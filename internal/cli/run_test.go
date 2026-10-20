@@ -768,6 +768,68 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 			code, cursorUnsupportedOutput, cursorUnsupportedError)
 	}
 
+	antigravityInScopeInput := map[string]any{
+		"toolCall": map[string]any{
+			"name": "write_to_file",
+			"args": map[string]any{"TargetFile": "src/main.go", "CodeContent": "private source"},
+		},
+		"workspacePaths": []string{projectRoot},
+	}
+	code, antigravityInScopeOutput, antigravityInScopeError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "antigravity-cli", antigravityInScopeInput)
+	var antigravityInScope map[string]any
+	if code != 0 || antigravityInScopeError != "" || json.Unmarshal([]byte(antigravityInScopeOutput), &antigravityInScope) != nil ||
+		antigravityInScope["decision"] != "allow" || antigravityInScope["reason"] != nil ||
+		antigravityInScope["permissionOverrides"] != nil || antigravityInScope["overwrite"] != nil {
+		t.Fatalf("in-scope Antigravity write must pass through without overriding host policy: code=%d stdout=%s stderr=%s",
+			code, antigravityInScopeOutput, antigravityInScopeError)
+	}
+	antigravityOutsideInput := map[string]any{
+		"toolCall": map[string]any{
+			"name": "replace_file_content",
+			"args": map[string]any{"TargetFile": "docs/private-marker.md", "TargetContent": "old", "ReplacementContent": "private source"},
+		},
+		"workspacePaths": []string{projectRoot},
+	}
+	code, antigravityOutsideOutput, antigravityOutsideError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "antigravity-cli", antigravityOutsideInput)
+	var antigravityOutside map[string]any
+	if code != 0 || antigravityOutsideError != "" || json.Unmarshal([]byte(antigravityOutsideOutput), &antigravityOutside) != nil ||
+		antigravityOutside["decision"] != "deny" || antigravityOutside["reason"] == nil ||
+		antigravityOutside["permissionOverrides"] != nil || antigravityOutside["overwrite"] != nil ||
+		strings.Contains(antigravityOutsideOutput, "docs/private-marker.md") || strings.Contains(antigravityOutsideOutput, "private source") {
+		t.Fatalf("out-of-scope Antigravity edit did not return a private flat deny: code=%d stdout=%s stderr=%s",
+			code, antigravityOutsideOutput, antigravityOutsideError)
+	}
+	antigravityMultiReplaceInput := map[string]any{
+		"toolCall": map[string]any{
+			"name": "multi_replace_file_content",
+			"args": map[string]any{"TargetFile": "src/other.go", "ReplacementChunks": []any{map[string]any{"old": "x", "new": "y"}}},
+		},
+		"workspacePaths": []string{projectRoot},
+	}
+	code, antigravityMultiReplaceOutput, antigravityMultiReplaceError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "antigravity-cli", antigravityMultiReplaceInput)
+	var antigravityMultiReplace map[string]any
+	if code != 0 || antigravityMultiReplaceError != "" || json.Unmarshal([]byte(antigravityMultiReplaceOutput), &antigravityMultiReplace) != nil ||
+		antigravityMultiReplace["decision"] != "allow" || antigravityMultiReplace["permissionOverrides"] != nil {
+		t.Fatalf("in-scope Antigravity multi-replace did not defer to host policy: code=%d stdout=%s stderr=%s",
+			code, antigravityMultiReplaceOutput, antigravityMultiReplaceError)
+	}
+	antigravityAmbiguousWorkspace := map[string]any{
+		"toolCall": map[string]any{
+			"name": "write_to_file",
+			"args": map[string]any{"TargetFile": "src/main.go", "CodeContent": "private source"},
+		},
+		"workspacePaths": []string{projectRoot, t.TempDir()},
+	}
+	code, antigravityAmbiguousOutput, antigravityAmbiguousError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "antigravity-cli", antigravityAmbiguousWorkspace)
+	if code != 0 || antigravityAmbiguousError != "" || !strings.Contains(antigravityAmbiguousOutput, `"decision": "deny"`) {
+		t.Fatalf("ambiguous Antigravity workspace did not fail closed: code=%d stdout=%s stderr=%s",
+			code, antigravityAmbiguousOutput, antigravityAmbiguousError)
+	}
+
 	copilotInput := map[string]any{
 		"timestamp": "2026-10-19T00:00:00Z", "cwd": projectRoot, "toolName": "edit",
 		"toolArgs": map[string]any{"file_path": "src/main.go", "new_string": "private source"},
@@ -880,6 +942,8 @@ func runTaskPlanGuardTestHook(t *testing.T, projectRoot, taskID, projectID, host
 		args = append(args, "--host", host, "--threadforge-managed-gemini-plan-gate=v1", "--threadforge-plan-gate=gemini-v1")
 	} else if host == "cursor" {
 		args = append(args, "--host", host, "--threadforge-managed-cursor-plan-gate=v1", "--threadforge-plan-gate=cursor-v1")
+	} else if host == "antigravity-cli" {
+		args = append(args, "--host", host, "--threadforge-managed-antigravity-plan-gate=v1", "--threadforge-plan-gate=antigravity-v1")
 	} else {
 		args = append(args, "--threadforge-managed-claude-plan-gate=v1", "--threadforge-plan-gate=claude-v1")
 	}

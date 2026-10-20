@@ -999,6 +999,106 @@ test('adapter CLI installs project-only Antigravity approved-memory PreInvocatio
   }
 });
 
+test('adapter CLI manages the project-only Antigravity deny/pass-through task-plan hook', async () => {
+  const project = await mkdtemp(path.join(os.tmpdir(), 'threadforge-antigravity-plan-gate-cli-'));
+  const env = { HOME: project, USERPROFILE: project };
+  const file = path.join(project, '.agents', 'hooks.json');
+  const command = `threadforge task plan guard --host antigravity-cli --task-id plan-task --project-id demo-project --project-root ${project} --threadforge-managed-antigravity-plan-gate=v1 --threadforge-plan-gate=antigravity-v1`;
+  const original = {
+    permissions: { ask: ['run_command'] },
+    'threadforge-endpoint': { PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'observer' }] }] },
+    'threadforge-approved-memory': { PreInvocation: [{ type: 'command', command: 'memory' }] },
+    user: { PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'user-policy' }] }] },
+  };
+  try {
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify(original), 'utf8');
+    let result = await invoke(['antigravity', 'plan-gate', 'install', '--project-root', project, '--command', command], env);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /requires explicit --scope project/);
+
+    result = await invoke(['antigravity', 'plan-gate', 'install', '--scope', 'project', '--project-root', project, '--command', command], env);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'installed');
+    assert.match(JSON.parse(result.stdout).warning, /allow only delegates/);
+    let config = JSON.parse(await readFile(file, 'utf8'));
+    assert.deepEqual(config.permissions, original.permissions);
+    assert.deepEqual(config['threadforge-endpoint'], original['threadforge-endpoint']);
+    assert.deepEqual(config['threadforge-approved-memory'], original['threadforge-approved-memory']);
+    assert.deepEqual(config.user, original.user);
+    assert.deepEqual(config['threadforge-task-plan-gate'], {
+      enabled: true,
+      PreToolUse: [{
+        matcher: '^(write_to_file|replace_file_content|multi_replace_file_content)$',
+        hooks: [{ type: 'command', command, timeout: 10 }],
+      }],
+    });
+
+    result = await invoke(['antigravity', 'plan-gate', 'update', '--scope', 'project', '--project-root', project, '--command', command], env);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'unchanged');
+    result = await invoke(['antigravity', 'plan-gate', 'uninstall', '--project-root', project], env);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /requires explicit --scope project/);
+    result = await invoke(['antigravity', 'plan-gate', 'uninstall', '--scope', 'project', '--project-root', project], env);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'removed');
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), original);
+  } finally {
+    await rm(project, { recursive: true, force: true });
+  }
+});
+
+test('adapter CLI requires project scope and manages Antigravity plan gates separately', async () => {
+  const project = await mkdtemp(path.join(os.tmpdir(), 'threadforge-antigravity-plan-gate-cli-'));
+  const env = { HOME: project, USERPROFILE: project };
+  const file = path.join(project, '.agents', 'hooks.json');
+  const command = `threadforge task plan guard --host antigravity-cli --task-id plan-task --project-id demo-project --project-root ${project} --threadforge-managed-antigravity-plan-gate=v1 --threadforge-plan-gate=antigravity-v1`;
+  const original = {
+    permissions: { ask: ['run_command'] },
+    'threadforge-endpoint': { PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'observer' }] }] },
+    'threadforge-approved-memory': { PreInvocation: [{ type: 'command', command: 'memory' }] },
+    user: { PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'user-policy' }] }] },
+  };
+  try {
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify(original), 'utf8');
+    let result = await invoke(['antigravity', 'plan-gate', 'install', '--project-root', project, '--command', command], env);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /requires explicit --scope project/);
+
+    result = await invoke(['antigravity', 'plan-gate', 'install', '--scope', 'project', '--project-root', project, '--command', command], env);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'installed');
+    assert.match(JSON.parse(result.stdout).warning, /allow only delegates/);
+    let config = JSON.parse(await readFile(file, 'utf8'));
+    assert.deepEqual(config.permissions, original.permissions);
+    assert.deepEqual(config['threadforge-endpoint'], original['threadforge-endpoint']);
+    assert.deepEqual(config['threadforge-approved-memory'], original['threadforge-approved-memory']);
+    assert.deepEqual(config.user, original.user);
+    assert.deepEqual(config['threadforge-task-plan-gate'], {
+      enabled: true,
+      PreToolUse: [{
+        matcher: '^(write_to_file|replace_file_content|multi_replace_file_content)$',
+        hooks: [{ type: 'command', command, timeout: 10 }],
+      }],
+    });
+
+    result = await invoke(['antigravity', 'plan-gate', 'update', '--scope', 'project', '--project-root', project, '--command', command], env);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'unchanged');
+    result = await invoke(['antigravity', 'plan-gate', 'uninstall', '--project-root', project], env);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /requires explicit --scope project/);
+    result = await invoke(['antigravity', 'plan-gate', 'uninstall', '--scope', 'project', '--project-root', project], env);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'removed');
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), original);
+  } finally {
+    await rm(project, { recursive: true, force: true });
+  }
+});
+
 test('adapter CLI manages Devin Desktop Cascade hooks and requires the ownership marker for dispatch', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'threadforge-devin-desktop-user-cli-'));
   const project = await mkdtemp(path.join(os.tmpdir(), 'threadforge-devin-desktop-project-cli-'));

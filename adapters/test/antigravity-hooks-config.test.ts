@@ -5,16 +5,20 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   antigravityMemoryManagedMarker,
+  antigravityPlanGateManagedMarker,
   antigravityHooksConfigPath,
   installAntigravityHooks,
   installAntigravityProjectMemoryHook,
+  installAntigravityProjectPlanGateHook,
   removeAntigravityHooks,
   removeAntigravityProjectMemoryHook,
+  removeAntigravityProjectPlanGateHook,
 } from '../src/antigravity-hooks-config.ts';
 import { antigravityManagedMarker } from '../src/antigravity-hook.ts';
 
 const command = `node antigravity-hook.ts ${antigravityManagedMarker}`;
 const memoryCommand = `threadforge memory inject-antigravity --project-id demo-project --threadforge-managed-antigravity-memory=v1 ${antigravityMemoryManagedMarker}`;
+const planGateCommand = `threadforge task plan guard --host antigravity-cli ${antigravityPlanGateManagedMarker} --threadforge-plan-gate=antigravity-v1`;
 const events = ['PreInvocation', 'PostToolUse', 'PostInvocation', 'Stop'];
 
 async function temporaryDirectory(): Promise<string> {
@@ -185,6 +189,74 @@ test('project memory hook preserves non-command PreInvocation refs and refuses u
     await assert.rejects(installAntigravityProjectMemoryHook({ command: `API_TOKEN=secret ${memoryCommand}`, projectRoot: root }), /credential/);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('project plan gate installs only direct file PreToolUse handlers and preserves other owners', async () => {
+  const project = await temporaryDirectory();
+  const file = antigravityHooksConfigPath('project', project);
+  try {
+    await mkdir(path.dirname(file), { recursive: true });
+    const original = {
+      'threadforge-endpoint': { PostInvocation: [{ type: 'command', command: 'telemetry-hook' }] },
+      'threadforge-approved-memory': { PreInvocation: [{ type: 'command', command: 'memory-hook' }] },
+      user: { PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'user-policy-hook' }] }] },
+      mcpServers: { preserve: { command: 'mcp-server' } },
+    };
+    await writeFile(file, JSON.stringify(original, null, 2), 'utf8');
+
+    assert.equal(await installAntigravityProjectPlanGateHook({ command: planGateCommand, projectRoot: project }), 'installed');
+    let config = JSON.parse(await readFile(file, 'utf8'));
+    assert.deepEqual(config['threadforge-endpoint'], original['threadforge-endpoint']);
+    assert.deepEqual(config['threadforge-approved-memory'], original['threadforge-approved-memory']);
+    assert.deepEqual(config.user, original.user);
+    assert.deepEqual(config.mcpServers, original.mcpServers);
+    assert.equal(config['threadforge-task-plan-gate'].enabled, true);
+    assert.deepEqual(config['threadforge-task-plan-gate'].PreToolUse, [
+      {
+        matcher: '^(write_to_file|replace_file_content|multi_replace_file_content)$',
+        hooks: [{ type: 'command', command: planGateCommand, timeout: 10 }],
+      },
+    ]);
+    const first = await readFile(file, 'utf8');
+    assert.equal(await installAntigravityProjectPlanGateHook({ command: planGateCommand, projectRoot: project }), 'unchanged');
+    assert.equal(await readFile(file, 'utf8'), first);
+
+    const updated = `threadforge task plan guard --host antigravity-cli --task-id next --threadforge-managed-antigravity-plan-gate=v1 --threadforge-plan-gate=antigravity-v1 ${antigravityPlanGateManagedMarker}`;
+    assert.equal(await installAntigravityProjectPlanGateHook({ command: updated, projectRoot: project }), 'updated');
+    config = JSON.parse(await readFile(file, 'utf8'));
+    assert.equal(config['threadforge-task-plan-gate'].PreToolUse.length, 1);
+    assert.equal(config['threadforge-task-plan-gate'].PreToolUse[0].hooks[0].command, updated);
+
+    assert.equal(await removeAntigravityProjectPlanGateHook(project), 'removed');
+    config = JSON.parse(await readFile(file, 'utf8'));
+    assert.equal(config['threadforge-task-plan-gate'], undefined);
+    assert.deepEqual(config['threadforge-endpoint'], original['threadforge-endpoint']);
+    assert.deepEqual(config['threadforge-approved-memory'], original['threadforge-approved-memory']);
+    assert.deepEqual(config.user, original.user);
+    assert.deepEqual(config.mcpServers, original.mcpServers);
+    assert.equal(await removeAntigravityProjectPlanGateHook(project), 'absent');
+  } finally {
+    await rm(project, { recursive: true, force: true });
+  }
+});
+
+test('project plan gate refuses unowned blocks and commands without both markers', async () => {
+  const project = await temporaryDirectory();
+  const file = antigravityHooksConfigPath('project', project);
+  try {
+    await assert.rejects(installAntigravityProjectPlanGateHook({ command: 'threadforge task plan guard', projectRoot: project }), /include/);
+    await assert.rejects(installAntigravityProjectPlanGateHook({
+      command: `threadforge task plan guard --host antigravity-cli ${antigravityPlanGateManagedMarker}`,
+      projectRoot: project,
+    }), /include/);
+    await mkdir(path.dirname(file), { recursive: true });
+    const original = { 'threadforge-task-plan-gate': { enabled: false, custom: true } };
+    await writeFile(file, JSON.stringify(original), 'utf8');
+    await assert.rejects(installAntigravityProjectPlanGateHook({ command: planGateCommand, projectRoot: project }), /without Threadforge ownership/);
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), original);
+  } finally {
+    await rm(project, { recursive: true, force: true });
   }
 });
 

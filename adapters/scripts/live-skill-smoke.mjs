@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createOpenCodeAdapter } from '../src/opencode-plugin.ts';
+import { installAntigravityProjectPlanGateHook } from '../src/antigravity-hooks-config.ts';
 import { installAntigravityProjectSkill } from '../src/antigravity-skill-config.ts';
 import { installClaudeCodeProjectSkill } from '../src/claude-skill-config.ts';
 import { installClaudeProjectMemoryHook } from '../src/claude-hooks-config.ts';
@@ -29,7 +30,7 @@ import { installQoderProjectCommand } from '../src/qoder-command-config.ts';
 import { runCodexAgentMcpRead, runCodexAgentPlanGateAttempt } from './codex-mcp-smoke.mjs';
 import { runGeminiCliTelemetrySmoke } from './gemini-telemetry-smoke.mjs';
 import { runClaudePromptMemoryRead } from './claude-memory-smoke.mjs';
-import { runAntigravityAgentMcpRead } from './antigravity-mcp-smoke.mjs';
+import { runAntigravityAgentMcpRead, runAntigravityPlanGateAttempt } from './antigravity-mcp-smoke.mjs';
 import { runCommandCodeAgentMcpRead } from './command-code-mcp-smoke.mjs';
 
 const approvalNotice = '> This portable procedure is approved guidance, not authorization to execute actions.';
@@ -948,6 +949,65 @@ try {
       function_responses: antigravityTaskResumeResult.provider_trace?.flatMap((trace) => trace.function_responses ?? []).slice(-2),
       external_network_attempts_blocked: antigravityTaskResumeResult.external_network_attempts_blocked,
     })}`);
+  const antigravityDeniedFile = path.join(projectRoot, 'src', 'threadforge-antigravity-plan-gate-denied.txt');
+  const antigravityPlanGateAuditPath = path.join(isolatedHome, 'antigravity-plan-gate-audit.jsonl');
+  const antigravityPlanGateObserver = path.join(repositoryRoot, 'adapters', 'scripts', 'antigravity-plan-gate-observer.mjs');
+  mkdirSync(path.dirname(antigravityDeniedFile), { recursive: true });
+  assert.equal(existsSync(antigravityDeniedFile), false, 'Antigravity plan-gate sentinel unexpectedly exists before smoke');
+  const antigravityPlanGateCommand = `"${process.execPath}" "${antigravityPlanGateObserver}" "${antigravityPlanGateAuditPath}" "${cliPath}" task plan guard --host antigravity-cli --task-id ${openCodeTaskFixture.id} --project-id ${openCodeTaskFixture.projectID} --project-root "${projectRoot}" --db "${databasePath}" --threadforge-managed-antigravity-plan-gate=v1 --threadforge-plan-gate=antigravity-v1`;
+  const antigravityPlanGateInstallAction = await installAntigravityProjectPlanGateHook({
+    command: antigravityPlanGateCommand,
+    projectRoot,
+  });
+  const antigravityPlanGateResult = await runAntigravityPlanGateAttempt({
+    projectRoot, home: isolatedHome, cliPath, isolatedEnvironment,
+    deniedFilePath: antigravityDeniedFile, auditPath: antigravityPlanGateAuditPath, hostVersion: antigravityVersion,
+  });
+  const antigravityDeniedFileCreated = existsSync(antigravityDeniedFile);
+  const antigravityPlanGateProbeValid = (
+    antigravityPlanGateResult.status === 'verified' &&
+    antigravityPlanGateResult.hook_callback_invocations === 1 &&
+    antigravityPlanGateResult.guard_decision === 'deny'
+  ) || (
+    antigravityPlanGateResult.status === 'not_observed' &&
+    antigravityPlanGateResult.hook_callback_invocations === 0 &&
+    antigravityPlanGateResult.guard_decision === 'unknown'
+  );
+  assert.ok(antigravityPlanGateProbeValid && antigravityPlanGateResult.host_tool_error_observed,
+    `Antigravity task-plan gate smoke failed safely: ${JSON.stringify({
+      status: antigravityPlanGateResult.status,
+      reason: antigravityPlanGateResult.reason,
+      host_failure_category: antigravityPlanGateResult.host_failure_category,
+      host_error_summary: antigravityPlanGateResult.host_error_summary,
+      provider_requests: antigravityPlanGateResult.provider_requests,
+      tool_call_count: antigravityPlanGateResult.tool_call_count,
+      hook_callback_invocations: antigravityPlanGateResult.hook_callback_invocations,
+      guard_decision: antigravityPlanGateResult.guard_decision,
+      host_tool_error_observed: antigravityPlanGateResult.host_tool_error_observed,
+      declared_tool_schemas: antigravityPlanGateResult.provider_trace?.flatMap((trace) => trace.declared_tool_schemas ?? []).slice(-4),
+      function_calls: antigravityPlanGateResult.provider_trace?.flatMap((trace) => trace.function_calls ?? []).slice(-2),
+      function_responses: antigravityPlanGateResult.provider_trace?.flatMap((trace) => trace.function_responses ?? []).slice(-2),
+      external_network_attempts_blocked: antigravityPlanGateResult.external_network_attempts_blocked,
+      denied_file_created: antigravityDeniedFileCreated,
+    })}`);
+  assert.equal(antigravityDeniedFileCreated, false, 'Antigravity plan gate did not prevent the denied file write');
+  const antigravityPlanGateSmoke = {
+    schema_version: 'threadforge.antigravity-plan-gate-smoke.v1',
+    status: antigravityPlanGateResult.status,
+    host_cli_version: antigravityVersion,
+    install_action: antigravityPlanGateInstallAction,
+    hook_event: 'PreToolUse',
+    tool: antigravityPlanGateResult.tool,
+    tool_call_count: antigravityPlanGateResult.tool_call_count,
+    hook_callback_invocations: antigravityPlanGateResult.hook_callback_invocations,
+    guard_decision: antigravityPlanGateResult.guard_decision,
+    host_tool_error_observed: antigravityPlanGateResult.host_tool_error_observed,
+    sandbox_enabled: false,
+    sentinel_created: antigravityDeniedFileCreated,
+    provider: 'loopback-gemini-api-fixture',
+    provider_requests: antigravityPlanGateResult.provider_requests,
+    real_model_invocations: 0,
+  };
   const antigravityAgentTaskResume = {
     schema_version: 'threadforge.antigravity-task-resume-smoke.v1',
     status: antigravityTaskResumeResult.status,
@@ -1097,7 +1157,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v30',
+    schema_version: 'threadforge.installed-skill-smoke.v31',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,
@@ -1141,6 +1201,7 @@ try {
       cli_list_detected_project_server: antigravityMcpListed,
       agent_run: antigravityAgentMcpRead,
       task_resume: antigravityAgentTaskResume,
+      plan_gate: antigravityPlanGateSmoke,
       real_model_invocations: 0,
     },
     command_code_project_mcp_readiness: {

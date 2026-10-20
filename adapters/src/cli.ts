@@ -29,8 +29,10 @@ import {
 import {
   installAntigravityHooks,
   installAntigravityProjectMemoryHook,
+  installAntigravityProjectPlanGateHook,
   removeAntigravityHooks,
   removeAntigravityProjectMemoryHook,
+  removeAntigravityProjectPlanGateHook,
   type AntigravityHookScope,
 } from './antigravity-hooks-config.ts';
 import {
@@ -138,7 +140,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   let codexSubsystem: 'memory' | 'plan-gate' | undefined;
   let geminiSubsystem: 'memory' | 'plan-gate' | undefined;
   let qwenSubsystem: 'memory' | 'plan-gate' | undefined;
-  let antigravitySubsystem: 'memory' | undefined;
+  let antigravitySubsystem: 'memory' | 'plan-gate' | undefined;
   let copilotSubsystem: 'sessions' | 'plan-gate' | undefined;
   let cursorSubsystem: 'sessions' | 'memory' | 'plan-gate' | undefined;
   let factorySubsystem: 'sessions' | undefined;
@@ -282,6 +284,15 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   }
   if (family === 'antigravity' && action === 'memory') {
     antigravitySubsystem = 'memory';
+    action = rest[0];
+    rest = rest.slice(1);
+    if (!action) {
+      stderr.write(`${usage()}\n`);
+      return 2;
+    }
+  }
+  if (family === 'antigravity' && action === 'plan-gate') {
+    antigravitySubsystem = 'plan-gate';
     action = rest[0];
     rest = rest.slice(1);
     if (!action) {
@@ -1345,6 +1356,15 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       rejectUnexpected(options, ['scope', 'project-root']);
       if (options.values.get('scope') !== 'project') throw new Error('Antigravity memory requires explicit --scope project');
       result = await removeAntigravityProjectMemoryHook(projectRoot);
+    } else if (family === 'antigravity' && antigravitySubsystem === 'plan-gate' && (action === 'install' || action === 'update')) {
+      rejectUnexpected(options, ['scope', 'project-root', 'command']);
+      if (options.values.get('scope') !== 'project') throw new Error('Antigravity plan-gate requires explicit --scope project');
+      result = await installAntigravityProjectPlanGateHook({ command: required(options, 'command'), projectRoot });
+      warning = 'Antigravity plan gate matches direct write_to_file/replace_file_content/multi_replace_file_content operations only. A deny blocks; an in-scope allow only delegates to the next hook/default policy and sets no permissionOverrides or auto_approve. It does not cover shell/MCP, sandbox execution, or path races. Installed agy CLI 1.4.2 smoke observed zero project-hook callbacks; do not rely on this gate in that CLI version. Antigravity IDE hook behavior remains unverified.';
+    } else if (family === 'antigravity' && antigravitySubsystem === 'plan-gate' && action === 'uninstall') {
+      rejectUnexpected(options, ['scope', 'project-root']);
+      if (options.values.get('scope') !== 'project') throw new Error('Antigravity plan-gate requires explicit --scope project');
+      result = await removeAntigravityProjectPlanGateHook(projectRoot);
     } else if (family === 'antigravity' && (action === 'install' || action === 'update')) {
       rejectUnexpected(options, ['scope', 'project-root', 'command']);
       if (antigravityScope !== 'user' && antigravityScope !== 'project') throw new Error('Antigravity --scope must be user or project');
@@ -1561,6 +1581,8 @@ function usage(): string {
     '  npm run adapter -- antigravity uninstall [--scope user|project] [--project-root <absolute-path>]',
     '  npm run adapter -- antigravity memory install|update --scope project --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers>',
     '  npm run adapter -- antigravity memory uninstall --scope project --project-root <absolute-path>',
+    '  npm run adapter -- antigravity plan-gate install|update --scope project --project-root <absolute-path> --command <threadforge-task-plan-guard-command-with-markers>',
+    '  npm run adapter -- antigravity plan-gate uninstall --scope project --project-root <absolute-path>',
     '  npm run adapter -- qwen install|update [--scope user|project] [--project-root <absolute-path>] --command <bash-command-with-marker>',
     '  npm run adapter -- qwen uninstall [--scope user|project] [--project-root <absolute-path>]',
     '  npm run adapter -- qwen memory install|update --scope project --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers>',

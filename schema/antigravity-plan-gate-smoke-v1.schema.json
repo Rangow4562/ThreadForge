@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/antigravity-plan-gate-smoke-v1.schema.json",
+  "title": "Threadforge Antigravity PreToolUse Plan-Gate Smoke v1",
+  "description": "Content-free installed-host probe for project-scoped Antigravity PreToolUse callback discovery and a direct file-tool response.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "host_cli_version",
+    "install_action",
+    "hook_event",
+    "tool",
+    "tool_call_count",
+    "hook_callback_invocations",
+    "guard_decision",
+    "host_tool_error_observed",
+    "sandbox_enabled",
+    "sentinel_created",
+    "provider",
+    "provider_requests",
+    "real_model_invocations"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.antigravity-plan-gate-smoke.v1" },
+    "status": { "enum": ["verified", "not_observed"] },
+    "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "install_action": { "enum": ["installed", "updated", "unchanged"] },
+    "hook_event": { "const": "PreToolUse" },
+    "tool": { "const": "write_to_file" },
+    "tool_call_count": { "const": 1 },
+    "hook_callback_invocations": { "enum": [0, 1] },
+    "guard_decision": { "enum": ["deny", "unknown"] },
+    "host_tool_error_observed": { "const": true },
+    "sandbox_enabled": { "const": false },
+    "sentinel_created": { "const": false },
+    "provider": { "const": "loopback-gemini-api-fixture" },
+    "provider_requests": { "type": "integer", "minimum": 1, "maximum": 8 },
+    "real_model_invocations": { "const": 0 }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "status": { "const": "verified" },
+        "hook_callback_invocations": { "const": 1 },
+        "guard_decision": { "const": "deny" }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "not_observed" },
+        "hook_callback_invocations": { "const": 0 },
+        "guard_decision": { "const": "unknown" }
+      }
+    }
+  ]
+}

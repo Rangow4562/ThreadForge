@@ -385,6 +385,48 @@ def test_gemini_cli_plan_gate_smoke_schema_is_deny_only_and_content_free():
             validator.validate(invalid)
     with pytest.raises(ValidationError):
         validator.validate({**result, "task_context_content_retained_in_report": True})
+
+
+def test_antigravity_plan_gate_smoke_schema_records_callback_non_observation_without_claiming_denial():
+    schema = json.loads((SCHEMA_DIRECTORY / "antigravity-plan-gate-smoke-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.antigravity-plan-gate-smoke.v1",
+        "status": "not_observed",
+        "host_cli_version": "1.4.2",
+        "install_action": "installed",
+        "hook_event": "PreToolUse",
+        "tool": "write_to_file",
+        "tool_call_count": 1,
+        "hook_callback_invocations": 0,
+        "guard_decision": "unknown",
+        "host_tool_error_observed": True,
+        "sandbox_enabled": False,
+        "sentinel_created": False,
+        "provider": "loopback-gemini-api-fixture",
+        "provider_requests": 2,
+        "real_model_invocations": 0,
+    }
+    validator.validate(result)
+    validator.validate({
+        **result,
+        "status": "verified",
+        "hook_callback_invocations": 1,
+        "guard_decision": "deny",
+    })
+    for invalid in (
+        {**result, "sentinel_created": True},
+        {**result, "hook_callback_invocations": 1},
+        {**result, "guard_decision": "allow"},
+        {**result, "host_tool_error_observed": False},
+        {**result, "sandbox_enabled": True},
+        {**result, "target_path": "private/workspace/file.txt"},
+        {**result, "prompt": "create this private file"},
+        {**result, "tool_input": {"CodeContent": "private file contents"}},
+        {**result, "real_model_invocations": 1},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
 def test_schema_catalog_exists_and_is_nonempty():
     assert SCHEMA_DIRECTORY.is_dir()
     assert SCHEMA_PATHS

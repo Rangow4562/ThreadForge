@@ -9,7 +9,9 @@ export type AntigravityHookScope = 'user' | 'project';
 export type AntigravityHookChange = 'installed' | 'updated' | 'unchanged' | 'removed' | 'absent';
 
 export const antigravityMemoryManagedMarker = '--threadforge-memory=antigravity-v1';
+export const antigravityPlanGateManagedMarker = '--threadforge-managed-antigravity-plan-gate=v1';
 const antigravityMemoryRunnerMarker = '--threadforge-managed-antigravity-memory=v1';
+const antigravityPlanGateRunnerMarker = '--threadforge-plan-gate=antigravity-v1';
 
 export interface AntigravityHookConfigOptions {
   command: string;
@@ -20,6 +22,7 @@ export interface AntigravityHookConfigOptions {
 
 const configKey = 'threadforge-endpoint';
 const memoryConfigKey = 'threadforge-approved-memory';
+const planGateConfigKey = 'threadforge-task-plan-gate';
 const lockName = '.threadforge-antigravity-hooks.lock';
 const maxConfigBytes = 8 << 20;
 const eventTimeouts: Record<string, number> = {
@@ -151,6 +154,59 @@ export async function removeAntigravityProjectMemoryHook(projectRoot: string): P
   });
 }
 
+/** Installs an explicit project-only PreToolUse task gate for direct file operations. */
+export async function installAntigravityProjectPlanGateHook(options: { command: string; projectRoot: string }): Promise<AntigravityHookChange> {
+  validatePlanGateCommand(options.command);
+  const filePath = await configPath('project', options.projectRoot, undefined, true);
+  if (!filePath) throw new Error('unable to resolve Antigravity project hooks configuration path');
+  return withLock(filePath, async () => {
+    const read = await readConfig(filePath);
+    const config = read.value;
+    const previous = config[planGateConfigKey];
+    if (previous !== undefined && !isRecord(previous)) throw new Error('Antigravity plan-gate block must be an object; no changes were made');
+    const block = (previous ?? {}) as JsonObject;
+    const cleaned = removeManagedPlanGateRefs(block);
+    if (previous !== undefined && !cleaned.found && Object.keys(block).length > 0) {
+      throw new Error('Antigravity plan-gate block exists without Threadforge ownership; no changes were made');
+    }
+    const nextBlock: JsonObject = {
+      ...cleaned.value,
+      enabled: true,
+      PreToolUse: [
+        ...readEventGroups(cleaned.value, 'PreToolUse'),
+        {
+          matcher: '^(write_to_file|replace_file_content|multi_replace_file_content)$',
+          hooks: [{ type: 'command', command: options.command, timeout: 10 }],
+        },
+      ],
+    };
+    const nextConfig: JsonObject = { ...config, [planGateConfigKey]: nextBlock };
+    if (deepEqual(config, nextConfig)) return 'unchanged';
+    await atomicWrite(filePath, read.snapshot, nextConfig);
+    return cleaned.found ? 'updated' : 'installed';
+  });
+}
+
+/** Removes only Threadforge-marked Antigravity PreToolUse plan-gate refs. */
+export async function removeAntigravityProjectPlanGateHook(projectRoot: string): Promise<AntigravityHookChange> {
+  const filePath = await configPath('project', projectRoot, undefined, false);
+  if (!filePath) return 'absent';
+  return withLock(filePath, async () => {
+    const read = await readConfig(filePath);
+    const config = read.value;
+    const previous = config[planGateConfigKey];
+    if (previous === undefined) return 'absent';
+    if (!isRecord(previous)) throw new Error('Antigravity plan-gate block is malformed; no changes were made');
+    const cleaned = removeManagedPlanGateRefs(previous);
+    if (!cleaned.found) return 'absent';
+    const nextConfig: JsonObject = { ...config };
+    if (Object.keys(cleaned.value).length === 1 && cleaned.value.enabled === true) delete nextConfig[planGateConfigKey];
+    else nextConfig[planGateConfigKey] = cleaned.value;
+    await atomicWrite(filePath, read.snapshot, nextConfig);
+    return 'removed';
+  });
+}
+
 export function antigravityHooksConfigPath(scope: AntigravityHookScope, root: string): string {
   return scope === 'project'
     ? path.join(root, '.agents', 'hooks.json')
@@ -255,6 +311,33 @@ function readEventGroups(block: JsonObject, event: string): unknown[] {
     throw new Error(`Antigravity ${event} must contain hook groups; no changes were made`);
   }
   return current;
+}
+
+function removeManagedPlanGateRefs(block: JsonObject): { value: JsonObject; found: boolean } {
+  const value: JsonObject = { ...block };
+  const raw = block.PreToolUse;
+  if (raw === undefined || raw === null) return { value, found: false };
+  if (!Array.isArray(raw) || raw.some((item) => !isRecord(item) || !Array.isArray(item.hooks))) {
+    throw new Error('Antigravity plan-gate PreToolUse must contain hook groups; no changes were made');
+  }
+  let found = false;
+  const keptGroups: unknown[] = [];
+  for (const group of raw as JsonObject[]) {
+    const originalHooks = group.hooks as unknown[];
+    let removedManagedRef = false;
+    const keptHooks = originalHooks.filter((ref) => {
+      const managed = isRecord(ref) && ref.type === 'command' && typeof ref.command === 'string' &&
+        ref.command.includes(antigravityPlanGateManagedMarker);
+      removedManagedRef ||= managed;
+      found ||= managed;
+      return !managed;
+    });
+    if (keptHooks.length > 0) keptGroups.push(keptHooks.length === originalHooks.length ? group : { ...group, hooks: keptHooks });
+    else if (!removedManagedRef && (originalHooks.length === 0 || Object.keys(group).some((key) => key !== 'hooks'))) keptGroups.push(group);
+  }
+  if (keptGroups.length === 0) delete value.PreToolUse;
+  else value.PreToolUse = keptGroups;
+  return { value, found };
 }
 
 function readDirectEventHooks(block: JsonObject, event: string): unknown[] {
@@ -424,6 +507,16 @@ function validateMemoryCommand(command: string): void {
     throw new Error(`Antigravity memory command must include ${antigravityMemoryRunnerMarker} and ${antigravityMemoryManagedMarker}`);
   }
   if (looksSecretLike(command)) throw new Error('Antigravity memory hook command must not contain credential-like values');
+}
+
+function validatePlanGateCommand(command: string): void {
+  if (typeof command !== 'string' || command.trim() === '' || command.length > 8192 || /[\r\n\0]/.test(command)) {
+    throw new Error('Antigravity plan-gate command is invalid or too long');
+  }
+  if (!command.includes(antigravityPlanGateManagedMarker) || !command.includes(antigravityPlanGateRunnerMarker)) {
+    throw new Error(`Antigravity plan-gate command must include ${antigravityPlanGateManagedMarker} and ${antigravityPlanGateRunnerMarker}`);
+  }
+  if (looksSecretLike(command)) throw new Error('Antigravity plan-gate command must not contain credential-like values');
 }
 
 function looksSecretLike(value: string): boolean {

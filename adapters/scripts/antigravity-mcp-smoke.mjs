@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const fixtureKey = 'threadforge-antigravity-local-fixture-only';
@@ -10,7 +10,8 @@ const maxRequestBytes = 8 << 20;
 export async function runAntigravityAgentMcpRead({
   projectRoot, home, cliPath, procedureID, expectedGuidance, isolatedEnvironment,
   toolName = 'threadforge_procedure_get', toolArguments, prompt, expectedFinalResponse,
-  requiredResultMarkers = [], hostVersion = 'unknown',
+  requiredResultMarkers = [], hostVersion = 'unknown', scriptedFunctionCall, expectedToolResponseMarker,
+  sandbox = true,
 }) {
   const requestedArguments = toolArguments ?? { procedure_id: procedureID };
   const finalResponse = expectedFinalResponse ?? expectedGuidance;
@@ -108,6 +109,17 @@ export async function runAntigravityAgentMcpRead({
 
         if (functionResponses.length > 0) {
           const resultText = functionResponseText(functionResponses);
+          if (scriptedFunctionCall) {
+            expectedContentObserved = normalizedText(resultText).includes(normalizedText(expectedToolResponseMarker ?? ''));
+            resultMarkerFlags = { threadforge_plan_gate_denial: expectedContentObserved };
+            toolResultObserved = expectedContentObserved;
+            if (!toolResultObserved) fixtureReason ??= 'plan_gate_denial_not_returned_to_provider';
+            else fixtureReason = undefined;
+            sendGemini(response, request.url, {
+              text: toolResultObserved ? finalResponse : 'The expected Threadforge plan-gate denial was not observed.',
+            });
+            return;
+          }
           const compactResultText = resultText.replace(/\s+/g, '');
           expectedContentObserved = normalizedText(resultText).includes(normalizedText(expectedGuidance));
           resultMarkerFlags = Object.fromEntries(requiredResultMarkers.map((marker) => [
@@ -142,6 +154,18 @@ export async function runAntigravityAgentMcpRead({
         if (toolCalls > 0) {
           fixtureReason ??= 'threadforge_mcp_tool_result_not_returned_to_model';
           sendGemini(response, request.url, { text: 'The Threadforge MCP read has not returned a result.' });
+          return;
+        }
+
+        if (scriptedFunctionCall) {
+          const target = declarations.find((item) => item.name === scriptedFunctionCall.name);
+          if (!target) {
+            sendGemini(response, request.url, { text: 'The scripted Antigravity file tool was not exposed.' });
+            return;
+          }
+        fixtureReason = undefined;
+          toolCalls++;
+          sendGemini(response, request.url, { functionCall: scriptedFunctionCall });
           return;
         }
 
@@ -235,24 +259,38 @@ export async function runAntigravityAgentMcpRead({
   let invocationFailed = false;
   let hostOutput = '';
   try {
-    const run = await runAntigravityCli([
+    const cliArgs = [
       `--print=${promptText}`,
       '--output-format', 'json',
       '--print-timeout', '8s',
       '--model', fixtureModel,
-      '--sandbox',
-    ], { cwd: projectRoot, env: environment, timeout: 12_000 });
+    ];
+    if (sandbox) cliArgs.push('--sandbox');
+    const run = await runAntigravityCli(cliArgs, { cwd: projectRoot, env: environment, timeout: 12_000 });
     output = run.stdout;
     hostOutput = `${run.stderr}\n${run.stdout}`;
     invocationFailed = run.error !== undefined || run.exitCode !== 0 || run.timedOut;
     if (invocationFailed) {
       hostFailureCategory = classifyHostFailure(hostOutput);
-      hostErrorSummary = summarizeHostError(hostOutput, { fixtureKey, cliPath, projectRoot, home, procedureID, expectedGuidance });
+      hostErrorSummary = summarizeHostError(hostOutput, {
+        fixtureKey, cliPath, projectRoot, home, procedureID, expectedGuidance,
+        deniedFilePath: scriptedFunctionCall?.args?.TargetFile,
+        deniedFileContent: scriptedFunctionCall?.args?.CodeContent,
+      });
+    }
+
+    if (scriptedFunctionCall && expectedToolResponseMarker &&
+        normalizedText(hostOutput).includes(normalizedText(expectedToolResponseMarker))) {
+      expectedContentObserved = true;
+      toolResultObserved = true;
+      resultMarkerFlags = { threadforge_plan_gate_denial: true };
+      fixtureReason = undefined;
     }
 
     const expectedInOutput = output.includes(finalResponse);
-    const verified = !invocationFailed && authorizationSafe && toolCalls === 1 &&
-      toolResultObserved && expectedInOutput && !fixtureReason;
+    const observedPlanGateDenial = scriptedFunctionCall !== undefined && toolResultObserved;
+    const verified = (!invocationFailed || observedPlanGateDenial) && authorizationSafe && toolCalls === 1 &&
+      toolResultObserved && (expectedInOutput || observedPlanGateDenial) && !fixtureReason;
     const reason = verified ? undefined : fixtureReason ?? (
       !authorizationSafe ? 'fixture_authentication_mismatch' :
         providerRequests === 0 ? 'local_provider_not_reached' :
@@ -293,6 +331,63 @@ export async function runAntigravityAgentMcpRead({
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+}
+
+export async function runAntigravityPlanGateAttempt({
+  projectRoot, home, cliPath, isolatedEnvironment, deniedFilePath, auditPath, hostVersion = 'unknown',
+}) {
+  const marker = 'THREADFORGE_ANTIGRAVITY_DENIED_FILE_SENTINEL';
+  const denialReason = 'Threadforge withheld this Antigravity file operation';
+  const result = await runAntigravityAgentMcpRead({
+    projectRoot,
+    home,
+    cliPath,
+    procedureID: 'antigravity-plan-gate-smoke',
+    expectedGuidance: denialReason,
+    isolatedEnvironment,
+    hostVersion,
+    sandbox: false,
+    toolName: 'write_to_file',
+    prompt: 'Create one file in the project and wait for the tool result.',
+    expectedFinalResponse: 'The requested file write was denied by the Threadforge task plan gate.',
+    scriptedFunctionCall: {
+      name: 'write_to_file',
+      args: {
+        TargetFile: deniedFilePath,
+        Overwrite: false,
+        CodeContent: marker,
+        Description: 'Create the isolated plan-gate smoke sentinel.',
+        toolAction: 'write',
+        toolSummary: 'Create the isolated plan-gate smoke sentinel.',
+      },
+    },
+    expectedToolResponseMarker: denialReason,
+  });
+  let audit = [];
+  if (typeof auditPath === 'string' && auditPath !== '') {
+    try {
+      audit = readFileSync(auditPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+    } catch { audit = []; }
+  }
+  const hostToolResponse = result.provider_trace?.flatMap((trace) => trace.function_responses ?? [])
+    .find((entry) => entry.name === 'write_to_file');
+  const hostToolErrorObserved = hostToolResponse?.result_signal === 'tool_error' &&
+    hostToolResponse?.result_markers?.numeric_status === 1;
+  const guardDecisionObserved = audit.length === 1 && audit[0]?.decision === 'deny' && audit[0]?.exit_code === 0;
+  const probeComplete = hostToolErrorObserved && result.tool_call_count === 1 && result.provider_requests > 0 &&
+    result.local_fixture_authentication_validated && result.real_model_invocations === 0;
+  const verified = guardDecisionObserved && probeComplete;
+  const hookNotObserved = audit.length === 0 && probeComplete;
+  return {
+    ...result,
+    status: verified ? 'verified' : hookNotObserved ? 'not_observed' : 'not-verified',
+    reason: verified ? undefined : hookNotObserved ? 'workspace_pretool_hook_not_invoked' : !guardDecisionObserved ? 'guard_denial_not_observed' :
+      !hostToolErrorObserved ? 'host_tool_error_after_guard_denial_not_observed' : result.reason,
+    hook_callback_invocations: audit.length,
+    guard_decision: audit.length === 1 ? audit[0]?.decision : 'unknown',
+    host_tool_error_observed: hostToolErrorObserved,
+    tool_result_observed: hostToolErrorObserved,
+  };
 }
 
 function runAntigravityCli(args, { cwd, env, timeout }) {
@@ -340,6 +435,8 @@ function summarizeHostError(message, replacements) {
     [replacements.home, '<isolated-home>'],
     [replacements.procedureID, '<procedure-id>'],
     [replacements.expectedGuidance, '<guidance>'],
+    [replacements.deniedFilePath, '<target-file>'],
+    [replacements.deniedFileContent, '<file-content>'],
   ]) {
     if (value) summary = summary.replaceAll(value, replacement);
   }

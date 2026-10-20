@@ -4,6 +4,8 @@ Smoke v29 adds an isolated Codex task-plan-gate probe with a persisted synthetic
 
 Smoke v30 adds a Gemini CLI project `BeforeTool` plan-gate check. Installed Gemini CLI receives deterministic fake `write_file` and `replace` function calls in YOLO mode; the installed hook invokes Threadforge and returns `decision=deny` for each. The new-file sentinel stays absent and the pre-existing replacement fixture remains byte-for-byte unchanged. The report stores only host version, hook/tool names, invocation and safety booleans, and fake-response/model-call counts—no task ID, target path, prompt, or file content. Zero real model requests are allowed. This verifies two installed direct-file-tool denial paths only; it is not a security-boundary, normal trust-discovery, shell/MCP, other-tool, or efficacy test.
 
+Smoke v31 probes Antigravity CLI `1.4.2` project `PreToolUse` discovery with one schema-valid `write_to_file` request, no CLI sandbox, an isolated project, and a local fake provider. A content-free observer recorded zero guard callbacks; the host returned a generic tool error and the sentinel remained absent. The result is `status=not_observed`, not evidence that Threadforge denied the write. No real model was called. Treat Antigravity CLI project plan-gate enforcement as unverified for this version; the IDE hook path is not covered by this smoke.
+
 Run the no-model host check from `adapters/`:
 
 ```powershell

@@ -253,6 +253,8 @@ def test_truncate_path_guards_accept_windows_short_names(tmp_path):
 
 
 def test_truncate_path_guards_reject_symlinked_ancestors(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
     linked_parent = tmp_path / "linked-parent"
     try:
         linked_parent.symlink_to(tmp_path, target_is_directory=True)

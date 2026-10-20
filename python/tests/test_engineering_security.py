@@ -155,6 +155,10 @@ def test_engineering_workspace_must_be_absolute_existing_and_unlinked(tmp_path):
         return
     with pytest.raises(ValueError, match="absolute, existing, unlinked"):
         validate_task_workspace(link)
+    linked_task = outside / "nested-task"
+    _task(linked_task)
+    with pytest.raises(ValueError, match="absolute, existing, unlinked"):
+        validate_task_workspace(link / "nested-task")
 
 
 def test_engineering_refuses_remote_docker_context(monkeypatch):

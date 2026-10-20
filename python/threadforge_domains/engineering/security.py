@@ -99,10 +99,11 @@ def validate_task_workspace(value: str | os.PathLike[str]) -> Path:
     """Return one existing absolute, non-linked task directory."""
     try:
         raw = Path(value)
-        if not raw.is_absolute() or (raw.drive.startswith("\\\\") if raw.drive else False):
+        if (not raw.is_absolute() or (raw.drive.startswith("\\\\") if raw.drive else False)
+                or ".." in raw.parts or _has_link_component(raw)):
             raise ValueError
         resolved = raw.resolve(strict=True)
-        if not resolved.is_dir() or _has_link_component(resolved):
+        if not resolved.is_dir():
             raise ValueError
         # Docker's --mount value is comma-delimited; reject ambiguous host paths.
         if "," in str(resolved):

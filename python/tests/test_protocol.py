@@ -2709,6 +2709,7 @@ def _frontier_checkout(root: Path, task_paths: list[str]) -> Path:
     for args in (
         ["config", "user.name", "Threadforge test"],
         ["config", "user.email", "threadforge-test@example.invalid"],
+        ["config", "core.autocrlf", "false"],
         ["add", "benchmarks"],
         ["commit", "-m", "synthetic Frontier fixture"],
     ):
@@ -2721,6 +2722,10 @@ def test_frontier_inventory_derives_local_unanchored_candidate_from_clean_git_tr
         "KernelEngineering/Task-Alpha", "KernelEngineering/Task-Beta",
     ])
     monkeypatch.setenv("GIT_DIR", str(tmp_path / "wrong-git-dir"))
+    status = protocol._frontier_git_command(
+        root, "status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching",
+    )
+    assert not status, f"synthetic Frontier fixture unexpectedly has Git status records: {status!r}"
     result = dispatch(request("evolution.inventory.rrsi.derive", {
         "frontier_source_root": str(root), "source_id": "frontier-eng",
     })) ["result"]

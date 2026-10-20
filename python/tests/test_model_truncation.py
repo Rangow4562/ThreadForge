@@ -1,4 +1,6 @@
+import ctypes
 import json
+import os
 import sys
 from importlib.machinery import ModuleSpec
 from pathlib import Path
@@ -6,7 +8,13 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from anyjev.truncate import TruncateError, layer_of, truncate
+from anyjev.truncate import (
+    TruncateError,
+    _existing_real_directory,
+    _new_directory_path,
+    layer_of,
+    truncate,
+)
 
 
 class _Tensor:
@@ -216,3 +224,41 @@ def test_versioned_python_protocol_exposes_path_free_truncation_receipt(monkeypa
     })["result"]
     assert "decision.model.truncate" in capabilities["operations"]
     assert capabilities["model_truncation"]["downloads"] is False
+
+
+def test_truncate_path_guards_accept_windows_short_names(tmp_path):
+    if os.name != "nt":
+        pytest.skip("Windows short-name paths are only available on Windows")
+    source = tmp_path / "source"
+    source.mkdir()
+    output_parent = tmp_path / "output-parent"
+    output_parent.mkdir()
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_short_path = kernel32.GetShortPathNameW
+    get_short_path.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
+    get_short_path.restype = ctypes.c_uint
+
+    def short_path(path: Path) -> Path:
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = get_short_path(str(path), buffer, len(buffer))
+        return Path(buffer.value) if 0 < length < len(buffer) else path
+
+    short_source = short_path(source)
+    short_parent = short_path(output_parent)
+    if os.path.normcase(str(short_source)) == os.path.normcase(str(source)):
+        pytest.skip("the Windows volume does not expose an alternate 8.3 path")
+    assert os.path.samefile(_existing_real_directory(str(short_source), "model_path"), source)
+    assert os.path.samefile(_new_directory_path(str(short_parent / "new-output")).parent, output_parent)
+
+
+def test_truncate_path_guards_reject_symlinked_ancestors(tmp_path):
+    linked_parent = tmp_path / "linked-parent"
+    try:
+        linked_parent.symlink_to(tmp_path, target_is_directory=True)
+    except (NotImplementedError, OSError) as error:
+        pytest.skip(f"directory symlinks are unavailable: {error}")
+    with pytest.raises(TruncateError, match="symbolic links or reparse points"):
+        _existing_real_directory(str(linked_parent / "source"), "model_path")
+    with pytest.raises(TruncateError, match="real directory without links"):
+        _new_directory_path(str(linked_parent / "new-output"))

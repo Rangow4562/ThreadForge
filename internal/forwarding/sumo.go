@@ -148,7 +148,7 @@ else
   echo "Synthetic Sumo upload failed; response body was suppressed." >&2
   exit 1
 fi
-`, hex.EncodeToString(digest[:]), curlConfigString(endpoint))
+`, hex.EncodeToString(digest[:]), shellSingleQuoted(curlConfigString(endpoint)))
 }
 
 func curlConfigString(value string) string {

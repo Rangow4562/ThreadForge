@@ -139,7 +139,7 @@ else
   echo "Synthetic Datadog upload failed; response body was suppressed." >&2
   exit 1
 fi
-`, hex.EncodeToString(digest[:]), curlConfigString(uploadURL))
+`, hex.EncodeToString(digest[:]), shellSingleQuoted(curlConfigString(uploadURL)))
 
 	powershell := fmt.Sprintf(`param(
     [switch]$SendSyntheticEvent

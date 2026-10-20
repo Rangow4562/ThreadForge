@@ -199,10 +199,12 @@ def _existing_real_directory(value: Any, label: str) -> Path:
         absolute = Path(os.path.abspath(supplied))
         resolved = supplied.resolve(strict=True)
         info = supplied.lstat()
+        same_location = os.path.samefile(absolute, resolved)
     except OSError:
         raise TruncateError(f"{label} is unavailable") from None
     reparse = bool(getattr(info, "st_file_attributes", 0) & 0x400)
-    if resolved != absolute or not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or reparse:
+    if (_path_has_link_or_reparse_component(absolute) or not same_location
+            or not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or reparse):
         raise TruncateError(f"{label} must not traverse symbolic links or reparse points")
     return resolved
 
@@ -216,10 +218,13 @@ def _new_directory_path(value: Any) -> Path:
     try:
         parent = supplied.parent.resolve(strict=True)
         parent_info = supplied.parent.lstat()
+        absolute_parent = Path(os.path.abspath(supplied.parent))
+        same_parent = os.path.samefile(parent, absolute_parent)
     except OSError:
         raise TruncateError("output_path parent must already exist") from None
     parent_reparse = bool(getattr(parent_info, "st_file_attributes", 0) & 0x400)
-    if parent != Path(os.path.abspath(supplied.parent)) or not stat.S_ISDIR(parent_info.st_mode) or stat.S_ISLNK(parent_info.st_mode) or parent_reparse:
+    if (_path_has_link_or_reparse_component(absolute_parent) or not same_parent
+            or not stat.S_ISDIR(parent_info.st_mode) or stat.S_ISLNK(parent_info.st_mode) or parent_reparse):
         raise TruncateError("output_path parent must be a real directory without links")
     try:
         output_info = supplied.lstat()
@@ -231,6 +236,21 @@ def _new_directory_path(value: Any) -> Path:
     if stat.S_ISLNK(output_info.st_mode) or output_reparse:
         raise TruncateError("output_path must not be a symbolic link or reparse point")
     raise TruncateError("output_path already exists; truncation never overwrites local data")
+
+
+def _path_has_link_or_reparse_component(path: Path) -> bool:
+    """Check every existing path component without confusing 8.3 aliases with links."""
+    absolute = Path(os.path.abspath(path))
+    current = Path(absolute.anchor)
+    for component in absolute.parts[len(current.parts):]:
+        current = current / component
+        try:
+            info = current.lstat()
+        except OSError:
+            return True
+        if stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0) & 0x400):
+            return True
+    return False
 
 
 def _overlaps(source: Path, destination: Path) -> bool:

@@ -32,7 +32,11 @@ go test ./internal/cli -run '^TestConfiguredMigrationSourceReadback$' -count=1 -
 
 The test is skipped when no source variables are configured and leaves no snapshot or database behind. A passing source-specific round trip validates only that checkout and allowlist; it is not full cross-product migration or cutover approval.
 
-### Actual checkout readback evidence (updated 2026-10-15)
+### Actual checkout readback evidence (updated 2026-10-20)
+
+On October 20, 2026, with `THREADFORGE_BEACON_SOURCE` and `THREADFORGE_ANYJEV_SOURCE` set to the supplied checkouts, `go test ./internal/cli -run '^TestConfiguredMigrationSourceReadback$' -count=1 -v` reran the production inspect, private snapshot, per-format coverage, apply, idempotent reapply, verify, and post-run inspect path. Beacon reconciled one `.cursor/hooks.json` file/record (2,907 source bytes) in `beacon.endpoint-cursor`. AnyJev reconciled 306 files (304 ready and 2 credential-path exclusions), 419 normalized review-only records, and 27,445,135 source bytes across 24 populated families, with zero unconverted, unclassified, unsupported, or rejected inputs. Both source fingerprints remained unchanged; temporary Threadforge stores were isolated by the test, and `cutover_authorized=false`. This proves only the eligible Beacon settings file and formats present in this AnyJev checkout; it does not prove full product migration or benchmark efficacy.
+
+The same-day path availability check found no Mancode coordination roots at `mancode/.git/mancode/workspaces` or `mancode/.mancode/runtime/non-git`, and no RRSI run roots at `rrsi/runs` or `rrsi/.rrsi/runs` under the supplied code checkouts. No actual-source migration was run for those absent roots; alternate operator-provided state roots still need to be identified and reconciled.
 
 The current `D:\Personal\Memory\AnyJev` checkout completed `TestConfiguredMigrationSourceReadback` through inspect, private snapshot, apply, idempotent reapply, verify, and post-run inspect: 306 files scanned, 304 ready, 2 credential-path exclusions, 419 records imported, 27,445,135 source bytes, `status=reconciled`, and unchanged source fingerprint. The temporary Threadforge database and snapshot were removed. This reconciles the observed checkout and currently supported formats only; it is not complete AnyJev feature parity or benchmark evidence.
 

@@ -878,6 +878,51 @@ test('adapter CLI manages Cursor session-start memory without changing telemetry
   }
 });
 
+test('adapter CLI installs and removes Cursor plan gate without replacing user hooks', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-cursor-plan-gate-cli-'));
+  try {
+    const hooksPath = path.join(root, '.cursor', 'hooks.json');
+    await mkdir(path.dirname(hooksPath), { recursive: true });
+    const original = {
+      version: 1,
+      hooks: {
+        preToolUse: [{ command: 'user-shell-policy', matcher: 'Shell' }],
+        sessionStart: [{ command: 'user-start-hook' }],
+      },
+      userOption: { keep: true },
+    };
+    await writeFile(hooksPath, JSON.stringify(original));
+    const command = 'threadforge task plan guard --host cursor --task-id task-1 --project-id demo --project-root . --threadforge-managed-cursor-plan-gate=v1 --threadforge-plan-gate=cursor-v1';
+
+    let result = await invoke(['cursor', 'plan-gate', 'install', '--project-root', root, '--command', command]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'installed');
+    assert.match(JSON.parse(result.stdout).warning, /direct Write tools only/);
+    let config = JSON.parse(await readFile(hooksPath, 'utf8'));
+    assert.deepEqual(config.userOption, original.userOption);
+    assert.deepEqual(config.hooks.preToolUse[0], original.hooks.preToolUse[0]);
+    assert.deepEqual(config.hooks.sessionStart, original.hooks.sessionStart);
+    assert.deepEqual(config.hooks.preToolUse[1], {
+      command, matcher: 'Write', timeout: 10, failClosed: true,
+    });
+
+    result = await invoke(['cursor', 'plan-gate', 'update', '--project-root', root, '--command', command]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'unchanged');
+    result = await invoke(['cursor', 'plan-gate', 'uninstall', '--project-root', root]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'removed');
+    config = JSON.parse(await readFile(hooksPath, 'utf8'));
+    assert.deepEqual(config, original);
+
+    result = await invoke(['cursor', 'plan-gate', 'install', '--command', command]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /--project-root/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('adapter CLI manages Antigravity user and project hook scopes without enabling decisions', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'threadforge-antigravity-user-cli-'));
   const project = await mkdtemp(path.join(os.tmpdir(), 'threadforge-antigravity-project-cli-'));

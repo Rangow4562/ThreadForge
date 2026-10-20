@@ -43,7 +43,7 @@ npm.cmd --prefix adapters run adapter -- gemini plan-gate install --project-root
 npm.cmd --prefix adapters run adapter -- gemini plan-gate uninstall --project-root <absolute-project-path>
 ```
 
-The installer uses a 10-second timeout, shares the lock for `.gemini/settings.json`, and preserves other `BeforeTool` groups, the separate `BeforeAgent` memory hook, MCP settings, telemetry, and trust choices. Gemini project trust remains controlled by the user. This is defense in depth, not a security boundary: a host hook failure may fail open, it does not constrain shell or MCP side effects or other tools, and filesystem changes between path validation and the host write (TOCTOU) are not prevented. Local Go/adapter tests cover the response and config contracts; an installed Gemini denial smoke has not yet been run.
+The installer uses a 10-second timeout, shares the lock for `.gemini/settings.json`, and preserves other `BeforeTool` groups, the separate `BeforeAgent` memory hook, MCP settings, telemetry, and trust choices. Gemini project trust remains controlled by the user. This is defense in depth, not a security boundary: a host hook failure may fail open, it does not constrain shell or MCP side effects or other tools, and filesystem changes between path validation and the host write (TOCTOU) are not prevented. Installed smoke v30 verifies one `write_file` denial and one `replace` denial against disposable file fixtures under fake responses; it makes zero real-model calls and does not prove normal trust discovery, protection of other tools, or task efficacy.
 
 ## Project memory over MCP
 

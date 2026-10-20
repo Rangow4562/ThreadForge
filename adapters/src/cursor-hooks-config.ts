@@ -5,7 +5,9 @@ import path from 'node:path';
 
 export const cursorManagedMarker = '--threadforge-hook=cursor';
 export const cursorMemoryManagedMarker = '--threadforge-memory=cursor-v1';
+export const cursorPlanGateManagedMarker = '--threadforge-managed-cursor-plan-gate=v1';
 const cursorMemoryRunnerMarker = '--threadforge-managed-cursor-memory=v1';
+const cursorPlanGateOwnerMarker = '--threadforge-plan-gate=cursor-v1';
 const maxSettingsBytes = 8 << 20;
 const installedHooks: Record<string, Array<{ command: string; matcher?: string; timeout?: number }>> = {
   sessionStart: [{ command: '' }],
@@ -90,6 +92,46 @@ export async function removeCursorProjectMemoryHook(projectRoot: string): Promis
     const settings = await readSettings(filePath);
     const hooks = readHookMap(settings);
     const cleaned = removeHooksWithMarker(hooks, cursorMemoryManagedMarker);
+    if (!cleaned.found) return 'absent';
+    if (Object.keys(cleaned.value).length === 0) delete settings.hooks;
+    else settings.hooks = cleaned.value;
+    if (Object.keys(settings).length === 1 && settings.version === 1) await unlink(filePath);
+    else await atomicWrite(filePath, settings);
+    return 'removed';
+  });
+}
+
+/** Installs an opt-in, fail-closed Cursor preToolUse guard for direct Write tools only. */
+export async function installCursorProjectPlanGateHook(projectRoot: string, command: string): Promise<CursorHookChange> {
+  validateCursorPlanGateCommand(command);
+  const filePath = await settingsPath(projectRoot, true);
+  if (!filePath) throw new Error('unable to resolve Cursor project hooks path');
+  return withLock(filePath, async () => {
+    const settings = await readSettings(filePath);
+    const hooks = readHookMap(settings);
+    const wasCurrentVersion = settings.version === 1;
+    const cleaned = removeHooksWithMarker(hooks, cursorPlanGateManagedMarker);
+    const next: JsonObject = { ...cleaned.value };
+    next.preToolUse = [
+      ...readHookRefs(next, 'preToolUse'),
+      { command, matcher: 'Write', timeout: 10, failClosed: true },
+    ];
+    settings.version = 1;
+    settings.hooks = next;
+    if (wasCurrentVersion && deepEqual(hooks, next)) return 'unchanged';
+    await atomicWrite(filePath, settings);
+    return cleaned.found ? 'updated' : 'installed';
+  });
+}
+
+/** Removes only the Threadforge Cursor preToolUse plan gate. */
+export async function removeCursorProjectPlanGateHook(projectRoot: string): Promise<CursorHookChange> {
+  const filePath = await settingsPath(projectRoot, false);
+  if (!filePath) return 'absent';
+  return withLock(filePath, async () => {
+    const settings = await readSettings(filePath);
+    const hooks = readHookMap(settings);
+    const cleaned = removeHooksWithMarker(hooks, cursorPlanGateManagedMarker);
     if (!cleaned.found) return 'absent';
     if (Object.keys(cleaned.value).length === 0) delete settings.hooks;
     else settings.hooks = cleaned.value;
@@ -222,6 +264,15 @@ function validateCursorMemoryCommand(command: string): void {
   }
   if (!command.includes(cursorMemoryRunnerMarker) || !command.includes(cursorMemoryManagedMarker)) {
     throw new Error(`Cursor memory command must include ${cursorMemoryRunnerMarker} and ${cursorMemoryManagedMarker}`);
+  }
+}
+
+function validateCursorPlanGateCommand(command: string): void {
+  if (typeof command !== 'string' || command.trim() === '' || command.length > 8192 || /[\r\n\0]/.test(command)) {
+    throw new Error('Cursor plan-gate command is invalid or too long');
+  }
+  if (!command.includes(cursorPlanGateManagedMarker) || !command.includes(cursorPlanGateOwnerMarker)) {
+    throw new Error(`Cursor plan-gate command must include ${cursorPlanGateManagedMarker} and ${cursorPlanGateOwnerMarker}`);
   }
 }
 

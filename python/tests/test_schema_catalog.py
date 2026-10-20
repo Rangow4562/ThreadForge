@@ -348,6 +348,41 @@ def test_gemini_task_resume_smoke_schema_is_advisory_and_content_free():
         validator.validate({**result, "objective": "synthetic task objective"})
     with pytest.raises(ValidationError):
         validator.validate({**result, "prompt": "private task-resume prompt"})
+
+
+def test_gemini_cli_plan_gate_smoke_schema_is_deny_only_and_content_free():
+    schema = json.loads((SCHEMA_DIRECTORY / "gemini-cli-plan-gate-smoke-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.gemini-cli-plan-gate-smoke.v1",
+        "status": "verified",
+        "host_cli_version": "0.42.0",
+        "install_action": "installed",
+        "hook_event": "BeforeTool",
+        "tools": ["write_file", "replace"],
+        "hook_invocations": 2,
+        "hook_inputs_verified": True,
+        "write_file_denial_observed": True,
+        "replace_denial_observed": True,
+        "write_file_created": False,
+        "replace_target_unchanged": True,
+        "response_source": "gemini-cli-fake-responses-file",
+        "provider_requests": 0,
+        "real_model_invocations": 0,
+    }
+    validator.validate(result)
+    for invalid in (
+        {**result, "write_file_created": True},
+        {**result, "replace_target_unchanged": False},
+        {**result, "decision": "allow"},
+        {**result, "execution_authorized": True},
+        {**result, "task_id": "synthetic-task-id"},
+        {**result, "target_path": "private/workspace/file.txt"},
+        {**result, "prompt": "create the fixture file"},
+        {**result, "tool_input": {"content": "fixture content"}},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
     with pytest.raises(ValidationError):
         validator.validate({**result, "task_context_content_retained_in_report": True})
 def test_schema_catalog_exists_and_is_nonempty():

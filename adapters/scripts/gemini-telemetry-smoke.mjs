@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { installGeminiTelemetry } from '../src/gemini-telemetry-config.ts';
-import { installGeminiProjectMemoryHook } from '../src/gemini-memory-config.ts';
+import { installGeminiProjectMemoryHook, installGeminiProjectPlanGateHook } from '../src/gemini-memory-config.ts';
 
 const fixtureModel = 'gemini-2.5-flash';
 const fixtureKey = `AIzaSy${'0'.repeat(33)}`;
@@ -16,6 +16,7 @@ const maxRequestBytes = 16 << 20;
 export async function runGeminiCliTelemetrySmoke({ smokeRoot, isolatedEnvironment, runGemini, version, cliPath, taskFixture }) {
   const home = path.join(smokeRoot, 'gemini-telemetry-home');
   const project = path.join(smokeRoot, 'gemini-telemetry-project');
+  const planGateProject = path.join(smokeRoot, 'gemini-plan-gate-project');
   const prompt = `Return exactly this marker and nothing else: ${outputMarker}`;
   const telemetry = { logs: 0, traces: 0, metrics: 0, payload_bytes: 0, content_types: new Set() };
   const routeCounts = {};
@@ -83,6 +84,7 @@ export async function runGeminiCliTelemetrySmoke({ smokeRoot, isolatedEnvironmen
     const origin = `http://127.0.0.1:${address.port}`;
     mkdirSync(home, { recursive: true, mode: 0o700 });
     mkdirSync(project, { recursive: true, mode: 0o700 });
+    mkdirSync(planGateProject, { recursive: true, mode: 0o700 });
     const fakeResponsesPath = path.join(smokeRoot, 'gemini-fake-responses.jsonl');
     const fakeResponse = {
       method: 'generateContentStream',
@@ -252,6 +254,182 @@ if (Object.values(checks).some((value) => !value)) process.exitCode = 1;
       response_source: 'gemini-cli-fake-responses-file',
       real_model_invocations: 0,
     };
+
+    const planGateSentinelPath = path.join(planGateProject, 'threadforge-plan-gate-sentinel.txt');
+    const planGateReplaceTargetPath = path.join(planGateProject, 'threadforge-plan-gate-replace-target.txt');
+    const planGateReplaceTargetContent = 'preserve this approved fixture content';
+    writeFileSync(planGateReplaceTargetPath, planGateReplaceTargetContent, { mode: 0o600, flag: 'wx' });
+    const planGateFakeResponsesPath = path.join(smokeRoot, 'gemini-plan-gate-fake-responses.jsonl');
+    const planGateFakeResponses = [
+      {
+        method: 'generateContentStream',
+        response: [{
+          candidates: [{
+            content: { role: 'model', parts: [{ functionCall: {
+              name: 'write_file',
+              args: { file_path: planGateSentinelPath, content: 'THREADFORGE_GEMINI_DENIED_SENTINEL' },
+            } }] },
+            finishReason: 'STOP',
+          }],
+          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+          modelVersion: fixtureModel,
+        }],
+      },
+      {
+        method: 'generateContentStream',
+        response: [{
+          candidates: [{
+            content: { role: 'model', parts: [{ functionCall: {
+              name: 'replace',
+              args: {
+                file_path: planGateReplaceTargetPath,
+                instruction: 'Change the fixture text',
+                old_string: planGateReplaceTargetContent,
+                new_string: 'THREADFORGE_GEMINI_DENIED_REPLACEMENT',
+              },
+            } }] },
+            finishReason: 'STOP',
+          }],
+          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+          modelVersion: fixtureModel,
+        }],
+      },
+      {
+        method: 'generateContentStream',
+        response: [{
+          candidates: [{
+            content: { role: 'model', parts: [{ text: 'Both direct file operations were denied by the task plan gate.' }] },
+            finishReason: 'STOP',
+          }],
+          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+          modelVersion: fixtureModel,
+        }],
+      },
+    ];
+    writeFileSync(planGateFakeResponsesPath, `${planGateFakeResponses.map((item) => JSON.stringify(item)).join('\n')}\n`,
+      { mode: 0o600, flag: 'wx' });
+    const planGateObserverPath = path.join(smokeRoot, 'gemini-plan-gate-observer.mjs');
+    const planGateObserverResultPath = path.join(smokeRoot, 'gemini-plan-gate-observer.json');
+    const planGateObserverSource = `import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+const [cliPath, resultPath, projectID, taskID, projectRoot, writeTargetPath, replaceTargetPath] = process.argv.slice(2);
+const samePath = (left, right) => process.platform === 'win32'
+  ? path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase()
+  : path.resolve(left) === path.resolve(right);
+const rawInput = readFileSync(0);
+let input;
+try { input = JSON.parse(rawInput.toString('utf8')); }
+catch { process.stderr.write('Gemini plan-gate smoke hook input was invalid.\\n'); process.exit(1); }
+let prior = {};
+if (existsSync(resultPath)) {
+  try { prior = JSON.parse(readFileSync(resultPath, 'utf8')); }
+  catch { process.stderr.write('Gemini plan-gate smoke observation was invalid.\\n'); process.exit(1); }
+}
+const isWriteFile = input?.tool_name === 'write_file';
+const isReplace = input?.tool_name === 'replace';
+const expectedPath = isWriteFile ? writeTargetPath : isReplace ? replaceTargetPath : '';
+const inputVerified = input?.hook_event_name === 'BeforeTool' && Boolean(expectedPath) &&
+  typeof input?.tool_input?.file_path === 'string' && samePath(input.tool_input.file_path, expectedPath);
+const child = spawnSync(cliPath, [
+  'task', 'plan', 'guard', '--host', 'gemini-cli', '--task-id', taskID, '--project-id', projectID,
+  '--project-root', projectRoot,
+  '--threadforge-managed-gemini-plan-gate=v1', '--threadforge-plan-gate=gemini-v1',
+], { input: rawInput, encoding: 'utf8', env: process.env, timeout: 10000, maxBuffer: 1 << 20, windowsHide: true });
+let guardOutput;
+try { guardOutput = JSON.parse(child.stdout); } catch { guardOutput = {}; }
+const guardSucceeded = !child.error && child.status === 0;
+const denialObserved = guardOutput?.decision === 'deny' && typeof guardOutput?.reason === 'string' && guardOutput.reason.length > 0;
+const noAllowDecision = guardOutput?.decision !== 'allow' && guardOutput?.permissionDecision !== 'allow';
+const observation = {
+  hook_invocations: (prior.hook_invocations ?? 0) + 1,
+  write_file_invocations: (prior.write_file_invocations ?? 0) + (isWriteFile ? 1 : 0),
+  replace_invocations: (prior.replace_invocations ?? 0) + (isReplace ? 1 : 0),
+  hook_inputs_verified: (prior.hook_inputs_verified ?? true) && inputVerified,
+  threadforge_guards_succeeded: (prior.threadforge_guards_succeeded ?? true) && guardSucceeded,
+  write_file_denial_observed: (prior.write_file_denial_observed ?? false) || (isWriteFile && denialObserved),
+  replace_denial_observed: (prior.replace_denial_observed ?? false) || (isReplace && denialObserved),
+  no_allow_decisions_returned: (prior.no_allow_decisions_returned ?? true) && noAllowDecision,
+  threadforge_cli_error_code: child.error?.code ?? null,
+};
+writeFileSync(resultPath, JSON.stringify(observation), { mode: 0o600 });
+process.stdout.write(child.stdout ?? '{}');
+if (!inputVerified || !guardSucceeded || !denialObserved || !noAllowDecision) process.exitCode = 1;
+`;
+    writeFileSync(planGateObserverPath, planGateObserverSource, { mode: 0o600, flag: 'wx' });
+    const planGateCommandArguments = [
+      process.execPath, planGateObserverPath, cliPath, planGateObserverResultPath,
+      taskFixture.projectID, taskFixture.id, planGateProject, planGateSentinelPath, planGateReplaceTargetPath,
+      '--threadforge-managed-gemini-plan-gate=v1', '--threadforge-plan-gate=gemini-v1',
+    ];
+    const planGateCommand = process.platform === 'win32'
+      ? `& ${planGateCommandArguments.map(quotePowerShellArgument).join(' ')}`
+      : planGateCommandArguments.map(quotePosixArgument).join(' ');
+    assert.equal(await installGeminiProjectPlanGateHook(planGateProject, planGateCommand), 'installed');
+    const planGateSettingsPath = path.join(planGateProject, '.gemini', 'settings.json');
+    const planGateSettings = JSON.parse(readFileSync(planGateSettingsPath, 'utf8'));
+    const installedPlanGate = planGateSettings.hooks?.BeforeTool?.flatMap((group) => group.hooks ?? [])
+      .find((hook) => hook.name === 'threadforge-task-plan-gate');
+    assert.equal(installedPlanGate?.command, planGateCommand,
+      'Gemini project BeforeTool plan-gate hook did not preserve the owned observer command');
+    assert.equal(planGateSettings.hooks.BeforeTool.find((group) => group.hooks?.includes(installedPlanGate))?.matcher,
+      '^(write_file|replace)$', 'Gemini plan gate was not limited to direct file tools');
+    installedPlanGate.env = { THREADFORGE_HOME: smokeRoot };
+    writeFileSync(planGateSettingsPath, `${JSON.stringify(planGateSettings, null, 2)}\n`, { mode: 0o600 });
+
+    let planGateOutput;
+    try {
+      planGateOutput = await runGemini([
+        '--output-format', 'json',
+        '--model', fixtureModel,
+        '--approval-mode', 'yolo',
+        '--skip-trust',
+        '--debug',
+        '--fake-responses', planGateFakeResponsesPath,
+      ], {
+        cwd: planGateProject,
+        env: { ...geminiEnvironment, GEMINI_TELEMETRY_ENABLED: 'false' },
+        timeout: 30_000,
+        includeStderr: true,
+        stdin: 'Use write_file to create the requested fixture file and replace to change the existing fixture text, then report both results.',
+      });
+    } catch (error) {
+      throw new Error(`Gemini installed plan-gate denial invocation failed; unexpected_local_routes=${routeCounts.unexpected ?? 0}; cause=${String(error?.message ?? error).slice(0, 500)}`);
+    }
+    assert.ok(planGateOutput.includes('Both direct file operations were denied'),
+      'Gemini CLI did not complete the deterministic response after both deny hooks');
+    assert.equal(existsSync(planGateSentinelPath), false, 'Gemini created the file despite the plan-gate denial');
+    assert.equal(readFileSync(planGateReplaceTargetPath, 'utf8'), planGateReplaceTargetContent,
+      'Gemini changed the existing file despite the plan-gate denial');
+    assert.equal(routeCounts.unexpected ?? 0, 0, 'Gemini plan-gate smoke attempted a model request outside the fake-response fixture');
+    let planGateObservation;
+    try { planGateObservation = JSON.parse(readFileSync(planGateObserverResultPath, 'utf8')); }
+    catch { throw new Error('Gemini CLI did not execute the installed Threadforge BeforeTool plan-gate observer'); }
+    assert.equal(planGateObservation.hook_invocations, 2, 'Gemini did not invoke the plan-gate hook for both direct file tools');
+    assert.equal(planGateObservation.write_file_invocations, 1, 'Gemini did not invoke exactly one write_file hook');
+    assert.equal(planGateObservation.replace_invocations, 1, 'Gemini did not invoke exactly one replace hook');
+    assert.equal(planGateObservation.hook_inputs_verified, true, 'Gemini plan-gate hook received the wrong event or file target');
+    assert.equal(planGateObservation.threadforge_guards_succeeded, true, 'Threadforge task-plan guard failed inside Gemini hook');
+    assert.equal(planGateObservation.write_file_denial_observed, true, 'Threadforge did not deny Gemini write_file');
+    assert.equal(planGateObservation.replace_denial_observed, true, 'Threadforge did not deny Gemini replace');
+    assert.equal(planGateObservation.no_allow_decisions_returned, true, 'Threadforge plan gate returned an allow decision');
+    const taskPlanGate = {
+      schema_version: 'threadforge.gemini-cli-plan-gate-smoke.v1',
+      status: 'verified',
+      host_cli_version: version,
+      install_action: 'installed',
+      hook_event: 'BeforeTool',
+      tools: ['write_file', 'replace'],
+      hook_invocations: planGateObservation.hook_invocations,
+      hook_inputs_verified: planGateObservation.hook_inputs_verified,
+      write_file_denial_observed: planGateObservation.write_file_denial_observed,
+      replace_denial_observed: planGateObservation.replace_denial_observed,
+      write_file_created: existsSync(planGateSentinelPath),
+      replace_target_unchanged: readFileSync(planGateReplaceTargetPath, 'utf8') === planGateReplaceTargetContent,
+      response_source: 'gemini-cli-fake-responses-file',
+      provider_requests: routeCounts.unexpected ?? 0,
+      real_model_invocations: 0,
+    };
     const debugTelemetryLines = output.split(/\r?\n/)
       .filter((line) => /telemetry|OpenTelemetry|OTLP/i.test(line))
       .map((line) => line.replaceAll(origin, '<loopback>').slice(0, 240))
@@ -264,6 +442,7 @@ if (Object.values(checks).some((value) => !value)) process.exitCode = 1;
         `Gemini CLI telemetry SDK did not start; diagnostics=${JSON.stringify(debugTelemetryLines)}`);
       return {
         task_resume: taskResume,
+        task_plan_gate: taskPlanGate,
         telemetry: {
         schema_version: 'threadforge.gemini-cli-telemetry-smoke.v1',
         status: 'not_observed',
@@ -290,6 +469,7 @@ if (Object.values(checks).some((value) => !value)) process.exitCode = 1;
       `Gemini telemetry included model output text despite detailed tracing being disabled: fields=${JSON.stringify(observedSensitiveFields)}; paths=${JSON.stringify([...sensitiveFieldPaths].filter((item) => item.includes(':model_output_text')).sort())}`);
     return {
       task_resume: taskResume,
+      task_plan_gate: taskPlanGate,
       telemetry: {
       schema_version: 'threadforge.gemini-cli-telemetry-smoke.v1',
       status: 'verified',

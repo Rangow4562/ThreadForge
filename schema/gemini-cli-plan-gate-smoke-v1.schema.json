@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/gemini-cli-plan-gate-smoke-v1.schema.json",
+  "title": "Threadforge installed Gemini CLI task-plan gate smoke result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "host_cli_version",
+    "install_action",
+    "hook_event",
+    "tools",
+    "hook_invocations",
+    "hook_inputs_verified",
+    "write_file_denial_observed",
+    "replace_denial_observed",
+    "write_file_created",
+    "replace_target_unchanged",
+    "response_source",
+    "provider_requests",
+    "real_model_invocations"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.gemini-cli-plan-gate-smoke.v1" },
+    "status": { "const": "verified" },
+    "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "install_action": { "enum": ["installed", "updated", "unchanged"] },
+    "hook_event": { "const": "BeforeTool" },
+    "tools": { "const": ["write_file", "replace"] },
+    "hook_invocations": { "const": 2 },
+    "hook_inputs_verified": { "const": true },
+    "write_file_denial_observed": { "const": true },
+    "replace_denial_observed": { "const": true },
+    "write_file_created": { "const": false },
+    "replace_target_unchanged": { "const": true },
+    "response_source": { "const": "gemini-cli-fake-responses-file" },
+    "provider_requests": { "const": 0 },
+    "real_model_invocations": { "const": 0 }
+  }
+}

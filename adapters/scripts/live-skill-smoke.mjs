@@ -895,6 +895,7 @@ try {
   });
   const geminiCliTelemetrySmoke = geminiCliSmokeResults.telemetry;
   const geminiAgentTaskResume = geminiCliSmokeResults.task_resume;
+  const geminiCliPlanGate = geminiCliSmokeResults.task_plan_gate;
 
   const antigravityMcpConfig = {
     command: cliPath,
@@ -1096,7 +1097,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v29',
+    schema_version: 'threadforge.installed-skill-smoke.v30',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,
@@ -1130,6 +1131,7 @@ try {
     claude_agent_task_resume: claudeAgentTaskResume,
     gemini_cli_telemetry_smoke: geminiCliTelemetrySmoke,
     gemini_agent_task_resume: geminiAgentTaskResume,
+    gemini_cli_plan_gate: geminiCliPlanGate,
     claude_agent_memory_read: claudeAgentMemoryRead,
     antigravity_project_mcp_list_probe: {
       status: antigravityMcpListed ? 'listed' : 'not-listed',

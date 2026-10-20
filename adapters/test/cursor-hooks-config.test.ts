@@ -6,14 +6,18 @@ import test from 'node:test';
 import {
   cursorMemoryManagedMarker,
   cursorManagedMarker,
+  cursorPlanGateManagedMarker,
+  installCursorProjectPlanGateHook,
   installCursorProjectMemoryHook,
   installCursorProjectHooks,
+  removeCursorProjectPlanGateHook,
   removeCursorProjectMemoryHook,
   removeCursorProjectHooks,
 } from '../src/cursor-hooks-config.ts';
 
 const command = `node adapters/src/cursor-hook.ts ${cursorManagedMarker}`;
 const memoryCommand = `threadforge memory inject-cursor --project-id demo ${cursorMemoryManagedMarker} --threadforge-managed-cursor-memory=v1`;
+const planGateCommand = `threadforge task plan guard --host cursor ${cursorPlanGateManagedMarker} --threadforge-plan-gate=cursor-v1`;
 const settingsPath = (root: string) => path.join(root, '.cursor', 'hooks.json');
 
 async function withProject(run: (root: string) => Promise<void>): Promise<void> {
@@ -51,6 +55,58 @@ test('installs only observational hook groups and preserves unrelated Cursor hoo
     }
     assert.equal(await installCursorProjectHooks(root, command), 'unchanged');
     assert.equal(await readFile(file, 'utf8'), first);
+  });
+});
+
+test('installs an isolated fail-closed Cursor Write plan gate and preserves other hooks', async () => {
+  await withProject(async (root) => {
+    const file = settingsPath(root);
+    await mkdir(path.dirname(file));
+    const original = {
+      version: 1,
+      hooks: {
+        preToolUse: [{ command: 'user-policy-hook', matcher: 'Shell', timeout: 4 }],
+        sessionStart: [{ command: 'user-start-hook' }],
+        beforeSubmitPrompt: [{ command: 'user-prompt-hook' }],
+      },
+      userOption: { keep: true },
+    };
+    await writeFile(file, JSON.stringify(original, null, 2));
+
+    assert.equal(await installCursorProjectPlanGateHook(root, planGateCommand), 'installed');
+    const first = await readFile(file, 'utf8');
+    let config = JSON.parse(first);
+    assert.deepEqual(config.userOption, original.userOption);
+    assert.deepEqual(config.hooks.preToolUse[0], original.hooks.preToolUse[0]);
+    assert.deepEqual(config.hooks.sessionStart, original.hooks.sessionStart);
+    assert.deepEqual(config.hooks.beforeSubmitPrompt, original.hooks.beforeSubmitPrompt);
+    assert.deepEqual(config.hooks.preToolUse[1], {
+      command: planGateCommand, matcher: 'Write', timeout: 10, failClosed: true,
+    });
+    assert.equal(await installCursorProjectPlanGateHook(root, planGateCommand), 'unchanged');
+    assert.equal(await readFile(file, 'utf8'), first);
+
+    const updated = `threadforge task plan guard --host cursor --task-id next ${cursorPlanGateManagedMarker} --threadforge-plan-gate=cursor-v1`;
+    assert.equal(await installCursorProjectPlanGateHook(root, updated), 'updated');
+    config = JSON.parse(await readFile(file, 'utf8'));
+    assert.equal(config.hooks.preToolUse.length, 2);
+    assert.equal(config.hooks.preToolUse[0].command, 'user-policy-hook');
+    assert.equal(config.hooks.preToolUse[1].command, updated);
+
+    assert.equal(await removeCursorProjectPlanGateHook(root), 'removed');
+    config = JSON.parse(await readFile(file, 'utf8'));
+    assert.deepEqual(config.hooks.preToolUse, original.hooks.preToolUse);
+    assert.deepEqual(config.hooks.sessionStart, original.hooks.sessionStart);
+    assert.deepEqual(config.hooks.beforeSubmitPrompt, original.hooks.beforeSubmitPrompt);
+    assert.equal(await removeCursorProjectPlanGateHook(root), 'absent');
+  });
+});
+
+test('Cursor plan-gate installation requires both ownership markers', async () => {
+  await withProject(async (root) => {
+    await assert.rejects(installCursorProjectPlanGateHook(root, 'threadforge task plan guard --host cursor'), /include/);
+    await assert.rejects(installCursorProjectPlanGateHook(root,
+      `threadforge task plan guard --host cursor ${cursorPlanGateManagedMarker}`), /include/);
   });
 });
 

@@ -732,6 +732,42 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 			code, geminiUnsupportedOutput, geminiUnsupportedError)
 	}
 
+	cursorInScopeInput := map[string]any{
+		"tool_name": "Write", "cwd": projectRoot,
+		"tool_input": map[string]any{"path": "src/main.go", "content": "private source"},
+	}
+	code, cursorInScopeOutput, cursorInScopeError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorInScopeInput)
+	var cursorInScope map[string]any
+	if code != 0 || cursorInScopeError != "" || json.Unmarshal([]byte(cursorInScopeOutput), &cursorInScope) != nil || len(cursorInScope) != 0 {
+		t.Fatalf("in-scope Cursor write must return no opinion, not allow: code=%d stdout=%s stderr=%s",
+			code, cursorInScopeOutput, cursorInScopeError)
+	}
+	cursorOutsideInput := map[string]any{
+		"hook_event_name": "preToolUse", "tool_name": "Write", "cwd": projectRoot,
+		"tool_input": map[string]any{"file_path": "docs/private-marker.md", "content": "private source"},
+	}
+	code, cursorOutsideOutput, cursorOutsideError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorOutsideInput)
+	var cursorOutside map[string]any
+	if code != 0 || cursorOutsideError != "" || json.Unmarshal([]byte(cursorOutsideOutput), &cursorOutside) != nil ||
+		cursorOutside["permission"] != "deny" || cursorOutside["user_message"] == nil || cursorOutside["agent_message"] == nil ||
+		cursorOutside["permissionDecision"] != nil || strings.Contains(cursorOutsideOutput, "docs/private-marker.md") ||
+		strings.Contains(cursorOutsideOutput, "private source") {
+		t.Fatalf("out-of-scope Cursor write did not return a private flat deny: code=%d stdout=%s stderr=%s",
+			code, cursorOutsideOutput, cursorOutsideError)
+	}
+	cursorUnsupportedInput := map[string]any{
+		"tool_name": "Shell", "cwd": projectRoot,
+		"tool_input": map[string]any{"command": "echo do-not-run"},
+	}
+	code, cursorUnsupportedOutput, cursorUnsupportedError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorUnsupportedInput)
+	if code != 0 || cursorUnsupportedError != "" || !strings.Contains(cursorUnsupportedOutput, `"permission": "deny"`) {
+		t.Fatalf("unsupported Cursor tool did not fail closed: code=%d stdout=%s stderr=%s",
+			code, cursorUnsupportedOutput, cursorUnsupportedError)
+	}
+
 	copilotInput := map[string]any{
 		"timestamp": "2026-10-19T00:00:00Z", "cwd": projectRoot, "toolName": "edit",
 		"toolArgs": map[string]any{"file_path": "src/main.go", "new_string": "private source"},
@@ -842,6 +878,8 @@ func runTaskPlanGuardTestHook(t *testing.T, projectRoot, taskID, projectID, host
 		args = append(args, "--host", host, "--threadforge-managed-codex-plan-gate=v1", "--threadforge-plan-gate=codex-v1")
 	} else if host == "gemini-cli" {
 		args = append(args, "--host", host, "--threadforge-managed-gemini-plan-gate=v1", "--threadforge-plan-gate=gemini-v1")
+	} else if host == "cursor" {
+		args = append(args, "--host", host, "--threadforge-managed-cursor-plan-gate=v1", "--threadforge-plan-gate=cursor-v1")
 	} else {
 		args = append(args, "--threadforge-managed-claude-plan-gate=v1", "--threadforge-plan-gate=claude-v1")
 	}

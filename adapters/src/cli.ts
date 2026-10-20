@@ -13,8 +13,10 @@ import { installOpenCodeProjectPlugin, removeOpenCodeProjectPlugin } from './ope
 import {
   installCursorProjectHooks,
   installCursorProjectMemoryHook,
+  installCursorProjectPlanGateHook,
   removeCursorProjectHooks,
   removeCursorProjectMemoryHook,
+  removeCursorProjectPlanGateHook,
 } from './cursor-hooks-config.ts';
 import {
   installCodexProjectHooks,
@@ -138,7 +140,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   let qwenSubsystem: 'memory' | 'plan-gate' | undefined;
   let antigravitySubsystem: 'memory' | undefined;
   let copilotSubsystem: 'sessions' | 'plan-gate' | undefined;
-  let cursorSubsystem: 'sessions' | 'memory' | undefined;
+  let cursorSubsystem: 'sessions' | 'memory' | 'plan-gate' | undefined;
   let factorySubsystem: 'sessions' | undefined;
   let fxSubsystem: 'sessions' | undefined;
   let piSubsystem: 'sessions' | undefined;
@@ -235,6 +237,15 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   }
   if (family === 'cursor' && action === 'memory') {
     cursorSubsystem = 'memory';
+    action = rest[0];
+    rest = rest.slice(1);
+    if (!action) {
+      stderr.write(`${usage()}\n`);
+      return 2;
+    }
+  }
+  if (family === 'cursor' && action === 'plan-gate') {
+    cursorSubsystem = 'plan-gate';
     action = rest[0];
     rest = rest.slice(1);
     if (!action) {
@@ -1259,6 +1270,13 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
     } else if (family === 'cursor' && cursorSubsystem === 'memory' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
       result = await removeCursorProjectMemoryHook(projectRoot);
+    } else if (family === 'cursor' && cursorSubsystem === 'plan-gate' && (action === 'install' || action === 'update')) {
+      rejectUnexpected(options, ['project-root', 'command']);
+      result = await installCursorProjectPlanGateHook(projectRoot, required(options, 'command'));
+      warning = 'Cursor plan gate is opt-in and fail-closed for direct Write tools only; it emits deny decisions but no allows. It does not gate shell/MCP tools, close path-check races, sandbox execution, or change Cursor permissions.';
+    } else if (family === 'cursor' && cursorSubsystem === 'plan-gate' && action === 'uninstall') {
+      rejectUnexpected(options, ['project-root']);
+      result = await removeCursorProjectPlanGateHook(projectRoot);
     } else if (family === 'gemini' && (action === 'install' || action === 'update')) {
       rejectUnexpected(options, []);
       result = await installGeminiTelemetry();
@@ -1637,6 +1655,8 @@ function usage(): string {
     '  npm run adapter -- gemini plan-gate uninstall --project-root <absolute-path>',
     '  npm run adapter -- cursor memory install|update --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers>',
     '  npm run adapter -- cursor memory uninstall --project-root <absolute-path>',
+    '  npm run adapter -- cursor plan-gate install|update --project-root <absolute-path> --command <threadforge-deny-only-plan-gate-command-with-markers>',
+    '  npm run adapter -- cursor plan-gate uninstall --project-root <absolute-path>',
     '  npm run adapter -- cursor skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- devin skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- opencode skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',

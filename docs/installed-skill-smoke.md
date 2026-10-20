@@ -2,6 +2,8 @@
 
 Smoke v29 adds an isolated Codex task-plan-gate probe with a persisted synthetic plan_only task. Codex CLI 0.163.0 exposed exec_command but not direct apply_patch in the fixture request. The probe scripted one exec_command that would create a sentinel; the PreToolUse denial returned to the fixture and the file remained absent. The subresult is verified with one tool call and zero real model invocations. This is deterministic transport evidence, not a security-boundary claim, and it does not test governed-execution shell path scope, normal trust discovery, or MCP writes.
 
+Smoke v30 adds a Gemini CLI project `BeforeTool` plan-gate check. Installed Gemini CLI receives deterministic fake `write_file` and `replace` function calls in YOLO mode; the installed hook invokes Threadforge and returns `decision=deny` for each. The new-file sentinel stays absent and the pre-existing replacement fixture remains byte-for-byte unchanged. The report stores only host version, hook/tool names, invocation and safety booleans, and fake-response/model-call counts—no task ID, target path, prompt, or file content. Zero real model requests are allowed. This verifies two installed direct-file-tool denial paths only; it is not a security-boundary, normal trust-discovery, shell/MCP, other-tool, or efficacy test.
+
 Run the no-model host check from `adapters/`:
 
 ```powershell

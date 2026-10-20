@@ -64,29 +64,34 @@ func runTaskPlanGuard(args []string, stdout, stderr io.Writer) int {
 	copilotMarker := fs.String("threadforge-managed-copilot-plan-gate", "", "required GitHub Copilot CLI hook marker")
 	codexMarker := fs.String("threadforge-managed-codex-plan-gate", "", "required Codex CLI hook marker")
 	geminiMarker := fs.String("threadforge-managed-gemini-plan-gate", "", "required Gemini CLI hook marker")
+	cursorMarker := fs.String("threadforge-managed-cursor-plan-gate", "", "required Cursor hook marker")
 	planGateMarker := fs.String("threadforge-plan-gate", "", "required host-specific plan-gate ownership marker")
 	if err := fs.Parse(args); err != nil || *taskID == "" || *projectID == "" || *projectRoot == "" || fs.NArg() != 0 {
 		return writeTaskPlanGateResult(stdout, stderr, false, *host)
 	}
 	switch *host {
 	case "claude-code":
-		if *claudeMarker != planGateRuntimeMarker || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *planGateMarker != "claude-v1" {
+		if *claudeMarker != planGateRuntimeMarker || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *cursorMarker != "" || *planGateMarker != "claude-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	case "qwen-code":
-		if *qwenMarker != planGateRuntimeMarker || *claudeMarker != "" || *copilotMarker != "" || *codexMarker != "" || *planGateMarker != "qwen-v1" {
+		if *qwenMarker != planGateRuntimeMarker || *claudeMarker != "" || *copilotMarker != "" || *codexMarker != "" || *cursorMarker != "" || *planGateMarker != "qwen-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	case "github-copilot":
-		if *copilotMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *codexMarker != "" || *planGateMarker != "copilot-v1" {
+		if *copilotMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *codexMarker != "" || *cursorMarker != "" || *planGateMarker != "copilot-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	case "codex-cli":
-		if *codexMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *geminiMarker != "" || *planGateMarker != "codex-v1" {
+		if *codexMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *geminiMarker != "" || *cursorMarker != "" || *planGateMarker != "codex-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	case "gemini-cli":
-		if *geminiMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *planGateMarker != "gemini-v1" {
+		if *geminiMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *cursorMarker != "" || *planGateMarker != "gemini-v1" {
+			return writeTaskPlanGateResult(stdout, stderr, false, *host)
+		}
+	case "cursor":
+		if *cursorMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *geminiMarker != "" || *planGateMarker != "cursor-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	default:
@@ -107,6 +112,10 @@ func runTaskPlanGuard(args []string, stdout, stderr io.Writer) int {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 		toolName, toolArgs = hookInput.CopilotToolName, hookInput.CopilotToolArgs
+	} else if *host == "cursor" {
+		if hookInput.HookEventName != "" && hookInput.HookEventName != "preToolUse" {
+			return writeTaskPlanGateResult(stdout, stderr, false, *host)
+		}
 	} else {
 		expectedEvent := "PreToolUse"
 		if *host == "gemini-cli" {
@@ -184,6 +193,8 @@ func taskPlanGateToolIsSupported(host, toolName string) bool {
 		return toolName == "apply_patch" || toolName == "exec_command"
 	case "gemini-cli":
 		return toolName == "write_file" || toolName == "replace"
+	case "cursor":
+		return toolName == "Write"
 	default:
 		return false
 	}
@@ -212,6 +223,19 @@ func taskPlanGateToolTargetPaths(host, toolName string, raw json.RawMessage) ([]
 			return nil, false
 		}
 		return taskPlanGateCopilotPatchPaths(input.Command)
+	}
+	if host == "cursor" {
+		if input.FilePath != "" && input.Path != "" && input.FilePath != input.Path {
+			return nil, false
+		}
+		targetPath := input.FilePath
+		if targetPath == "" {
+			targetPath = input.Path
+		}
+		if targetPath == "" {
+			return nil, false
+		}
+		return []string{targetPath}, true
 	}
 	if host != "github-copilot" {
 		if input.FilePath == "" {
@@ -282,6 +306,19 @@ func taskPlanGateCopilotPatchPaths(patch string) ([]string, bool) {
 }
 
 func writeTaskPlanGateResult(stdout, stderr io.Writer, withinScope bool, host string) int {
+	if host == "cursor" {
+		result := struct {
+			Permission   string `json:"permission,omitempty"`
+			UserMessage  string `json:"user_message,omitempty"`
+			AgentMessage string `json:"agent_message,omitempty"`
+		}{}
+		if !withinScope {
+			result.Permission = "deny"
+			result.UserMessage = "Threadforge withheld this Cursor file write; task requirements, plan decision, or implementation scope did not satisfy the configured guard."
+			result.AgentMessage = "The file write was withheld by the configured Threadforge task plan gate. Review the task requirements and declared implementation scope."
+		}
+		return writeIndentedJSON(stdout, result, stderr)
+	}
 	if host == "gemini-cli" {
 		result := struct {
 			Decision string `json:"decision,omitempty"`

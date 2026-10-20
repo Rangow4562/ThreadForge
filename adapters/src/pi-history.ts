@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 
 const cursorVersion = 1;
 const cursorName = 'pi-session-cursor.v1.json';
@@ -178,7 +179,7 @@ async function resolveSessionsDir(value?: string): Promise<string> {
   if (!info) return path.resolve(sessionsDir);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Pi sessions path must be a real directory');
   const canonical = await realpath(sessionsDir).catch(() => { throw new Error('Pi sessions directory could not be resolved'); });
-  if (canonical !== path.resolve(sessionsDir)) throw new Error('Pi sessions directory must not traverse symbolic links');
+  if (!await isSameRealPathWithoutLinks(canonical, sessionsDir)) throw new Error('Pi sessions directory must not traverse symbolic links');
   return canonical;
 }
 
@@ -214,7 +215,7 @@ async function listFiles(
       if (!info.isFile() || path.extname(entry.name).toLowerCase() !== '.jsonl') continue;
       if (info.size > maxFileBytes) { oversizedSkipped++; continue; }
       const canonical = await realpath(fullPath).catch(() => '');
-      if (!canonical || canonical !== path.resolve(fullPath) || !isWithin(root, canonical)) { symlinksSkipped++; continue; }
+      if (!canonical || !await isSameRealPathWithoutLinks(canonical, fullPath) || !isWithin(root, canonical)) { symlinksSkipped++; continue; }
       const relative = path.relative(root, canonical).split(path.sep).join('/');
       if (!isSafeRelative(relative)) { symlinksSkipped++; continue; }
       files.push({ path: canonical, relative, sourceSha256: sha256(relative), name: path.basename(fullPath), size: info.size, mtimeMs: info.mtimeMs });
@@ -233,7 +234,7 @@ async function readPiFile(file: PiFile, root: string): Promise<Buffer> {
     throw new Error('Pi transcript changed after enumeration');
   }
   const canonical = await realpath(file.path).catch(() => '');
-  if (!canonical || canonical !== file.path || !isWithin(root, canonical)) throw new Error('Pi transcript path escaped sessions directory');
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, file.path) || !isWithin(root, canonical)) throw new Error('Pi transcript path escaped sessions directory');
   let handle;
   try {
     handle = await open(file.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));

@@ -3,6 +3,7 @@ import { constants, type Stats } from 'node:fs';
 import { lstat, mkdir, open, readdir, realpath, rename, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
 
 const stateVersion = 2;
@@ -179,7 +180,7 @@ async function resolveSessionsDir(value?: string): Promise<string> {
   if (!info) return sessionsDir;
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Grok sessions path must be a real directory');
   const canonical = await realpath(sessionsDir).catch(() => { throw new Error('Grok sessions directory could not be resolved'); });
-  if (!samePath(canonical, sessionsDir)) throw new Error('Grok sessions directory must not traverse symbolic links');
+  if (!await isSameRealPathWithoutLinks(canonical, sessionsDir)) throw new Error('Grok sessions directory must not traverse symbolic links');
   return canonical;
 }
 
@@ -292,7 +293,7 @@ async function readStableFile(file: FileMeta | undefined, root: string, label: s
     throw new Error(`${label} changed after enumeration`);
   }
   const canonical = await realpath(file.path).catch(() => '');
-  if (!canonical || !samePath(canonical, file.path) || !isWithin(root, canonical)) throw new Error(`${label} escaped the Grok sessions directory`);
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, file.path) || !isWithin(root, canonical)) throw new Error(`${label} escaped the Grok sessions directory`);
   let handle;
   try {
     handle = await open(file.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -807,10 +808,6 @@ function isSourceCursor(value: unknown): value is SourceCursor {
     typeof value.prefix_sha256 === 'string' && (value.prefix_sha256 === '' || /^[a-f0-9]{64}$/.test(value.prefix_sha256));
 }
 function sameFile(a: Stats, b: Stats | null): boolean { return b !== null && a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs; }
-function samePath(left: string, right: string): boolean {
-  const a = path.resolve(left).replace(/[\\/]+$/, ''); const b = path.resolve(right).replace(/[\\/]+$/, '');
-  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
-}
 function isWithin(root: string, value: string): boolean {
   const relative = path.relative(root, value);
   return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));

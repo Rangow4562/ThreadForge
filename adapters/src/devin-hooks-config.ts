@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { lstat, mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 import { devinHookEvents, devinManagedMarker, type DevinHookEvent } from './devin-hook.ts';
 
 export type DevinHookScope = 'user' | 'project';
@@ -191,7 +192,7 @@ async function resolveConfigPath(
     const rootInfo = await lstat(requestedRoot).catch(() => null);
     if (!rootInfo || !rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error('project root must be a real directory');
     const root = await realpath(requestedRoot).catch(() => { throw new Error('project root must exist and be accessible'); });
-    if (!samePath(root, requestedRoot)) throw new Error('project root must not traverse symbolic links');
+    if (!await isSameRealPathWithoutLinks(root, requestedRoot)) throw new Error('project root must not traverse symbolic links');
     const canonicalRootInfo = await lstat(root);
     if (!canonicalRootInfo.isDirectory() || canonicalRootInfo.isSymbolicLink()) throw new Error('project root must be a real directory');
     const devinDir = await ensureDirectory(root, path.join(root, '.devin'), create);
@@ -206,7 +207,7 @@ async function resolveConfigPath(
     throw new Error('Devin home must be a real directory');
   }
   const home = await realpath(resolvedHome).catch(() => { throw new Error('Devin home directory must exist and be accessible'); });
-  if (!samePath(home, resolvedHome)) throw new Error('Devin home must not traverse symbolic links');
+  if (!await isSameRealPathWithoutLinks(home, resolvedHome)) throw new Error('Devin home must not traverse symbolic links');
   const homeInfo = await lstat(home);
   if (!homeInfo.isDirectory() || homeInfo.isSymbolicLink()) throw new Error('Devin home must be a real directory');
   const configBase = await ensureDirectory(home, path.join(home, '.config'), create);
@@ -324,12 +325,6 @@ function deepEqual(a: unknown, b: unknown): boolean { return JSON.stringify(a) =
 function isWithin(root: string, target: string): boolean {
   const relative = path.relative(root, target);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
-}
-function samePath(a: string, b: string): boolean {
-  const normalize = (value: string) => path.resolve(value).replace(/[\\/]+$/, '');
-  return process.platform === 'win32'
-    ? normalize(a).toLowerCase() === normalize(b).toLowerCase()
-    : normalize(a) === normalize(b);
 }
 function isCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && (error as NodeJS.ErrnoException).code === code;

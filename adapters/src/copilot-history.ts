@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 
 const stateVersion = 1;
 const stateFileName = 'copilot-sessions.v1.json';
@@ -147,7 +148,7 @@ async function resolveCopilotDir(value?: string): Promise<string> {
   if (!info) return path.resolve(root);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Copilot directory must be a real directory');
   const canonical = await realpath(root).catch(() => { throw new Error('Copilot directory could not be resolved'); });
-  if (canonical !== path.resolve(root)) throw new Error('Copilot directory must not traverse symbolic links');
+  if (!await isSameRealPathWithoutLinks(canonical, root)) throw new Error('Copilot directory must not traverse symbolic links');
   return canonical;
 }
 
@@ -208,7 +209,7 @@ async function readSessionFile(file: CopilotFile, root: string): Promise<Buffer>
   if (!before || !before.isFile() || before.isSymbolicLink() || before.size > maxFileBytes) throw new Error('Copilot session is not a bounded regular file');
   if (before.size !== file.size || before.mtimeMs !== file.mtimeMs) throw new Error('Copilot session changed after enumeration');
   const canonical = await realpath(file.path).catch(() => '');
-  if (!canonical || !isWithin(root, canonical)) throw new Error('Copilot session path escaped the Copilot directory');
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, file.path) || !isWithin(root, canonical)) throw new Error('Copilot session path escaped the Copilot directory');
   let handle;
   try {
     handle = await open(file.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));

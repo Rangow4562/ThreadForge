@@ -94,15 +94,15 @@ async function createReceiver(): Promise<Receiver> {
 test('Goose data-root and platform defaults resolve without exposing host paths', () => {
   assert.equal(
     resolveGooseHistoryDatabasePath({ env: { GOOSE_PATH_ROOT: 'D:/GooseData' }, platform: 'win32', homeDir: 'C:/Users/test' }),
-    path.join('D:/GooseData', 'data', 'sessions', 'sessions.db'),
+    path.win32.join('D:/GooseData', 'data', 'sessions', 'sessions.db'),
   );
   assert.equal(
     resolveGooseHistoryDatabasePath({ env: { XDG_DATA_HOME: '/tmp/data' }, platform: 'linux', homeDir: '/home/test' }),
-    path.join('/tmp/data', 'goose', 'sessions', 'sessions.db'),
+    path.posix.join('/tmp/data', 'goose', 'sessions', 'sessions.db'),
   );
   assert.equal(
     resolveGooseHistoryDatabasePath({ env: {}, platform: 'darwin', homeDir: '/Users/test' }),
-    path.join('/Users/test', 'Library', 'Application Support', 'Block', 'goose', 'data', 'sessions', 'sessions.db'),
+    path.posix.join('/Users/test', 'Library', 'Application Support', 'Block', 'goose', 'data', 'sessions', 'sessions.db'),
   );
   assert.throws(() => resolveGooseHistoryDatabasePath({ env: { GOOSE_PATH_ROOT: 'relative' }, platform: 'linux' }), /absolute/);
 });

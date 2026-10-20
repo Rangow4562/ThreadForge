@@ -1,9 +1,10 @@
 import { constants, type Stats } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 import { senpiExtensionTemplateMarker, senpiManagedMarker } from './senpi-extension.ts';
 
 export type SenpiScope = 'user' | 'project';
@@ -182,7 +183,7 @@ async function safeDirectory(input: string, create: boolean, label: string): Pro
     }
     if (!info || !info.isDirectory() || info.isSymbolicLink()) throw new Error(`${label} path contains a symbolic link or non-directory`);
     const actual = await realpath(current).catch(() => { throw new Error(`${label} is inaccessible`); });
-    if (!samePath(actual, current)) throw new Error(`${label} path traverses a symbolic link`);
+    if (!await isSameRealPathWithoutLinks(actual, current)) throw new Error(`${label} path traverses a symbolic link`);
     current = actual;
   }
   return current;
@@ -201,6 +202,7 @@ async function childDirectory(parent: string, child: string, create: boolean, la
     info = await lstat(target);
   }
   if (!info || !info.isDirectory() || info.isSymbolicLink()) throw new Error(`${label} contains a symbolic link or non-directory`);
+  if (mode === 0o700 && process.platform !== 'win32') await chmod(target, mode);
   const actual = await realpath(target).catch(() => { throw new Error(`${label} is inaccessible`); });
   if (!isWithin(parent, actual)) throw new Error(`${label} resolves outside the selected root`);
   return actual;
@@ -307,10 +309,6 @@ async function verifySnapshot(file: string, snapshot: Snapshot): Promise<void> {
 function identityOf(stat: Stats): Identity { return { dev: stat.dev, ino: stat.ino, mode: stat.mode, size: stat.size, mtimeMs: stat.mtimeMs }; }
 function sameIdentity(a: Identity, b: Identity): boolean {
   return a.dev === b.dev && a.ino === b.ino && a.mode === b.mode && a.size === b.size && a.mtimeMs === b.mtimeMs;
-}
-function samePath(a: string, b: string): boolean {
-  const normalize = (value: string) => path.resolve(value).replace(/[\\/]+$/, '');
-  return process.platform === 'win32' ? normalize(a).toLowerCase() === normalize(b).toLowerCase() : normalize(a) === normalize(b);
 }
 function isWithin(root: string, target: string): boolean {
   const relative = path.relative(root, target);

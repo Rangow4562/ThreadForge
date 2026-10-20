@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import { emitEvents, type ThreadforgeEvent } from './emit.ts';
 
@@ -380,7 +381,7 @@ async function inspectDatabase(databasePath: string) {
 
 async function openDatabase(databasePath: string, before: Awaited<ReturnType<typeof lstat>>) {
   const canonical = await realpath(databasePath).catch(() => '');
-  if (!canonical || canonical !== path.resolve(databasePath)) throw new Error('Hermes state database path cannot traverse symbolic links');
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, databasePath)) throw new Error('Hermes state database path cannot traverse symbolic links');
   const { DatabaseSync: SQLiteDatabase } = await import('node:sqlite');
   const database = new SQLiteDatabase(canonical, { readOnly: true });
   try {

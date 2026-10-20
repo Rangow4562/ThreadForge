@@ -6,6 +6,7 @@ import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
 import { resolveCursorGlobalDatabase, scanCursorComposers, type CursorComposerSnapshot } from './cursor-composer.ts';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 
 const stateVersion = 1;
 const stateFileName = 'cursor-transcripts.v1.json';
@@ -185,7 +186,7 @@ async function resolveProjectsDir(value?: string): Promise<string> {
   if (!info) return path.resolve(projectsDir);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Cursor projects path must be a real directory');
   const canonical = await realpath(projectsDir).catch(() => { throw new Error('Cursor projects directory could not be resolved'); });
-  if (canonical !== path.resolve(projectsDir)) throw new Error('Cursor projects directory must not traverse symbolic links');
+  if (!await isSameRealPathWithoutLinks(canonical, projectsDir)) throw new Error('Cursor projects directory must not traverse symbolic links');
   return canonical;
 }
 
@@ -258,7 +259,7 @@ async function readTranscriptFile(file: TranscriptFile, root: string): Promise<B
   if (!before || !before.isFile() || before.isSymbolicLink() || before.size > maxFileBytes) throw new Error('Cursor transcript is not a bounded regular file');
   if (before.size !== file.size || before.mtimeMs !== file.mtimeMs) throw new Error('Cursor transcript changed after enumeration');
   const canonical = await realpath(file.path).catch(() => '');
-  if (!canonical || canonical !== file.path || !isWithin(root, canonical)) throw new Error('Cursor transcript path escaped Cursor projects');
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, file.path) || !isWithin(root, canonical)) throw new Error('Cursor transcript path escaped Cursor projects');
   let handle;
   try {
     handle = await open(file.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));

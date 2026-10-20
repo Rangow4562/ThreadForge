@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 import {
   installCodexProjectMcpServer,
   removeCodexProjectMcpServer,
@@ -163,15 +164,8 @@ async function normalizeMcpArgs(projectRoot: string, args: string[]): Promise<st
     throw new Error('bootstrap only supports the standard mcp serve --project-root command');
   }
   const configuredRoot = await canonicalProjectRoot(args[3]!);
-  if (!samePath(projectRoot, configuredRoot)) throw new Error('MCP --project-root must match the selected project root');
+  if (!await isSameRealPathWithoutLinks(projectRoot, configuredRoot)) throw new Error('MCP --project-root must match the selected project root');
   return ['mcp', 'serve', '--project-root', projectRoot, managedMcpArgument];
-}
-
-function samePath(left: string, right: string): boolean {
-  const normalize = (value: string) => path.resolve(value).replace(/[\\/]+$/, '');
-  return process.platform === 'win32'
-    ? normalize(left).toLowerCase() === normalize(right).toLowerCase()
-    : normalize(left) === normalize(right);
 }
 
 function looksCredentialLike(value: string): boolean {

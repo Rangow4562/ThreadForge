@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 
 const cursorVersion = 1;
 const cursorName = 'prime-session-cursor.v1.json';
@@ -147,7 +148,7 @@ async function resolveRoot(value: string, label: string): Promise<string> {
   if (!info) return resolved;
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error(`${label} must be a real directory`);
   const canonical = await realpath(resolved).catch(() => { throw new Error(`${label} could not be resolved`); });
-  if (canonical !== resolved) throw new Error(`${label} must not traverse symbolic links`);
+  if (!await isSameRealPathWithoutLinks(canonical, resolved)) throw new Error(`${label} must not traverse symbolic links`);
   return canonical;
 }
 
@@ -181,7 +182,7 @@ async function listFiles(
         if (!info.isFile() || path.extname(entry.name).toLowerCase() !== '.jsonl') continue;
         if (info.size > maxFileBytes) { oversizedSkipped++; continue; }
         const canonical = await realpath(fullPath).catch(() => '');
-        if (!canonical || canonical !== path.resolve(fullPath) || !isWithin(root.path, canonical)) { symlinksSkipped++; continue; }
+        if (!canonical || !await isSameRealPathWithoutLinks(canonical, fullPath) || !isWithin(root.path, canonical)) { symlinksSkipped++; continue; }
         const relative = path.relative(root.path, canonical).split(path.sep).join('/');
         if (!isSafeRelative(relative)) { symlinksSkipped++; continue; }
         if (rootFileCount >= maximum) { truncated = true; rootLimitReached = true; break; }
@@ -202,7 +203,7 @@ async function readSource(file: PrimeFile, roots: PrimeRoot[]): Promise<Buffer> 
   const before = await lstat(file.path).catch(() => null);
   if (!before || !before.isFile() || before.isSymbolicLink()) throw new Error('Prime transcript source is no longer a regular file');
   const canonical = await realpath(file.path).catch(() => '');
-  if (!canonical || canonical !== file.path || !isWithin(root, canonical)) throw new Error('Prime transcript path escaped its source root');
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, file.path) || !isWithin(root, canonical)) throw new Error('Prime transcript path escaped its source root');
   let handle;
   try {
     handle = await open(file.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));

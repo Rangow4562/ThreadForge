@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 
 const maxInstructionFileBytes = 1 << 20;
 const lockName = '.threadforge-instructions.lock';
@@ -301,7 +302,7 @@ async function canonicalProjectRoot(value: string): Promise<string> {
   const info = await lstat(input).catch(() => null);
   if (!info?.isDirectory() || info.isSymbolicLink()) throw new Error('project root must be a real directory, not a symbolic link');
   const canonical = await realpath(input).catch(() => '');
-  if (canonical !== input) throw new Error('project root path changed during validation');
+  if (!await isSameRealPathWithoutLinks(canonical, input)) throw new Error('project root path changed during validation');
   return canonical;
 }
 

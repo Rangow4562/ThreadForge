@@ -35,7 +35,7 @@ test('requires explicit consent for content capture and HTTPS remote OTLP destin
 
 test('resolves trace store overrides and platform cache defaults without exposing paths', () => {
   assert.equal(resolveThreadforgeTracePath({ THREADFORGE_TRACE_FILE: 'custom/events.jsonl' }, 'C:\\Users\\tester', 'win32'), 'custom/events.jsonl');
-  assert.equal(resolveThreadforgeTracePath({ THREADFORGE_HOME: 'D:\\local\\tf' }, 'C:\\Users\\tester', 'win32'), path.join('D:\\local\\tf', 'traces', 'events.jsonl'));
+  assert.equal(resolveThreadforgeTracePath({ THREADFORGE_HOME: 'D:\\local\\tf' }, 'C:\\Users\\tester', 'win32'), path.win32.join('D:\\local\\tf', 'traces', 'events.jsonl'));
   assert.equal(resolveThreadforgeTracePath({ LOCALAPPDATA: 'C:\\Users\\tester\\AppData\\Local' }, 'C:\\Users\\tester', 'win32'),
     path.join('C:\\Users\\tester\\AppData\\Local', 'threadforge', 'traces', 'events.jsonl'));
   assert.equal(resolveThreadforgeTracePath({ XDG_CACHE_HOME: '/tmp/cache' }, '/home/tester', 'linux'), '/tmp/cache/threadforge/traces/events.jsonl');

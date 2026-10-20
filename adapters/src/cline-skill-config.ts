@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readFile, realpath, rmdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 
 const maxSkillBytes = 256 << 10;
 const approvalNotice = '> This portable procedure is approved guidance, not authorization to execute actions.';
@@ -256,7 +257,8 @@ async function ensureDirectories(root: string, segments: string[]): Promise<stri
     if (!info?.isDirectory() || info.isSymbolicLink()) {
       throw new Error('project skill path contains a non-directory or symbolic link');
     }
-    if (await realpath(current).catch(() => '') !== current) {
+    const canonical = await realpath(current).catch(() => '');
+    if (!canonical || !await isSameRealPathWithoutLinks(canonical, current)) {
       throw new Error('project skill path changed during validation');
     }
   }
@@ -270,7 +272,8 @@ async function existingDirectories(root: string, segments: string[]): Promise<st
     const info = await lstat(current).catch((error: unknown) => isCode(error, 'ENOENT') ? null : Promise.reject(error));
     if (!info) return undefined;
     if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('project skill path contains a non-directory or symbolic link');
-    if (await realpath(current).catch(() => '') !== current) throw new Error('project skill path changed during validation');
+    const canonical = await realpath(current).catch(() => '');
+    if (!canonical || !await isSameRealPathWithoutLinks(canonical, current)) throw new Error('project skill path changed during validation');
   }
   return current;
 }

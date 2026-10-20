@@ -225,12 +225,14 @@ test('symlinked Copilot session directories and transcript files are skipped', a
   const outside = await tempRoot();
   const { copilotDir } = await session(root, 'real-session', [record('id', 'user.message', { content: 'secret' })]);
   const sessionRoot = path.join(copilotDir, 'session-state');
+  const linkedFileSession = path.join(sessionRoot, 'linked-file-session');
+  await mkdir(linkedFileSession, { recursive: true });
   await mkdir(path.join(outside, 'foreign-session'), { recursive: true });
   await writeFile(path.join(outside, 'foreign-session', 'events.jsonl'), `${JSON.stringify(record('foreign', 'user.message', { content: 'private' }))}\n`, 'utf8');
   try {
     try {
       await symlink(path.join(outside, 'foreign-session'), path.join(sessionRoot, 'linked-session'), 'junction');
-      await symlink(path.join(outside, 'foreign-session', 'events.jsonl'), path.join(sessionRoot, 'real-session', 'linked.jsonl'));
+      await symlink(path.join(outside, 'foreign-session', 'events.jsonl'), path.join(linkedFileSession, 'events.jsonl'), 'file');
     } catch {
       t.skip('symlink creation is unavailable in this environment');
       return;

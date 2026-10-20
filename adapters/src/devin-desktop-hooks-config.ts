@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { lstat, mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 import { devinDesktopHookEvents, devinDesktopManagedMarker, type DevinDesktopHookEvent } from './devin-desktop-hook.ts';
 
 export type DevinDesktopHookScope = 'user' | 'project';
@@ -164,7 +165,7 @@ async function resolveConfigPath(
     const rootInfo = await lstat(requestedRoot).catch(() => null);
     if (!rootInfo || !rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error('project root must be a real directory');
     const root = await realpath(requestedRoot).catch(() => { throw new Error('project root must exist and be accessible'); });
-    if (!samePath(root, requestedRoot)) throw new Error('project root must not traverse symbolic links');
+    if (!await isSameRealPathWithoutLinks(root, requestedRoot)) throw new Error('project root must not traverse symbolic links');
     const configDir = await ensureDirectory(root, path.join(root, '.windsurf'), create);
     return configDir ? checkConfigFile(path.join(configDir, 'hooks.json')) : undefined;
   }
@@ -175,7 +176,7 @@ async function resolveConfigPath(
   const homeInfo = await lstat(requestedHome).catch(() => null);
   if (!homeInfo || !homeInfo.isDirectory() || homeInfo.isSymbolicLink()) throw new Error('Devin Desktop home must be a real directory');
   const home = await realpath(requestedHome).catch(() => { throw new Error('Devin Desktop home directory must exist and be accessible'); });
-  if (!samePath(home, requestedHome)) throw new Error('Devin Desktop home must not traverse symbolic links');
+  if (!await isSameRealPathWithoutLinks(home, requestedHome)) throw new Error('Devin Desktop home must not traverse symbolic links');
   const codeium = await ensureDirectory(home, path.join(home, '.codeium'), create);
   if (!codeium) return undefined;
   const windsurf = await ensureDirectory(home, path.join(codeium, 'windsurf'), create);
@@ -286,10 +287,6 @@ function identityOf(stat: Stats): Identity {
 }
 function sameIdentity(a: Identity, b: Identity): boolean {
   return a.dev === b.dev && a.ino === b.ino && a.mode === b.mode && a.size === b.size && a.mtimeMs === b.mtimeMs;
-}
-function samePath(a: string, b: string): boolean {
-  const normalize = (value: string) => path.resolve(value).replace(/[\\/]+$/, '');
-  return process.platform === 'win32' ? normalize(a).toLowerCase() === normalize(b).toLowerCase() : normalize(a) === normalize(b);
 }
 function isWithin(root: string, target: string): boolean {
   const relative = path.relative(root, target);

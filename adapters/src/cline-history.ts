@@ -4,6 +4,7 @@ import { lstat, mkdir, open, readdir, realpath, rename, unlink, type FileHandle 
 import os from 'node:os';
 import path from 'node:path';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 
 const stateSchema = 'threadforge.cline-history-cursor.v1';
 const defaultMaxSessions = 1_000;
@@ -232,7 +233,7 @@ async function canonicalOptionalDirectory(value: string, label: string): Promise
   if (!info) return undefined;
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error(`${label} must be a real directory`);
   const canonical = await realpath(absolute).catch(() => '');
-  if (!canonical || canonical !== absolute) throw new Error(`${label} must not traverse symbolic links`);
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, absolute)) throw new Error(`${label} must not traverse symbolic links`);
   return canonical;
 }
 

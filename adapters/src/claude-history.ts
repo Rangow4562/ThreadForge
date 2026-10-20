@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 
 const stateVersion = 1;
 const stateFileName = 'claude-sessions.v1.json';
@@ -154,7 +155,7 @@ async function resolveProjectsDir(value?: string): Promise<string> {
   if (!dirInfo) return path.resolve(projectsDir);
   if (!dirInfo.isDirectory() || dirInfo.isSymbolicLink()) throw new Error('Claude projects path must be a real directory');
   const canonical = await realpath(projectsDir).catch(() => { throw new Error('Claude projects directory could not be resolved'); });
-  if (canonical !== path.resolve(projectsDir)) throw new Error('Claude projects directory must not traverse symbolic links');
+  if (!await isSameRealPathWithoutLinks(canonical, projectsDir)) throw new Error('Claude projects directory must not traverse symbolic links');
   return canonical;
 }
 

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readFile, realpath, unlink } from 'node:fs/promises';
 import path from 'node:path';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 import { loadReviewedPortableSkillExport } from './cline-skill-config.ts';
 
 const maxCommandBytes = 256 << 10;
@@ -126,7 +127,8 @@ async function ensureCommandDirectory(root: string): Promise<string> {
     try { await mkdir(current, { mode: 0o755 }); }
     catch (error) { if (!isCode(error, 'EEXIST')) throw new Error('unable to create the Qoder project commands directory'); }
     const info = await lstat(current).catch(() => null);
-    if (!info?.isDirectory() || info.isSymbolicLink() || await realpath(current).catch(() => '') !== current) {
+    const canonical = await realpath(current).catch(() => '');
+    if (!info?.isDirectory() || info.isSymbolicLink() || !canonical || !await isSameRealPathWithoutLinks(canonical, current)) {
       throw new Error('Qoder project commands path contains a non-directory or symbolic link');
     }
   }
@@ -139,7 +141,8 @@ async function existingCommandDirectory(root: string): Promise<string | undefine
     current = path.join(current, segment);
     const info = await lstat(current).catch((error: unknown) => isCode(error, 'ENOENT') ? null : Promise.reject(error));
     if (!info) return undefined;
-    if (!info.isDirectory() || info.isSymbolicLink() || await realpath(current).catch(() => '') !== current) {
+    const canonical = await realpath(current).catch(() => '');
+    if (!info.isDirectory() || info.isSymbolicLink() || !canonical || !await isSameRealPathWithoutLinks(canonical, current)) {
       throw new Error('Qoder project commands path contains a non-directory or symbolic link');
     }
   }

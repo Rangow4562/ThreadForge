@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { emitEvents, type ThreadforgeEvent } from './emit.ts';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 
 const supportedSchemaVersion = 17;
 const stateVersion = 1;
@@ -85,28 +86,29 @@ export function resolveGooseHistoryDatabasePath(options: Pick<GooseHistoryOption
   const env = options.env ?? process.env;
   const homeDir = options.homeDir ?? os.homedir();
   const platform = options.platform ?? process.platform;
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const configuredRoot = env.GOOSE_PATH_ROOT?.trim();
   if (configuredRoot) {
-    if (!path.isAbsolute(configuredRoot)) throw new Error('GOOSE_PATH_ROOT must be absolute');
-    return path.join(configuredRoot, 'data', 'sessions', 'sessions.db');
+    if (!pathApi.isAbsolute(configuredRoot)) throw new Error('GOOSE_PATH_ROOT must be absolute');
+    return pathApi.join(configuredRoot, 'data', 'sessions', 'sessions.db');
   }
 
   if (platform === 'win32') {
     const localAppData = env.LOCALAPPDATA?.trim();
-    const base = localAppData && path.isAbsolute(localAppData)
+    const base = localAppData && pathApi.isAbsolute(localAppData)
       ? localAppData
-      : path.join(homeDir, 'AppData', 'Local');
-    return path.join(base, 'Block', 'goose', 'data', 'sessions', 'sessions.db');
+      : pathApi.join(homeDir, 'AppData', 'Local');
+    return pathApi.join(base, 'Block', 'goose', 'data', 'sessions', 'sessions.db');
   }
   if (platform === 'darwin') {
-    return path.join(homeDir, 'Library', 'Application Support', 'Block', 'goose', 'data', 'sessions', 'sessions.db');
+    return pathApi.join(homeDir, 'Library', 'Application Support', 'Block', 'goose', 'data', 'sessions', 'sessions.db');
   }
   if (platform === 'linux') {
     const xdgDataHome = env.XDG_DATA_HOME?.trim();
-    const base = xdgDataHome && path.isAbsolute(xdgDataHome)
+    const base = xdgDataHome && pathApi.isAbsolute(xdgDataHome)
       ? xdgDataHome
-      : path.join(homeDir, '.local', 'share');
-    return path.join(base, 'goose', 'sessions', 'sessions.db');
+      : pathApi.join(homeDir, '.local', 'share');
+    return pathApi.join(base, 'goose', 'sessions', 'sessions.db');
   }
   throw new Error('Goose history default path is unsupported on this platform; supply --db-path');
 }
@@ -446,7 +448,7 @@ function messageDigest(message: GooseMessage): string {
 
 async function openDatabase(databasePath: string, before: Stats) {
   const canonical = await realpath(databasePath).catch(() => '');
-  if (!canonical || !samePath(canonical, path.resolve(databasePath))) {
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, databasePath)) {
     throw new Error('Goose database path cannot traverse symbolic links');
   }
   const { DatabaseSync: SQLiteDatabase } = await import('node:sqlite');
@@ -538,7 +540,7 @@ async function writeState(statePath: string, state: CursorState): Promise<void> 
   const existing = await inspectOptionalRegularFile(statePath, maxStateBytes);
   if (existing) {
     const canonical = await realpath(statePath).catch(() => '');
-    if (!canonical || !samePath(canonical, path.resolve(statePath))) throw new Error('Goose history cursor path cannot traverse symbolic links');
+    if (!canonical || !await isSameRealPathWithoutLinks(canonical, statePath)) throw new Error('Goose history cursor path cannot traverse symbolic links');
   }
   const tempPath = `${statePath}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
   const handle = await open(tempPath, 'wx', 0o600);

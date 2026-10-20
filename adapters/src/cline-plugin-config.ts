@@ -4,6 +4,7 @@ import { lstat, mkdir, open, readFile, realpath, rename, unlink, type FileHandle
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 
 export type ClinePluginScope = 'user' | 'project';
 export type ClinePluginChange = 'installed' | 'updated' | 'unchanged' | 'removed' | 'absent';
@@ -195,7 +196,7 @@ async function walkDirectory(input: string, create: boolean, mode: number): Prom
     if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Cline plugin path must contain only real directories');
   }
   const canonical = await realpath(absolute).catch(() => '');
-  if (!canonical || canonical !== absolute) throw new Error('Cline plugin path must not traverse symbolic links');
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, absolute)) throw new Error('Cline plugin path must not traverse symbolic links');
   return canonical;
 }
 

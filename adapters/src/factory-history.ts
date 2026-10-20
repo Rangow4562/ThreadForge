@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 
 const stateVersion = 1;
 const stateFileName = 'factory-sessions.v1.json';
@@ -147,7 +148,7 @@ async function resolveSessionsDir(value?: string): Promise<string> {
   if (!info) return path.resolve(sessionsDir);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Factory sessions path must be a real directory');
   const canonical = await realpath(sessionsDir).catch(() => { throw new Error('Factory sessions directory could not be resolved'); });
-  if (canonical !== path.resolve(sessionsDir)) throw new Error('Factory sessions directory must not traverse symbolic links');
+  if (!await isSameRealPathWithoutLinks(canonical, sessionsDir)) throw new Error('Factory sessions directory must not traverse symbolic links');
   return canonical;
 }
 
@@ -207,7 +208,7 @@ async function readSessionFile(file: FactoryFile, root: string): Promise<Buffer>
   if (!before || !before.isFile() || before.isSymbolicLink() || before.size > maxFileBytes) throw new Error('Factory session is not a bounded regular file');
   if (before.size !== file.size || before.mtimeMs !== file.mtimeMs) throw new Error('Factory session changed after enumeration');
   const canonical = await realpath(file.path).catch(() => '');
-  if (!canonical || canonical !== file.path || !isWithin(root, canonical)) throw new Error('Factory session path escaped the sessions directory');
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, file.path) || !isWithin(root, canonical)) throw new Error('Factory session path escaped the sessions directory');
   let handle;
   try {
     handle = await open(file.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -230,7 +231,7 @@ async function readSettingsFile(file: FactoryFile, root: string): Promise<Factor
   if (!before) return undefined;
   if (!before.isFile() || before.isSymbolicLink() || before.size > maxSettingsBytes) throw new Error('Factory settings must be a bounded regular file');
   const canonical = await realpath(file.settingsPath).catch(() => '');
-  if (!canonical || canonical !== path.resolve(file.settingsPath) || !isWithin(root, canonical) || path.dirname(canonical) !== path.dirname(file.path)) {
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, file.settingsPath) || !isWithin(root, canonical) || path.dirname(canonical) !== path.dirname(file.path)) {
     throw new Error('Factory settings path escaped the sessions directory');
   }
   let handle;

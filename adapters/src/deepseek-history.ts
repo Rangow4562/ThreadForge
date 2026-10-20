@@ -3,6 +3,7 @@ import { constants, type Stats } from 'node:fs';
 import { lstat, mkdir, open, readdir, realpath, rename, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 import { constants as zstdConstants, createZstdDecompress } from 'node:zlib';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
 
@@ -231,7 +232,7 @@ async function resolveSessionsDir(options: Pick<DeepSeekHistoryOptions, 'dshHome
   if (!info) return root;
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('DeepSeek sessions path must be a real directory');
   const canonical = await realpath(root).catch(() => '');
-  if (!canonical || !samePath(canonical, root)) throw new Error('DeepSeek sessions path must not traverse symbolic links');
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, root)) throw new Error('DeepSeek sessions path must not traverse symbolic links');
   return canonical;
 }
 
@@ -263,7 +264,7 @@ async function listSessionFiles(root: string, maximum: number): Promise<{ files:
       if (!info.isFile() || !isSessionFileName(entry.name)) continue;
       if (info.size > maxCompressedBytes) { oversizedSkipped++; continue; }
       const canonical = await realpath(candidatePath).catch(() => '');
-      if (!canonical || !isWithin(root, canonical) || !samePath(canonical, candidatePath)) { symlinksSkipped++; continue; }
+      if (!canonical || !isWithin(root, canonical) || !await isSameRealPathWithoutLinks(canonical, candidatePath)) { symlinksSkipped++; continue; }
       const key = path.relative(root, canonical).split(path.sep).join('/');
       files.push({ key, absolutePath: canonical, compressed: entry.name.endsWith('.zstd'), size: info.size, mtimeMs: info.mtimeMs,
         fingerprint: sha256(JSON.stringify([info.size, info.mtimeMs, info.ino, info.dev, entry.name.endsWith('.zstd')])) });
@@ -291,7 +292,7 @@ async function readSession(file: SessionFile, root: string): Promise<ParsedSessi
     throw new Error('DeepSeek session changed after enumeration');
   }
   const canonical = await realpath(file.absolutePath).catch(() => '');
-  if (!canonical || !samePath(canonical, file.absolutePath) || !isWithin(root, canonical)) throw new Error('DeepSeek session escaped its source directory');
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, file.absolutePath) || !isWithin(root, canonical)) throw new Error('DeepSeek session escaped its source directory');
   let handle;
   try {
     handle = await open(file.absolutePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -302,7 +303,7 @@ async function readSession(file: SessionFile, root: string): Promise<ParsedSessi
     const afterPath = await lstat(file.absolutePath).catch(() => null);
     const afterCanonical = await realpath(file.absolutePath).catch(() => '');
     if (bytes.byteLength > maxCompressedBytes || !sameFile(opened, after) || !sameFile(opened, afterPath) ||
-        !afterCanonical || !samePath(afterCanonical, canonical) || !isWithin(root, afterCanonical)) throw new Error('DeepSeek session changed during read');
+        !afterCanonical || !await isSameRealPathWithoutLinks(afterCanonical, file.absolutePath) || !isWithin(root, afterCanonical)) throw new Error('DeepSeek session changed during read');
     const decoded = file.compressed ? await decompressZstd(bytes) : bytes;
     if (decoded.byteLength > maxUncompressedBytes) throw new Error('DeepSeek session exceeds the expanded-size limit');
     return parseSessionRecords(decoded);

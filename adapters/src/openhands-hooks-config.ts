@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { lstat, mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 
 export const openHandsManagedMarker = '--threadforge-openhands-hook=v1';
 export const openHandsHookEvents = ['session_start', 'user_prompt_submit', 'pre_tool_use', 'post_tool_use', 'stop', 'session_end'] as const;
@@ -154,7 +155,7 @@ async function mutateOpenHandsConfig(projectRoot: string, create: boolean, mutat
   const rootInfo = await lstat(resolved).catch(() => null);
   if (!rootInfo || !rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error('project root must exist and be a real directory');
   const canonical = await realpath(resolved).catch(() => '');
-  if (!canonical || !samePath(canonical, resolved)) throw new Error('project root must not traverse symbolic links');
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, resolved)) throw new Error('project root must not traverse symbolic links');
   const configDir = path.join(canonical, '.openhands');
   let dirInfo = await lstat(configDir).catch((error: unknown) => isCode(error, 'ENOENT') ? null : Promise.reject(error));
   if (!dirInfo && create) {
@@ -240,7 +241,6 @@ function canonicalize(value: unknown): unknown {
 function isRecord(value: unknown): value is JsonObject { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 function isCode(error: unknown, code: string): boolean { return typeof error === 'object' && error !== null && 'code' in error && error.code === code; }
 function sameFile(left: Stats, right: Stats): boolean { return left.dev === right.dev && left.ino === right.ino; }
-function samePath(left: string, right: string): boolean { return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right; }
 function looksCredentialLike(value: string): boolean {
   return /\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|secret|authorization)\b\s*[:=]\s*\S+/i.test(value) ||
     /\bBearer\s+[A-Za-z0-9._~+/-]+=*/i.test(value) || /\b(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})\b/.test(value);

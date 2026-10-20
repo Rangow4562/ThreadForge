@@ -3,6 +3,7 @@ import type { Stats } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 import type { DatabaseSync } from 'node:sqlite';
 
 type JsonObject = Record<string, unknown>;
@@ -49,7 +50,7 @@ export async function scanCursorComposers(options: CursorComposerOptions = {}): 
     throw new Error('Cursor global database must be a regular non-symlink file');
   }
   const canonical = await realpath(databasePath).catch(() => '');
-  if (!canonical || canonical !== path.resolve(databasePath)) throw new Error('Cursor global database path cannot traverse symbolic links');
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, databasePath)) throw new Error('Cursor global database path cannot traverse symbolic links');
 
   let database: DatabaseSync | undefined;
   try {

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
+import { isSameRealPathWithoutLinks } from './path-safety.ts';
 
 const cursorVersion = 1;
 const cursorName = 'fx-session-cursor.v1.json';
@@ -203,7 +204,7 @@ async function resolveSessionsDir(value?: string): Promise<string> {
   if (!info) return path.resolve(directory);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('fx sessions path must be a real directory');
   const canonical = await realpath(directory).catch(() => { throw new Error('fx sessions directory could not be resolved'); });
-  if (canonical !== path.resolve(directory)) throw new Error('fx sessions directory must not traverse symbolic links');
+  if (!await isSameRealPathWithoutLinks(canonical, directory)) throw new Error('fx sessions directory must not traverse symbolic links');
   return canonical;
 }
 
@@ -233,7 +234,7 @@ async function listSessions(
     if (!logInfo.isFile()) continue;
     if (logInfo.size > maxLogBytes) { oversizedSkipped++; continue; }
     const canonical = await realpath(logPath).catch(() => '');
-    if (!canonical || canonical !== path.resolve(logPath) || !isWithin(root, canonical)) { symlinksSkipped++; continue; }
+    if (!canonical || !await isSameRealPathWithoutLinks(canonical, logPath) || !isWithin(root, canonical)) { symlinksSkipped++; continue; }
     files.push({
       id: entry.name, dir, logPath: canonical, manifestPath: path.join(dir, 'session.json'),
       sourceSha256: sha256(entry.name), size: logInfo.size, mtimeMs: logInfo.mtimeMs,
@@ -267,7 +268,7 @@ async function readBoundedRegularFile(
   if (!before) return undefined;
   if (!before.isFile() || before.isSymbolicLink() || before.size > maximum) throw new Error(`${label} must be a bounded regular file`);
   const canonical = await realpath(filePath).catch(() => '');
-  if (!canonical || canonical !== path.resolve(filePath) || !isWithin(root, canonical)) throw new Error(`${label} escaped its source directory`);
+  if (!canonical || !await isSameRealPathWithoutLinks(canonical, filePath) || !isWithin(root, canonical)) throw new Error(`${label} escaped its source directory`);
   let handle;
   try {
     handle = await open(filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	beacon "github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/threadforge-ai/threadforge/internal/appdata"
 	"github.com/threadforge-ai/threadforge/internal/procedurefiles"
 	"github.com/threadforge-ai/threadforge/internal/sourcefingerprint"
@@ -3511,18 +3512,32 @@ func TestMCPPrintConfigEmitsEscapedCodexTOMLWithoutChangingHostConfiguration(t *
 	if code != 0 {
 		t.Fatalf("TOML print-config code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
 	}
-	quotedRoot, err := json.Marshal(root)
-	if err != nil {
-		t.Fatal(err)
+	var config map[string]any
+	if err := toml.Unmarshal(out.Bytes(), &config); err != nil {
+		t.Fatalf("Codex snippet is not valid TOML: %v\n%s", err, out.String())
 	}
-	for _, want := range []string{
-		"[mcp_servers.threadforge]",
-		`command = "C:\\Tools\\threadforge.exe"`,
-		`"mcp", "serve", "--project-root", ` + string(quotedRoot) + `, "--threadforge-managed-mcp=v1"`,
-	} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("Codex TOML snippet missing %q:\n%s", want, out.String())
-		}
+	servers, ok := config["mcp_servers"].(map[string]any)
+	if !ok {
+		t.Fatalf("Codex TOML has no MCP servers: %#v", config)
+	}
+	threadforge, ok := servers["threadforge"].(map[string]any)
+	if !ok || threadforge["command"] != `C:\Tools\threadforge.exe` {
+		t.Fatalf("unexpected Codex Threadforge server entry: %#v", servers["threadforge"])
+	}
+	args, ok := threadforge["args"].([]any)
+	if !ok || len(args) != 5 || args[0] != "mcp" || args[1] != "serve" ||
+		args[2] != "--project-root" || args[4] != "--threadforge-managed-mcp=v1" {
+		t.Fatalf("unexpected Codex Threadforge arguments: %#v", threadforge["args"])
+	}
+	actualRoot, ok := args[3].(string)
+	if !ok {
+		t.Fatalf("Codex project-root argument is not a string: %#v", args[3])
+	}
+	actualInfo, actualErr := os.Stat(actualRoot)
+	wantInfo, wantErr := os.Stat(root)
+	if actualErr != nil || wantErr != nil || !os.SameFile(actualInfo, wantInfo) {
+		t.Fatalf("Codex project root %q does not resolve to requested root %q (actual err=%v, expected err=%v)",
+			actualRoot, root, actualErr, wantErr)
 	}
 	after, err := os.ReadFile(configPath)
 	if err != nil || string(after) != string(existing) {

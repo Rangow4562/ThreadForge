@@ -45,6 +45,24 @@ jobs:
           cache: npm
           cache-dependency-path: adapters/package-lock.json
 
+      - name: Use a canonical temporary directory for strict filesystem tests
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          temp_root="$(cd "$RUNNER_TEMP" && pwd -P)/threadforge-tmp"
+          mkdir -p "$temp_root"
+          chmod 700 "$temp_root"
+          if [ -L "$temp_root" ]; then
+            echo "Threadforge temporary directory must not be a symlink" >&2
+            exit 1
+          fi
+          printf 'TMPDIR=%s\n' "$temp_root" >> "$GITHUB_ENV"
+
+      - name: Install Python runtime dependencies used by Go protocol tests and Python suites
+        shell: bash
+        working-directory: python
+        run: python -m pip install -e '.[test,decisions,workspace]'
+
       - name: Run Threadforge Go tests and vet
         shell: bash
         run: |
@@ -55,11 +73,6 @@ jobs:
         shell: bash
         working-directory: third_party/agent-beacon/pkg/asymptoteobserve
         run: go test ./...
-
-      - name: Install Python test and workspace runtime dependencies
-        shell: bash
-        working-directory: python
-        run: python -m pip install -e '.[test,decisions,workspace]'
 
       - name: Run Python tests, compile check, and lint
         shell: bash

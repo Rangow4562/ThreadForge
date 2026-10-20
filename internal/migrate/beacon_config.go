@@ -3,6 +3,7 @@ package migrate
 import (
 	"encoding/json"
 	"errors"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -311,7 +312,7 @@ func isBeaconMuseManagedHooksPath(relative, sourceRoot string) bool {
 		strings.Contains(lower, "/muse/beacon-endpoint-hooks.json") {
 		return true
 	}
-	return relative == filepath.Base(relative) && strings.EqualFold(filepath.Base(filepath.Clean(sourceRoot)), "muse")
+	return relative == filepath.Base(relative) && strings.EqualFold(path.Base(strings.ReplaceAll(sourceRoot, `\`, "/")), "muse")
 }
 
 // isBeaconMuseSettingsPath accepts Muse's user settings file only in its Muse config directory.
@@ -323,7 +324,7 @@ func isBeaconMuseSettingsPath(relative, sourceRoot string) bool {
 	if strings.Contains(lower, "/.config/muse/settings.json") || strings.Contains(lower, "/muse/settings.json") {
 		return true
 	}
-	return relative == filepath.Base(relative) && strings.EqualFold(filepath.Base(filepath.Clean(sourceRoot)), "muse")
+	return relative == filepath.Base(relative) && strings.EqualFold(path.Base(strings.ReplaceAll(sourceRoot, `\`, "/")), "muse")
 }
 
 func normalizeBeaconEndpointConfig(relative, sourceRoot string, value any) (json.RawMessage, error) {

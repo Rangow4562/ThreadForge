@@ -1,6 +1,7 @@
 package security
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -17,7 +18,7 @@ const BeaconThreatRulePackV1 = "beacon-threat-rules-v1"
 
 const (
 	builtinBeaconRuleCount  = 75
-	builtinBeaconRuleSHA256 = "fc5b9df22a8531200defb6ecabd3f10629d4730494c2ae2880a3488a17c18f21"
+	builtinBeaconRuleSHA256 = "97ec19dda6e42d23de3a76e3f3a1560ae782cb04ef5b003eec04fb67bc347770"
 )
 
 // The full Beacon corpus is an opt-in data pack. Scans continue to use the
@@ -47,6 +48,7 @@ func InstallBuiltinRulePack(storeDir, packID string, force bool) ([]string, erro
 		if err != nil {
 			return nil, err
 		}
+		data = canonicalBuiltinRuleContent(data)
 		relative := filepath.ToSlash(name)
 		if !safeRuleRelative(relative) {
 			return nil, fmt.Errorf("built-in threat-rule pack %q contains an unsafe path", packID)
@@ -91,13 +93,21 @@ func builtinRulePaths(packID string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		data = canonicalBuiltinRuleContent(data)
 		_, _ = manifest.Write([]byte(name))
 		_, _ = manifest.Write([]byte{0})
 		_, _ = manifest.Write(data)
 		_, _ = manifest.Write([]byte{0})
 	}
 	if got := hex.EncodeToString(manifest.Sum(nil)); got != builtinBeaconRuleSHA256 {
-		return nil, fmt.Errorf("built-in threat-rule pack %q does not match its pinned content digest", packID)
+		return nil, fmt.Errorf("built-in threat-rule pack %q content digest %s does not match its pinned digest", packID, got)
 	}
 	return paths, nil
+}
+
+// Git may check out embedded YAML assets with CRLF on Windows and LF on Unix.
+// Pin and install their canonical LF representation so the pack digest and
+// installed bytes are identical on every supported platform.
+func canonicalBuiltinRuleContent(data []byte) []byte {
+	return bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 }

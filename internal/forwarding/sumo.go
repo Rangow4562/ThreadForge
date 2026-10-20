@@ -124,7 +124,7 @@ else
   echo "sha256sum or shasum is required to verify the synthetic sample; no request was sent." >&2
   exit 2
 fi
-sample_digest=${sample_digest%% *}
+sample_digest=${sample_digest%%%% *}
 if [ "$sample_digest" != "%s" ]; then
   echo "Synthetic sample digest mismatch; no request was sent." >&2
   exit 2

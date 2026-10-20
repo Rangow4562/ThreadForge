@@ -1,0 +1,15 @@
+{
+  "name": "@threadforge/openclaw-observer",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "Local-only, non-authorizing OpenClaw telemetry adapter for Threadforge",
+  "openclaw": {
+    "extensions": ["./index.js"],
+    "runtimeExtensions": ["./index.js"]
+  },
+  "exports": {
+    ".": "./index.js"
+  }
+}

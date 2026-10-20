@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/native-session-events-v1.schema.json",
+  "title": "Threadforge Native Session Events v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "session", "events", "truncated"],
+  "properties": {
+    "schema_version": {"const": "threadforge.native-session-events.v1"},
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harness", "id", "updated_at"],
+      "properties": {
+        "harness": {"type": "string", "minLength": 1, "maxLength": 64},
+        "id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "title": {"type": "string", "maxLength": 4096},
+        "directory": {"type": "string", "maxLength": 4096},
+        "branch": {"type": "string", "maxLength": 1024},
+        "store": {"type": "string", "maxLength": 64},
+        "key": {"type": "string", "maxLength": 1024},
+        "updated_at": {"type": "string", "format": "date-time"},
+        "subagent": {"type": "boolean"},
+        "parent_id": {"type": "string", "maxLength": 256}
+      }
+    },
+    "events": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {"type": "object"}
+    },
+    "truncated": {"type": "boolean"}
+  }
+}

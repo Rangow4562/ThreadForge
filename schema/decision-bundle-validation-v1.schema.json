@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-bundle-validation-v1.schema.json",
+  "title": "Threadforge native AnyJev artifact-bundle validation result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "model", "artifact_count", "head_count", "adaptation_count", "observation_question_count", "observation_state_count", "content_sha256", "human_review_required", "activation_allowed", "execution_authorized", "model_environment_verified", "cutover_evidence_eligible"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-bundle-validation.v1" },
+    "status": { "const": "valid" },
+    "model": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "artifact_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+    "head_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+    "adaptation_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+    "observation_question_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+    "observation_state_count": { "type": "integer", "minimum": 0, "maximum": 4096 },
+    "content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "human_review_required": { "const": true },
+    "activation_allowed": { "const": false },
+    "execution_authorized": { "const": false },
+    "model_environment_verified": { "const": false },
+    "cutover_evidence_eligible": { "const": false }
+  }
+}

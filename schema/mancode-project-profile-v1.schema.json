@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-project-profile-v1.schema.json",
+  "title": "Threadforge Mancode project profile projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authority",
+    "human_review_required",
+    "execution_authorized",
+    "project_kind",
+    "language_count",
+    "framework_count",
+    "source_root_count",
+    "manifest_count",
+    "validation_count",
+    "ui_assets",
+    "browser_automation",
+    "confidence"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-project-profile.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "project_kind": { "enum": ["backend", "web", "mobile", "desktop", "cli", "library", "data", "mixed", "unknown"] },
+    "language_count": { "type": "integer", "minimum": 0, "maximum": 128 },
+    "framework_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+    "source_root_count": { "type": "integer", "minimum": 0, "maximum": 128 },
+    "manifest_count": { "type": "integer", "minimum": 0, "maximum": 64 },
+    "validation_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+    "ui_assets": { "enum": ["none", "detected"] },
+    "browser_automation": { "enum": ["available", "unavailable", "unknown"] },
+    "confidence": { "enum": ["high", "medium", "low"] }
+  }
+}

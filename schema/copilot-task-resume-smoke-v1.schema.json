@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/copilot-task-resume-smoke-v1.schema.json",
+  "title": "Threadforge installed GitHub Copilot task-resume smoke result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "host_cli_version", "provider", "tool", "tool_call_count",
+    "tool_result_observed", "task_context_content_retained_in_report", "advisory_result_markers_verified",
+    "requirements_not_finalized_warning_verified", "action_ready", "guidance_only", "execution_authorized",
+    "available_tools_restricted_to_task_resume", "provider_requests", "auxiliary_provider_requests", "real_model_invocations"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.copilot-task-resume-smoke.v1" },
+    "status": { "const": "verified" },
+    "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "provider": { "const": "deterministic-loopback-fixture" },
+    "tool": { "const": "threadforge_task_resume_context" },
+    "tool_call_count": { "const": 1 },
+    "tool_result_observed": { "const": true },
+    "task_context_content_retained_in_report": { "const": false },
+    "advisory_result_markers_verified": { "const": true },
+    "requirements_not_finalized_warning_verified": { "const": true },
+    "action_ready": { "const": false },
+    "guidance_only": { "const": true },
+    "execution_authorized": { "const": false },
+    "available_tools_restricted_to_task_resume": { "const": true },
+    "provider_requests": { "type": "integer", "minimum": 2, "maximum": 20 },
+    "auxiliary_provider_requests": { "type": "integer", "minimum": 0, "maximum": 10 },
+    "real_model_invocations": { "const": 0 }
+  }
+}

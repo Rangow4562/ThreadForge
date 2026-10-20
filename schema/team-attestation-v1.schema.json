@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/team-attestation-v1.schema.json",
+  "title": "Threadforge team procedure attestation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "subject", "key_id", "action", "project_id",
+    "procedure_id", "revision", "graph_sha256", "privacy_reviewed",
+    "issued_at", "signature"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.team-attestation.v1" },
+    "subject": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$" },
+    "key_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "action": { "enum": ["publish", "supersede"] },
+    "project_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$" },
+    "procedure_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "graph_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "privacy_reviewed": { "const": true },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "contentEncoding": "base64", "minLength": 88, "maxLength": 88 }
+  }
+}

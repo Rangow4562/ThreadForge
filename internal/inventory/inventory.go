@@ -1,0 +1,1223 @@
+// Adapted from Agent Beacon's CLI inventory package; see LICENSE.agent-beacon.
+// Threadforge changes add bounded reads, symlink refusal, and system-scope opt-in.
+package inventory
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/pelletier/go-toml/v2"
+	"gopkg.in/yaml.v3"
+
+	hooks "github.com/threadforge-ai/threadforge/internal/inventory/hookpaths"
+)
+
+const (
+	formatJSON         = "json"
+	formatTOML         = "toml"
+	formatYAML         = "yaml"
+	formatMetadataOnly = "metadata_only"
+
+	KindNativeConfig  = "native_config"
+	KindHookConfig    = "hook_config"
+	KindPlugin        = "plugin"
+	KindProfile       = "profile"
+	KindManagedConfig = "managed_config"
+
+	TransportStdio     = "stdio"
+	TransportHTTP      = "http"
+	TransportSSE       = "sse"
+	TransportWebSocket = "websocket"
+	TransportUnknown   = "unknown"
+
+	ScopeUser      = "user"
+	ScopeProject   = "project"
+	ScopeManaged   = "managed"
+	ScopeWorkspace = "workspace"
+	ScopeSystem    = "system"
+	ScopeUnknown   = "unknown"
+
+	// fxRuntime is the runtime key inventory files fx's configuration under. It is the same
+	// canonical harness name the collector writes on every fx event, so an inventory row and a log
+	// line describe one runtime rather than two.
+	fxRuntime = "vercel_fx"
+
+	StatusOK          = "ok"
+	StatusPartial     = "partial"
+	StatusParseFailed = "parse_failed"
+	StatusNotFound    = "not_found"
+	StatusUnreadable  = "unreadable"
+	StatusUnsupported = "unsupported"
+
+	RedactionFull = "full"
+)
+
+type Options struct {
+	HomeDir    string
+	WorkingDir string
+	// SkipProjectScope leaves project-scoped config out of the scan and never falls back to the
+	// process working directory. The scheduled heartbeat sets it: a job under launchd or systemd
+	// has no meaningful cwd (it is `/`), so project scope belongs to `beacon endpoint inventory`.
+	SkipProjectScope bool
+	Runtimes         []string
+	Now              func() time.Time
+	// IncludeContents opts into capturing redacted, size-limited raw bodies of
+	// config, hook, and skill files plus full (redacted) MCP server definitions.
+	// When false (the default) inventory stays metadata- and hash-only.
+	IncludeContents bool
+	// MaxContentBytes caps retained content per file. Zero uses DefaultMaxContentBytes.
+	MaxContentBytes int
+	// IncludeSystem opts into candidates outside the current home and working directory.
+	IncludeSystem bool
+}
+
+type Result struct {
+	GeneratedAt string      `json:"generated_at"`
+	Configs     []Config    `json:"configs"`
+	MCPServers  []MCPServer `json:"mcp_servers"`
+	Skills      []Skill     `json:"skills"`
+	UserScope   UserScope   `json:"user_scope"`
+}
+
+type UserScope struct {
+	Mode        string `json:"mode"`
+	HomePath    string `json:"home_path,omitempty"`
+	HomeHash    string `json:"home_hash,omitempty"`
+	WorkingDir  string `json:"working_dir,omitempty"`
+	WorkDirHash string `json:"working_dir_hash,omitempty"`
+}
+
+type Config struct {
+	Runtime      string `json:"runtime"`
+	Path         string `json:"path,omitempty"`
+	PathHash     string `json:"path_hash,omitempty"`
+	Scope        string `json:"scope"`
+	ConfigKind   string `json:"config_kind"`
+	ParserMode   string `json:"parser_mode"`
+	Exists       bool   `json:"exists"`
+	Readable     bool   `json:"readable"`
+	Reason       string `json:"reason,omitempty"`
+	ParserStatus string `json:"parser_status"`
+	FileSHA256   string `json:"file_sha256,omitempty"`
+	ModifiedAt   string `json:"modified_at,omitempty"`
+	// Volatile is true for a runtime state file whose raw content changes on every session, so
+	// the snapshot digest ignores its file hash and mtime; parsed MCP servers still count.
+	Volatile       bool             `json:"volatile,omitempty"`
+	MCPServerCount int              `json:"mcp_server_count"`
+	BeaconManaged  bool             `json:"beacon_managed"`
+	ThreadforgeManaged bool         `json:"threadforge_managed,omitempty"`
+	Redaction      string           `json:"redaction"`
+	Content        *CapturedContent `json:"content,omitempty"`
+}
+
+type MCPServer struct {
+	Runtime         string                 `json:"runtime"`
+	ServerName      string                 `json:"server_name,omitempty"`
+	ServerNameHash  string                 `json:"server_name_hash,omitempty"`
+	SourcePath      string                 `json:"source_path,omitempty"`
+	SourcePathHash  string                 `json:"source_path_hash,omitempty"`
+	SourceScope     string                 `json:"source_scope"`
+	Transport       string                 `json:"transport"`
+	CommandPresent  bool                   `json:"command_present"`
+	CommandName     string                 `json:"command_name,omitempty"`
+	CommandNameHash string                 `json:"command_name_hash,omitempty"`
+	ArgsCount       int                    `json:"args_count,omitempty"`
+	URLPresent      bool                   `json:"url_present"`
+	EnvKeys         []string               `json:"env_keys,omitempty"`
+	EnvKeyCount     int                    `json:"env_key_count,omitempty"`
+	DefinitionHash  string                 `json:"definition_hash"`
+	ParserStatus    string                 `json:"parser_status"`
+	Redaction       string                 `json:"redaction"`
+	Definition      map[string]interface{} `json:"definition,omitempty"`
+}
+
+type candidate struct {
+	runtime string
+	path    string
+	scope   string
+	format  string
+	kind    string
+	// volatile marks a runtime state file the runtime itself rewrites constantly (session
+	// bookkeeping, timestamps, project lists). Its raw content hash is reported but left out of
+	// the snapshot digest; the MCP servers parsed from it carry their own definition hashes.
+	volatile bool
+}
+
+func Scan(opts Options) Result {
+	redaction := RedactionFull
+	home := opts.HomeDir
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	wd := opts.WorkingDir
+	if wd == "" && !opts.SkipProjectScope {
+		wd, _ = os.Getwd()
+	}
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+	result := Result{
+		GeneratedAt: now().UTC().Format(time.RFC3339),
+		UserScope: UserScope{
+			Mode:        "current_user",
+			HomePath:    valueForPath(home, redaction),
+			HomeHash:    hashString(home),
+			WorkingDir:  valueForPath(wd, redaction),
+			WorkDirHash: hashString(wd),
+		},
+	}
+	co := contentOptions{include: opts.IncludeContents, maxBytes: opts.MaxContentBytes}
+	items := withoutProjectScope(candidates(home, wd), wd)
+	if !opts.IncludeSystem {
+		items = withoutSystemScope(items)
+	}
+	for _, item := range filterCandidates(items, opts.Runtimes) {
+		config, servers := inspectCandidate(item, redaction, co)
+		result.Configs = append(result.Configs, config)
+		result.MCPServers = append(result.MCPServers, servers...)
+	}
+	result.Skills = scanSkills(home, wd, redaction, opts.Runtimes, co)
+	return result
+}
+
+func withoutSystemScope(items []candidate) []candidate {
+	out := items[:0]
+	for _, item := range items {
+		if item.scope != ScopeSystem && item.scope != ScopeManaged {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// withoutProjectScope drops project-scoped candidates when there is no working directory to
+// scope them to; otherwise they would resolve relative to the process cwd.
+func withoutProjectScope(items []candidate, wd string) []candidate {
+	if wd != "" {
+		return items
+	}
+	out := items[:0]
+	for _, item := range items {
+		if item.scope != ScopeProject {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func filterCandidates(items []candidate, runtimes []string) []candidate {
+	allowed := runtimeSet(runtimes)
+	if len(allowed) == 0 {
+		return items
+	}
+	out := make([]candidate, 0, len(items))
+	for _, item := range items {
+		if allowed[item.runtime] {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func runtimeSet(runtimes []string) map[string]bool {
+	if len(runtimes) == 0 {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, runtime := range runtimes {
+		runtime = strings.TrimSpace(runtime)
+		if runtime != "" {
+			out[runtime] = true
+		}
+	}
+	return out
+}
+
+func candidates(home, wd string) []candidate {
+	items := []candidate{}
+	items = append(items, claudeCandidates(home, wd)...)
+	items = append(items, codexCandidates(home, wd)...)
+	items = append(items, cursorCandidates(home, wd)...)
+	items = append(items, geminiCandidates(home)...)
+	items = append(items, antigravityCandidates(home, wd)...)
+	items = append(items, vscodeCandidates(home, wd)...)
+	items = append(items, factoryCandidates(home, wd)...)
+	items = append(items, copilotCandidates(home)...)
+	items = append(items, opencodeCandidates(home, wd)...)
+	items = append(items, clineCandidates(home, wd)...)
+	items = append(items, piCandidates(home, wd)...)
+	items = append(items, ompCandidates(home, wd)...)
+	items = append(items, openClawCandidates(home, wd)...)
+	items = append(items, primeCandidates(home, wd)...)
+	items = append(items, senpiCandidates(home, wd)...)
+	items = append(items, hermesCandidates(home)...)
+	items = append(items, devinCandidates(home, wd)...)
+	items = append(items, grokCandidates(home, wd)...)
+	items = append(items, qwenCandidates(home, wd)...)
+	items = append(items, museCandidates(home)...)
+	items = append(items, openHandsCandidates(home, wd)...)
+	items = append(items, kiroCandidates(home, wd)...)
+	items = append(items, dshCandidates(home)...)
+	items = append(items, kimiCandidates(home)...)
+	items = append(items, fxCandidates(home, wd)...)
+	seen := map[string]bool{}
+	out := make([]candidate, 0, len(items))
+	for _, item := range items {
+		key := item.runtime + "\x00" + item.path
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, item)
+	}
+	return out
+}
+
+func claudeCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "claude_code", path: filepath.Join(home, ".claude.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig, volatile: true},
+		{runtime: "claude_code", path: filepath.Join(home, ".claude", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
+		{runtime: "claude_code", path: filepath.Join(wd, ".claude", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindNativeConfig},
+		{runtime: "claude_code", path: "/Library/Application Support/ClaudeCode/managed-settings.json", scope: ScopeManaged, format: formatJSON, kind: KindManagedConfig},
+	}
+}
+
+func codexCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "codex_cli", path: filepath.Join(home, ".codex", "config.toml"), scope: ScopeUser, format: formatTOML, kind: KindNativeConfig},
+		{runtime: "codex_cli", path: filepath.Join(home, ".codex", "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "codex_cli", path: filepath.Join(wd, ".codex", "config.toml"), scope: ScopeProject, format: formatTOML, kind: KindNativeConfig},
+		{runtime: "codex_cli", path: filepath.Join(wd, ".codex", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+func cursorCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "cursor", path: filepath.Join(home, ".cursor", "mcp.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
+		{runtime: "cursor", path: filepath.Join(wd, ".cursor", "mcp.json"), scope: ScopeProject, format: formatJSON, kind: KindNativeConfig},
+		{runtime: "cursor", path: filepath.Join(home, ".cursor", "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "cursor", path: filepath.Join(wd, ".cursor", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+func geminiCandidates(home string) []candidate {
+	return []candidate{{runtime: "gemini_cli", path: filepath.Join(home, ".gemini", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig}}
+}
+
+func antigravityCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "antigravity_cli", path: filepath.Join(home, ".gemini", "config", "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "antigravity_cli", path: filepath.Join(wd, ".agents", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+func vscodeCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "vscode", path: vscodeUserSettingsPath(home), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
+		{runtime: "vscode", path: filepath.Join(wd, ".vscode", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindNativeConfig},
+		{runtime: "vscode", path: filepath.Join(home, ".copilot", "hooks", "beacon.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "vscode", path: filepath.Join(wd, ".github", "hooks", "beacon.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+func factoryCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "factory", path: shellProfilePath(home), scope: ScopeUser, format: formatMetadataOnly, kind: KindProfile},
+		{runtime: "factory", path: filepath.Join(home, ".factory", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "factory", path: filepath.Join(wd, ".factory", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+func copilotCandidates(home string) []candidate {
+	return []candidate{{runtime: "copilot_cli", path: shellProfilePath(home), scope: ScopeUser, format: formatMetadataOnly, kind: KindProfile}}
+}
+
+func opencodeCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "opencode", path: filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
+		{runtime: "opencode", path: filepath.Join(wd, ".opencode", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+	}
+}
+
+func clineCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "cline", path: filepath.Join(home, ".cline", "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
+		{runtime: "cline", path: filepath.Join(wd, ".cline", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+	}
+}
+
+// piCandidates covers both documented Pi extension locations.
+//
+// The paths come from the installer rather than being rebuilt here: hooks.PiExtensionPath is the
+// one definition of where Beacon writes, and a second copy of that path is how inventory comes to
+// report on a file the installer does not touch. A resolution error yields no candidate rather than
+// a relative path, which would otherwise make inventory report on whatever sits under the current
+// working directory.
+func piCandidates(home, wd string) []candidate {
+	items := []candidate{}
+	if home != "" {
+		items = append(items, candidate{
+			runtime: "pi_cli",
+			path:    filepath.Join(home, ".pi", "agent", "extensions", "beacon.ts"),
+			scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	if wd != "" {
+		items = append(items, candidate{
+			runtime: "pi_cli",
+			path:    filepath.Join(wd, ".pi", "extensions", "beacon.ts"),
+			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	return items
+}
+
+// ompCandidates covers both Oh My Pi extension locations.
+//
+// Like piCandidates, the paths come from the installer rather than being rebuilt here: a second
+// copy of the path is how inventory comes to report on a file the installer does not touch. That
+// matters more for Oh My Pi than for Pi, because its user path is not a fixed string -- a profile
+// or a PI_CODING_AGENT_DIR override moves it, and only the installer knows the rule.
+func ompCandidates(home, wd string) []candidate {
+	items := []candidate{}
+	if home != "" {
+		if path, err := hooks.OmpExtensionPathForHome(home, hooks.LevelUser); err == nil {
+			items = append(items, candidate{
+				runtime: "omp",
+				path:    path,
+				scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+			})
+		}
+	}
+	if wd != "" {
+		items = append(items, candidate{
+			runtime: "omp",
+			path:    filepath.Join(wd, ".omp", "extensions", "beacon.ts"),
+			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	return items
+}
+
+// openClawCandidates covers both OpenClaw plugin locations.
+//
+// The user path comes from the installer rather than being rebuilt here, for the reason
+// ompCandidates gives: OPENCLAW_STATE_DIR moves it, and only the installer knows the rule. The
+// project path is the literal OpenClaw joins onto its workspace, which has no override.
+//
+// The candidate is the plugin *entry*, not its directory, because the entry is what carries
+// Beacon's marker -- the manifests beside it are byte-identical for every install and identify
+// nothing.
+func openClawCandidates(home, wd string) []candidate {
+	items := []candidate{}
+	if home != "" {
+		if path, err := hooks.OpenClawEntryPathForHome(home, hooks.LevelUser); err == nil {
+			items = append(items, candidate{
+				runtime: "openclaw_gateway",
+				path:    path,
+				scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+			})
+		}
+	}
+	if wd != "" {
+		items = append(items, candidate{
+			runtime: "openclaw_gateway",
+			path:    filepath.Join(wd, ".openclaw", "extensions", "beacon-endpoint", "beacon.js"),
+			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	return items
+}
+
+// primeCandidates covers both Prime Agent extension locations.
+//
+// Like ompCandidates, the user path comes from the installer rather than being rebuilt here,
+// because it is not a fixed string: PRIME_AGENT_CODING_AGENT_DIR moves it, and only the installer
+// knows that rule. The project path keeps the `agent` segment the user path has -- Prime Agent
+// joins the same two-segment literal at both scopes, unlike Pi and Oh My Pi, whose project
+// directories drop it.
+func primeCandidates(home, wd string) []candidate {
+	items := []candidate{}
+	if home != "" {
+		if path, err := hooks.PrimeExtensionPathForHome(home, hooks.LevelUser); err == nil {
+			items = append(items, candidate{
+				runtime: "prime_agent",
+				path:    path,
+				scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+			})
+		}
+	}
+	if wd != "" {
+		items = append(items, candidate{
+			runtime: "prime_agent",
+			path:    filepath.Join(wd, ".prime", "agent", "extensions", "beacon.ts"),
+			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	return items
+}
+
+// senpiCandidates preserves the legacy Beacon OMO plugin locations and adds Threadforge's current
+// Senpi extension path. Their config roots differ, so inventory reports them as separate candidates.
+func senpiCandidates(home, wd string) []candidate {
+	items := []candidate{}
+	if home != "" {
+		if path, err := hooks.OmoExtensionPathForHome(home, hooks.LevelUser); err == nil {
+			items = append(items, candidate{
+				runtime: "omo_senpi",
+				path:    path,
+				scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+			})
+		}
+		if path, err := hooks.SenpiExtensionPathForHome(home, hooks.LevelUser); err == nil {
+			items = append(items, candidate{
+				runtime: "omo_senpi",
+				path:    path,
+				scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+			})
+		}
+	}
+	if wd != "" {
+		items = append(items, candidate{
+			runtime: "omo_senpi",
+			path:    filepath.Join(wd, ".omo", "agent", "extensions", "beacon.ts"),
+			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
+		})
+		items = append(items, candidate{
+			runtime: "omo_senpi",
+			path:    filepath.Join(wd, ".senpi", "extensions", "threadforge.ts"),
+			scope:   ScopeProject, format: formatMetadataOnly, kind: KindPlugin,
+		})
+	}
+	return items
+}
+
+func hermesCandidates(home string) []candidate {
+	return []candidate{{runtime: "hermes", path: filepath.Join(home, ".hermes", "config.yaml"), scope: ScopeUser, format: formatYAML, kind: KindNativeConfig}}
+}
+
+func devinCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "devin-cli", path: filepath.Join(home, ".config", "devin", "config.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
+		{runtime: "devin-cli", path: filepath.Join(wd, ".devin", "hooks.v1.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+		{runtime: "devin-desktop", path: filepath.Join(home, ".codeium", "windsurf", "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "devin-desktop", path: filepath.Join(wd, ".windsurf", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+// Qwen Code keeps hooks in the same settings.json as the rest of its configuration, so this is a
+// native config file that Beacon merges into rather than a file Beacon owns. That is why it is
+// classified KindHookConfig and detected by the hook command it contains rather than by a
+// Beacon-managed marker: there is no marker to write into a file the user also edits.
+func qwenCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "qwen_code", path: filepath.Join(home, ".qwen", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "qwen_code", path: filepath.Join(wd, ".qwen", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+// Muse Code is two files: the managed hooks file Beacon owns outright, and Muse's own settings.json,
+// which Beacon edits by exactly one key. Both are reported, because either one alone is a broken
+// install and Muse says nothing about either -- a hooks file nothing points at is never read, and a
+// managed_hooks_path with no file behind it registers nothing. An inventory that showed only the
+// file Beacon wrote would report a half-install as a whole one.
+//
+// User scope only, with no project entry: Muse's project .muse/hooks.json is ignored by the
+// shipping build, so the installer refuses that scope and there is no project path to find.
+//
+// XDG_CONFIG_HOME is read here rather than assumed away, for the same reason the installer reads
+// it: on a machine that sets it, ~/.config/muse is not where Muse looks, and an inventory scanning
+// the wrong directory reports "not installed" for a working install.
+func museCandidates(home string) []candidate {
+	dir := museConfigDir(home)
+	return []candidate{
+		{runtime: "muse_code", path: filepath.Join(dir, "beacon-endpoint-hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "muse_code", path: filepath.Join(dir, "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+// OpenHands keeps hooks in .openhands/hooks.json, which the user also edits, so this is a native
+// config file Beacon merges into rather than one it owns -- KindHookConfig, detected by the hook
+// command it contains, because there is no marker to write into a file with a closed schema.
+//
+// Both scopes are reported, and reporting both is the point rather than thoroughness. OpenHands
+// reads the first hooks.json it finds instead of merging the two, so a project file shadows the
+// user one entirely; an inventory that showed only the user file would report a working install
+// for a repository whose own hooks.json means Beacon's never runs.
+//
+// OH_PERSISTENCE_DIR is read here rather than assumed away, for the same reason the installer
+// reads it: on a machine that sets it, ~/.openhands is not where OpenHands looks, and an inventory
+// scanning the wrong directory reports "not installed" for a working install.
+func openHandsCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "openhands", path: filepath.Join(openHandsUserDir(home), "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "openhands", path: filepath.Join(wd, ".openhands", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+// Kiro keeps hooks as standalone files in a directory it scans, and Beacon writes one of its own
+// there -- so unlike OpenHands' hooks.json this is a file Beacon owns outright, and unlike Muse
+// Code's managed file there is no second file that has to point at it. One path per scope, and
+// finding it is the whole answer.
+//
+// Both scopes are reported, and here that is coverage rather than the shadowing problem OpenHands
+// has: Kiro merges hook files across scopes instead of taking the first it finds, so a user-scope
+// and a project-scope install are both live and an inventory showing one would understate what is
+// installed rather than overstate it.
+//
+// KIRO_HOME is read here rather than assumed away, for the same reason the installer reads it: on
+// a machine that sets it, ~/.kiro is not where Kiro looks, and an inventory scanning the wrong
+// directory reports "not installed" for a working install.
+func kiroCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "kiro", path: filepath.Join(kiroUserDir(home), "hooks", "beacon-endpoint.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "kiro", path: filepath.Join(wd, ".kiro", "hooks", "beacon-endpoint.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+// dshCandidates covers both halves of a DeepSeek Harness install.
+//
+// Two files rather than one, because on this runtime either alone is inert: the hooks file is a
+// file nothing reads until the patch layer mounts the bridge at it, and the mount is a bridge that
+// registers nothing until the hooks file is there. Listing both is what lets the inventory report a
+// half-install -- which here is the failure that looks most like success, the same reason Muse Code
+// gets two candidates.
+//
+// No project scope, because dsh has none: its plugin tree is composed from the Harness home, so
+// there is nowhere in a repository for a hook bridge to be mounted from. A `wd` parameter is
+// therefore not taken at all rather than taken and ignored.
+//
+// The patch file is listed as YAML and the hooks file as JSON, which is what they are -- and the
+// patch file is also the user's own, so the inventory may well find rows in it that have nothing to
+// do with Beacon. Detection keys on Beacon's mount, not on the file existing.
+func dshCandidates(home string) []candidate {
+	dir := dshUserDir(home)
+	return []candidate{
+		{runtime: "deepseek_harness", path: filepath.Join(dir, "beacon-endpoint-hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "deepseek_harness", path: filepath.Join(dir, "cordis.patch.yml"), scope: ScopeUser, format: formatYAML, kind: KindHookConfig},
+	}
+}
+
+// kimiCandidates covers the one file a Kimi Code install touches.
+//
+// One file, and it is the runtime's own `config.toml` -- the same file that holds
+// `[providers.<name>].api_key`, the model catalog and the permission rules. That is worth
+// noticing here rather than only in the installer: this row points the inventory at a document
+// where Beacon's hooks are a minority of the content, so detection keys on the hook command and
+// nothing about the file existing counts as an install.
+//
+// No project scope, because Kimi Code has none: it reads one user-level config file, and the
+// project-local `.kimi-code` directory holds only a workspace override and an MCP server list,
+// neither of which can register a hook. A `wd` parameter is therefore not taken at all rather
+// than taken and ignored -- the same shape as dsh above.
+func kimiCandidates(home string) []candidate {
+	return []candidate{
+		{runtime: "kimi_code", path: filepath.Join(kimiUserDir(home), "config.toml"), scope: ScopeUser, format: formatTOML, kind: KindNativeConfig},
+	}
+}
+
+// kimiUserDir resolves the Kimi Code data root, mirroring the installer.
+//
+// Exported to the test as a function rather than restated there as a literal path, so the
+// expected-candidate list stays correct on a developer machine that happens to set
+// KIMI_CODE_HOME.
+func kimiUserDir(home string) string {
+	if base := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME")); base != "" {
+		return base
+	}
+	return filepath.Join(home, ".kimi-code")
+}
+
+// dshUserDir resolves the Harness home, mirroring the installer.
+//
+// Exported to the test as a function rather than restated there as a literal path, so the
+// expected-candidate list stays correct on a developer machine that happens to set DSH_HOME.
+func dshUserDir(home string) string {
+	if base := strings.TrimSpace(os.Getenv("DSH_HOME")); base != "" {
+		return base
+	}
+	return filepath.Join(home, ".dsh")
+}
+
+// kiroUserDir resolves the global Kiro directory, mirroring the installer.
+//
+// Exported to the test as a function rather than restated there as a literal path, so the
+// expected-candidate list stays correct on a developer machine that happens to set the variable.
+func kiroUserDir(home string) string {
+	if base := strings.TrimSpace(os.Getenv("KIRO_HOME")); base != "" {
+		return base
+	}
+	return filepath.Join(home, ".kiro")
+}
+
+// openHandsUserDir resolves the user-level OpenHands state directory, mirroring the installer.
+//
+// Exported to the test as a function rather than restated there as a literal path, so the
+// expected-candidate list stays correct on a developer machine that happens to set the variable.
+func openHandsUserDir(home string) string {
+	if base := strings.TrimSpace(os.Getenv("OH_PERSISTENCE_DIR")); base != "" {
+		return base
+	}
+	return filepath.Join(home, ".openhands")
+}
+
+// museConfigDir resolves the directory Muse Code keeps settings.json in, mirroring the installer.
+//
+// XDG_CONFIG_HOME is read from the process environment, the same way vscodeUserSettingsPath does
+// it: on a machine that sets it, ~/.config/muse is not where Muse looks, and scanning the wrong
+// directory reports "not installed" for a working install. Exported to the test as a function
+// rather than restated there as a literal path, so the expected-candidate list stays correct on a
+// developer machine that happens to set the variable.
+//
+// No GOOS switch, unlike VS Code's: Muse Code ships for macOS and Linux only, and uses the same
+// ~/.config location on both rather than a Library path on macOS.
+func museConfigDir(home string) string {
+	if base := os.Getenv("XDG_CONFIG_HOME"); base != "" {
+		return filepath.Join(base, "muse")
+	}
+	return filepath.Join(home, ".config", "muse")
+}
+
+// fx keeps no Beacon-written file, so every entry here is fx's own configuration rather than
+// something Beacon installed -- which is why they are all KindNativeConfig and why beacon_managed
+// stays false for them. Reporting them is still the point of an inventory: what runtimes are on
+// this machine and what they are wired to.
+//
+// The MCP files are the reason this is worth having at all. fx's profile server list lives in
+// ~/.fx/mcp.json under an `mcp` key (with `mcpServers` accepted as an alias), and a workspace can
+// add a Claude-compatible .mcp.json with `mcpServers` -- both keys the scanner already reads, so
+// fx's MCP servers land in the same inventory as every other runtime's with no parser of their own.
+//
+// The workspace .mcp.json is attributed to fx and to nothing else here, even though other runtimes
+// read the same file: attributing one file to several runtimes would report one server as several,
+// and fx is the runtime this pass is adding. A machine running two agents over one .mcp.json still
+// gets its servers inventoried once.
+func fxCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: fxRuntime, path: filepath.Join(home, ".fx", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
+		{runtime: fxRuntime, path: filepath.Join(home, ".fx", "mcp.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
+		{runtime: fxRuntime, path: filepath.Join(wd, ".mcp.json"), scope: ScopeProject, format: formatJSON, kind: KindNativeConfig},
+	}
+}
+
+func grokCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "grok", path: filepath.Join(home, ".grok", "hooks", "beacon-endpoint.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "grok", path: filepath.Join(wd, ".grok", "hooks", "beacon-endpoint.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+func vscodeUserSettingsPath(home string) string {
+	switch runtime.GOOS {
+	case "linux":
+		base := os.Getenv("XDG_CONFIG_HOME")
+		if base == "" {
+			base = filepath.Join(home, ".config")
+		}
+		return filepath.Join(base, "Code", "User", "settings.json")
+	case "windows":
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			return filepath.Join(appData, "Code", "User", "settings.json")
+		}
+		return filepath.Join(home, "AppData", "Roaming", "Code", "User", "settings.json")
+	}
+	return filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
+}
+
+func shellProfilePath(home string) string {
+	switch filepath.Base(os.Getenv("SHELL")) {
+	case "zsh":
+		return filepath.Join(home, ".zshrc")
+	case "bash":
+		return filepath.Join(home, ".bash_profile")
+	default:
+		return filepath.Join(home, ".profile")
+	}
+}
+
+func inspectCandidate(item candidate, redaction string, co contentOptions) (Config, []MCPServer) {
+	config := Config{
+		Volatile:     item.volatile,
+		Runtime:      item.runtime,
+		Path:         valueForPath(item.path, redaction),
+		PathHash:     hashString(item.path),
+		Scope:        item.scope,
+		ConfigKind:   item.kind,
+		ParserMode:   item.format,
+		ParserStatus: StatusNotFound,
+		Redaction:    redaction,
+	}
+	data, info, err := readInventoryFile(item.path, MaxInventoryConfigBytes)
+	if err != nil {
+		config.Reason = errReason(err)
+		if info != nil {
+			config.Exists = true
+			config.ModifiedAt = info.ModTime().UTC().Format(time.RFC3339)
+		}
+		config.ParserStatus = inventoryErrorStatus(err)
+		return config, nil
+	}
+	config.Exists = true
+	config.ModifiedAt = info.ModTime().UTC().Format(time.RFC3339)
+	config.Readable = true
+	config.FileSHA256 = hashBytes(data)
+	config.BeaconManaged = beaconManaged(item, data)
+	config.ThreadforgeManaged = threadforgeManaged(item, data)
+	if co.include {
+		config.Content = captureContent(data, co.limit())
+	}
+
+	servers, parseErr := parseMCPServers(item, data, redaction, co)
+	config.MCPServerCount = len(servers)
+	config.ParserStatus = StatusOK
+	if parseErr != nil {
+		config.ParserStatus = StatusParseFailed
+		config.Reason = parseErr.Error()
+	}
+	return config, servers
+}
+
+func parseMCPServers(item candidate, data []byte, redaction string, co contentOptions) ([]MCPServer, error) {
+	switch item.format {
+	case formatMetadataOnly:
+		return nil, nil
+	case formatJSON:
+		var root map[string]interface{}
+		if err := json.Unmarshal(data, &root); err != nil {
+			return nil, err
+		}
+		return serversFromMap(item, root, redaction, co), nil
+	case formatTOML:
+		var root map[string]interface{}
+		if err := toml.Unmarshal(data, &root); err != nil {
+			return nil, err
+		}
+		return serversFromMap(item, root, redaction, co), nil
+	case formatYAML:
+		var root map[string]interface{}
+		if err := yaml.Unmarshal(data, &root); err != nil {
+			return nil, err
+		}
+		return serversFromMap(item, root, redaction, co), nil
+	default:
+		return nil, fmt.Errorf("unsupported config format %q", item.format)
+	}
+}
+
+func serversFromMap(item candidate, root map[string]interface{}, redaction string, co contentOptions) []MCPServer {
+	servers := serversFromNestedMCPBlocks(item, root, redaction, co)
+	if raw, ok := root["servers"]; ok {
+		servers = append(servers, serversFromBlock(item, raw, redaction, co)...)
+	}
+	return dedupeServers(servers)
+}
+
+func serversFromNestedMCPBlocks(item candidate, value interface{}, redaction string, co contentOptions) []MCPServer {
+	var servers []MCPServer
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		for key, nested := range typed {
+			if isMCPServerBlockKey(key) {
+				servers = append(servers, serversFromBlock(item, nested, redaction, co)...)
+			}
+			servers = append(servers, serversFromNestedMCPBlocks(item, nested, redaction, co)...)
+		}
+	case []interface{}:
+		for _, nested := range typed {
+			servers = append(servers, serversFromNestedMCPBlocks(item, nested, redaction, co)...)
+		}
+	}
+	return servers
+}
+
+func isMCPServerBlockKey(key string) bool {
+	switch key {
+	case "mcpServers", "mcp_servers", "mcp":
+		return true
+	default:
+		return false
+	}
+}
+
+func serversFromBlock(item candidate, raw interface{}, redaction string, co contentOptions) []MCPServer {
+	block, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	var servers []MCPServer
+	for name, value := range block {
+		def, ok := value.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if looksLikeServerDefinition(def) {
+			servers = append(servers, serverFromDefinition(item, name, def, redaction, co))
+			continue
+		}
+		for nestedName, nestedValue := range def {
+			nestedDef, ok := nestedValue.(map[string]interface{})
+			if ok && looksLikeServerDefinition(nestedDef) {
+				servers = append(servers, serverFromDefinition(item, nestedName, nestedDef, redaction, co))
+			}
+		}
+	}
+	return servers
+}
+
+func looksLikeServerDefinition(def map[string]interface{}) bool {
+	for _, key := range []string{"command", "args", "env", "url", "transport"} {
+		if _, ok := def[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func serverFromDefinition(item candidate, name string, def map[string]interface{}, redaction string, co contentOptions) MCPServer {
+	command := firstString(def["command"])
+	url := firstString(def["url"])
+	envKeys := mapKeys(def["env"])
+	// Fingerprint the redacted definition, not the raw one. The raw block is where an MCP server's
+	// API token actually lives (`env: {GITHUB_TOKEN: ghp_...}`), and this is the only field that
+	// carried those values into a digest: EnvKeys already drops secret-marked keys and Definition
+	// is already redacted. A digest is not a disclosure, but a digest over a definition whose only
+	// varying part is one token is guessable, and an inventory has no reason to hold that.
+	//
+	// Redaction is stable per key rather than per value, so the fingerprint still answers what it
+	// is for -- a server was added, a command or URL changed -- and it stops answering one thing it
+	// was never meant to: that a token was rotated while everything else stayed put.
+	redactedDef := redactStructuredMap(def)
+	server := MCPServer{
+		Runtime:        item.runtime,
+		ServerName:     valueForName(name, redaction),
+		ServerNameHash: hashString(name),
+		SourcePath:     valueForPath(item.path, redaction),
+		SourcePathHash: hashString(item.path),
+		SourceScope:    item.scope,
+		Transport:      inferTransport(def, url, command),
+		CommandPresent: command != "",
+		CommandName:    valueForName(filepath.Base(command), redaction),
+		ArgsCount:      sliceLen(def["args"]),
+		URLPresent:     url != "",
+		EnvKeys:        valuesForEnvKeys(envKeys, redaction),
+		EnvKeyCount:    len(envKeys),
+		DefinitionHash: "sha256:" + canonicalHash(redactedDef),
+		ParserStatus:   StatusOK,
+		Redaction:      redaction,
+	}
+	if command != "" {
+		server.CommandNameHash = hashString(filepath.Base(command))
+	}
+	if co.include {
+		server.Definition = redactedDef
+	}
+	return server
+}
+
+func inferTransport(def map[string]interface{}, url, command string) string {
+	transport := strings.ToLower(firstString(def["transport"]))
+	switch transport {
+	case TransportStdio, TransportHTTP, TransportSSE, TransportWebSocket:
+		return transport
+	}
+	lowerURL := strings.ToLower(url)
+	switch {
+	case strings.HasPrefix(lowerURL, "ws://"), strings.HasPrefix(lowerURL, "wss://"):
+		return TransportWebSocket
+	case strings.Contains(lowerURL, "sse"):
+		return TransportSSE
+	case strings.HasPrefix(lowerURL, "http://"), strings.HasPrefix(lowerURL, "https://"):
+		return TransportHTTP
+	case command != "":
+		return TransportStdio
+	default:
+		return TransportUnknown
+	}
+}
+
+func dedupeServers(servers []MCPServer) []MCPServer {
+	seen := map[string]bool{}
+	out := make([]MCPServer, 0, len(servers))
+	for _, server := range servers {
+		key := server.Runtime + "\x00" + server.SourcePathHash + "\x00" + server.ServerNameHash + "\x00" + server.DefinitionHash
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, server)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Runtime == out[j].Runtime {
+			if out[i].SourcePathHash == out[j].SourcePathHash {
+				return out[i].ServerNameHash < out[j].ServerNameHash
+			}
+			return out[i].SourcePathHash < out[j].SourcePathHash
+		}
+		return out[i].Runtime < out[j].Runtime
+	})
+	return out
+}
+
+func valueForPath(value, redaction string) string {
+	return value
+}
+
+func valueForName(value, redaction string) string {
+	return value
+}
+
+func valuesForEnvKeys(keys []string, redaction string) []string {
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if safeEnvKey(key) {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
+func safeEnvKey(key string) bool {
+	return !containsSecretMarker(key)
+}
+
+func mapKeys(raw interface{}) []string {
+	values, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sliceLen(raw interface{}) int {
+	values, ok := raw.([]interface{})
+	if !ok {
+		return 0
+	}
+	return len(values)
+}
+
+func firstString(raw interface{}) string {
+	switch typed := raw.(type) {
+	case string:
+		return typed
+	default:
+		return ""
+	}
+}
+
+func beaconManaged(item candidate, data []byte) bool {
+	text := string(data)
+	switch item.runtime {
+	case "claude_code", "cursor", "antigravity_cli", "vscode", "factory", "hermes", "devin-cli", "devin-desktop":
+		if strings.Contains(text, "BEACON_ENDPOINT_MODE=1") {
+			return true
+		}
+	case "opencode":
+		return strings.Contains(text, "beacon-managed-opencode-plugin:v1")
+	case "cline":
+		return strings.Contains(text, "beacon-managed-cline-plugin:v1")
+	// Read from the installer's own constant rather than repeated as a literal here, unlike the
+	// markers above. Two spellings of a marker is how discovery comes to report on a file the
+	// installer does not write -- the reason hooks.PiManagedExtensionMarker is exported at all.
+	case "pi_cli":
+		return strings.Contains(text, hooks.PiManagedExtensionMarker)
+	// Distinct from Pi's marker, and matched separately, so a file found at either runtime's path
+	// is attributed to the runtime that actually loads it rather than to whichever case ran first.
+	case "omp":
+		return strings.Contains(text, hooks.OmpManagedExtensionMarker)
+	// The plugin entry's marker, read from the installer's own constant for the reason the Pi case
+	// gives. The manifests beside it carry no marker because they are identical for every install.
+	case "openclaw_gateway":
+		return strings.Contains(text, hooks.OpenClawManagedPluginMarker)
+	// Third distinct marker in this family, matched separately for the same reason: a file found at
+	// any of the three paths is attributed to the runtime that actually loads it rather than to
+	// whichever case ran first.
+	case "prime_agent":
+		return strings.Contains(text, hooks.PrimeManagedExtensionMarker)
+	// Fourth distinct marker in this family, matched separately for the same reason: a file found
+	// at any of the four paths is attributed to the runtime that actually loads it rather than to
+	// whichever case ran first.
+	case "omo_senpi":
+		return strings.Contains(text, hooks.OmoManagedExtensionMarker)
+	case "grok":
+		return strings.Contains(text, "beacon-managed-grok-hooks:v1")
+	// Matched on the hook command rather than on a marker, because Beacon merges into Qwen's own
+	// settings.json and has no file of its own there to stamp. `--platform qwen` is what the
+	// installer writes and what uninstall keys on, so it is the same string in all three places.
+	case "qwen_code":
+		return strings.Contains(text, "--platform qwen") || strings.Contains(text, "--platform=qwen")
+	// Two files with two different tells, both matched by one case because both are Muse Code's.
+	// The managed hooks file carries Beacon's marker, since Beacon owns it outright; settings.json
+	// does not, because Beacon edits one key of a file the user also edits, so it is recognized by
+	// the path that key names. Matching either is what lets the inventory report a half-install --
+	// which on Muse is the failure that looks most like success.
+	case "muse_code":
+		return strings.Contains(text, "beacon-managed-muse-hooks:v1") ||
+			strings.Contains(text, "beacon-endpoint-hooks.json")
+	// Matched on the hook command, like Qwen Code above and for a stronger version of the same
+	// reason: OpenHands' hooks.json forbids top-level fields it does not know, so a Beacon marker
+	// would not merely be untidy -- it would fail validation and take every hook in the file down.
+	// `--platform openhands` is what the installer writes and what uninstall keys on, so it is the
+	// same string in all three places.
+	case "openhands":
+		return strings.Contains(text, "--platform openhands") || strings.Contains(text, "--platform=openhands")
+	// Matched on the hook command rather than on a marker, even though Beacon owns this whole
+	// file. Kiro's v1 schema publishes exactly two top-level keys and says nothing about what it
+	// does with a third, so a marker would be a guess about a loader that fails silently -- and
+	// the command is stronger evidence anyway: it is what the installer writes, what uninstall
+	// keys on, and what survives someone renaming the hooks inside the file.
+	case "kiro":
+		return strings.Contains(text, "--platform kiro") || strings.Contains(text, "--platform=kiro")
+	// Two files with two different tells, both matched by one case because both are DeepSeek
+	// Harness's -- the Muse Code shape. The hooks file carries the hook command, since Beacon owns
+	// it outright; cordis.patch.yml carries neither a command nor a Beacon marker, because Beacon
+	// adds one row to a file the user also writes, so it is recognized by the bridge package its
+	// row mounts. Matching either is what lets the inventory report a half-install.
+	//
+	// The bridge package name is safe to match on here in a way a bare marker would not be: it is
+	// the plugin specifier the loader resolves, so it cannot be edited to something else and still
+	// work. A user who mounts the bridge themselves would match too -- which is correct, since
+	// that is a live route from this runtime into a hooks file.
+	case "deepseek_harness":
+		return strings.Contains(text, "--platform dsh") || strings.Contains(text, "--platform=dsh") ||
+			strings.Contains(text, "@deepseek-ai/dsh-hooks-claude-code")
+	// Matched on the hook command rather than on the comment Beacon writes above its block, and
+	// here that is not a preference between two working options: Kimi Code's legacy migration
+	// from `kimi-cli` rewrites this file by serializing the merged config, which keeps the
+	// `[[hooks]]` entries and drops every comment in the document. A marker-based tell would
+	// report "not managed" on any machine that had been through that upgrade, for an install that
+	// is still running.
+	case "kimi_code":
+		return strings.Contains(text, "--platform kimi") || strings.Contains(text, "--platform=kimi")
+	}
+	if item.runtime == "claude_code" || item.runtime == "codex_cli" {
+		if strings.Contains(text, "OTEL_EXPORTER_OTLP_ENDPOINT") && localEndpointText(text) {
+			return true
+		}
+	}
+	if item.runtime == "gemini_cli" && strings.Contains(text, "otlpEndpoint") && localEndpointText(text) {
+		return true
+	}
+	if item.runtime == "vscode" && strings.Contains(text, "github.copilot.chat.otel.otlpEndpoint") && localEndpointText(text) {
+		return true
+	}
+	if item.runtime == "factory" {
+		if ep := shellExportValue(text, "OTEL_TELEMETRY_ENDPOINT"); ep != "" && localEndpointText(ep) {
+			return true
+		}
+	}
+	if item.runtime == "copilot_cli" && copilotOTELEnabled(text) {
+		return true
+	}
+	return false
+}
+
+func threadforgeManaged(item candidate, data []byte) bool {
+	if item.runtime == "omo_senpi" {
+		return strings.Contains(string(data), hooks.SenpiManagedExtensionMarker)
+	}
+	return false
+}
+
+func copilotOTELEnabled(text string) bool {
+	enabled := shellExportValue(text, "COPILOT_OTEL_ENABLED")
+	if !truthyValue(enabled) {
+		return false
+	}
+	endpoint := shellExportValue(text, "COPILOT_OTEL_ENDPOINT")
+	if endpoint == "" {
+		endpoint = shellExportValue(text, "OTEL_EXPORTER_OTLP_ENDPOINT")
+	}
+	if endpoint == "" {
+		return false
+	}
+	return localEndpointText(endpoint)
+}
+
+func shellExportValue(text, key string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		if !strings.HasPrefix(line, key+"=") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(line, key+"="))
+		return strings.Trim(value, `"'`)
+	}
+	return ""
+}
+
+func truthyValue(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	return normalized == "true" || normalized == "1"
+}
+
+func localEndpointText(text string) bool {
+	return strings.Contains(text, "127.0.0.1") || strings.Contains(text, "localhost")
+}
+
+// The three hashes below are correlation identifiers, not credential digests. They exist so two
+// snapshots of the same machine can be compared -- did this config file move, is this the same MCP
+// server as last run -- without the event carrying the operator's directory layout around with it.
+// A password hash has the opposite job: it must survive an attacker who holds the digest, which is
+// what makes bcrypt/scrypt/Argon2 and their work factors the right tool there. Nothing here is a
+// credential, so a fast hash is the correct one, and deliberately so: these values are recomputed
+// for every path, name, and file on every scheduled scan.
+//
+// Callers are responsible for what they pass. Every input today is a filesystem path, a server or
+// command name, a timestamp, or a whole config file's bytes. A secret value must not be hashed
+// here -- a digest over one short, low-entropy secret is a lookup table away from the secret
+// itself -- so route anything that may hold a secret through redactStructured first, the way
+// serverFromDefinition does. Secret-looking keys are stripped by containsSecretMarker.
+
+func hashString(value string) string {
+	if value == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(value))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func hashBytes(value []byte) string {
+	sum := sha256.Sum256(value)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func canonicalHash(value interface{}) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return hashString(fmt.Sprint(value))
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func errReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	if os.IsNotExist(err) {
+		return "not found"
+	}
+	if os.IsPermission(err) {
+		return "permission denied"
+	}
+	return err.Error()
+}

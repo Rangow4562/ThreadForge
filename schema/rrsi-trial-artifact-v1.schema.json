@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/rrsi-trial-artifact-v1.schema.json",
+  "title": "Threadforge sanitized RRSI trial artifact v1",
+  "oneOf": [
+    { "$ref": "#/$defs/coding" },
+    { "$ref": "#/$defs/workspace" },
+    { "$ref": "#/$defs/engineering" }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "common": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "domain",
+        "record_kind",
+        "job_id_sha256",
+        "task_id_sha256",
+        "trial_key_sha256",
+        "source_sha256"
+      ],
+      "properties": {
+        "schema_version": { "const": "threadforge.rrsi-trial-artifact.v1" },
+        "domain": { "enum": ["coding", "workspace", "eng"] },
+        "record_kind": { "enum": ["coding_result", "workspace_scores", "engineering_trial"] },
+        "job_id_sha256": { "$ref": "#/$defs/sha256" },
+        "task_id_sha256": { "$ref": "#/$defs/sha256" },
+        "trial_key_sha256": { "$ref": "#/$defs/sha256" },
+        "source_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "coding": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["domain", "record_kind", "reward", "input_tokens", "output_tokens", "episodes", "exception_reported"],
+          "properties": {
+            "domain": { "const": "coding" },
+            "record_kind": { "const": "coding_result" },
+            "reward": { "oneOf": [{ "type": "number", "minimum": 0, "maximum": 1 }, { "type": "null" }] },
+            "input_tokens": { "oneOf": [{ "type": "integer", "minimum": 0, "maximum": 1000000000000 }, { "type": "null" }] },
+            "output_tokens": { "oneOf": [{ "type": "integer", "minimum": 0, "maximum": 1000000000000 }, { "type": "null" }] },
+            "episodes": { "oneOf": [{ "type": "integer", "minimum": 0, "maximum": 1000000000 }, { "type": "null" }] },
+            "exception_reported": { "type": "boolean" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "workspace": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["domain", "record_kind", "sample_index", "score", "passed_criteria", "total_criteria", "all_pass"],
+          "properties": {
+            "domain": { "const": "workspace" },
+            "record_kind": { "const": "workspace_scores" },
+            "sample_index": { "type": "integer", "minimum": 0, "maximum": 100000 },
+            "score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "passed_criteria": { "type": "integer", "minimum": 0, "maximum": 100000 },
+            "total_criteria": { "type": "integer", "minimum": 1, "maximum": 100000 },
+            "all_pass": { "type": "boolean" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "engineering": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": [
+            "domain",
+            "record_kind",
+            "verdict_source_sha256",
+            "trial_index",
+            "total_tokens",
+            "payload_chars",
+            "no_payload",
+            "n_messages",
+            "wall_seconds",
+            "verifier_wall_seconds",
+            "combined_score",
+            "valid_rate",
+            "passed"
+          ],
+          "properties": {
+            "domain": { "const": "eng" },
+            "record_kind": { "const": "engineering_trial" },
+            "verdict_source_sha256": { "$ref": "#/$defs/sha256" },
+            "trial_index": { "type": "integer", "minimum": 0, "maximum": 100000 },
+            "total_tokens": { "oneOf": [{ "type": "integer", "minimum": 0, "maximum": 1000000000000 }, { "type": "null" }] },
+            "payload_chars": { "type": "integer", "minimum": 0, "maximum": 1000000000000 },
+            "no_payload": { "type": "boolean" },
+            "n_messages": { "oneOf": [{ "type": "integer", "minimum": 0, "maximum": 1000000000 }, { "type": "null" }] },
+            "wall_seconds": { "type": "number", "minimum": 0, "maximum": 1000000000 },
+            "verifier_wall_seconds": { "oneOf": [{ "type": "number", "minimum": 0, "maximum": 1000000000 }, { "type": "null" }] },
+            "combined_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "valid_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+            "passed": { "type": "boolean" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

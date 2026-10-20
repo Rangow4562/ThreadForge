@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.invalid/schema/context-request-v2.schema.json",
+  "title": "Threadforge Unified Context Request v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_id", "query"],
+  "properties": {
+    "schema_version": { "const": "threadforge.context-request.v2" },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "query": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "paths": { "type": "array", "maxItems": 64, "items": { "type": "string", "minLength": 1, "maxLength": 1024 } },
+    "modules": { "type": "array", "maxItems": 64, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+    "path_fingerprints": {
+      "type": "array", "maxItems": 500,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "max_items": { "type": "integer", "minimum": 1, "maximum": 32, "default": 8 },
+    "max_tokens": { "type": "integer", "minimum": 1, "maximum": 16000, "default": 4000 }
+  }
+}

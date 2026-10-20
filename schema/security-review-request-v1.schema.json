@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schema/security-review-request-v1.schema.json",
+  "title": "Threadforge security finding review update request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "expected_revision", "status"],
+  "properties": {
+    "schema_version": { "const": "threadforge.security-review-request.v1" },
+    "expected_revision": { "type": "integer", "minimum": 0 },
+    "status": { "enum": ["open", "acknowledged", "resolved", "false_positive"] },
+    "actor": { "type": "string", "minLength": 1, "maxLength": 64 }
+  }
+}

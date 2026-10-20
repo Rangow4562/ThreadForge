@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-exit-artifact-validation-v2.schema.json",
+  "title": "Threadforge AnyJev exit artifact validation result v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_sha256",
+    "transformer_layers",
+    "candidate_layers",
+    "selection_mode",
+    "validation",
+    "omitted_fields",
+    "human_review_required",
+    "execution_verified",
+    "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.anyjev-exit-artifact-validation.v2"
+    },
+    "model_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "transformer_layers": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4096
+    },
+    "candidate_layers": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4097,
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4096
+      }
+    },
+    "selection_mode": {
+      "enum": ["fixed_global_block", "per_question_cross_validation"]
+    },
+    "validation": {
+      "$ref": "https://threadforge.dev/schema/anyjev-bundle-metadata-v1.schema.json#/properties/validation"
+    },
+    "omitted_fields": {
+      "const": ["model_label", "date", "environment_details", "validation_row_labels"]
+    },
+    "human_review_required": {
+      "const": true
+    },
+    "execution_verified": {
+      "const": false
+    },
+    "cutover_evidence_eligible": {
+      "const": false
+    }
+  }
+}

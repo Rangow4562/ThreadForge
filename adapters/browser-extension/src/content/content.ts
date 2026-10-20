@@ -1,0 +1,71 @@
+// ISOLATED-world content script. The bridge between the page (MAIN interceptor)
+// and the extension service worker. Deliberately thin: validate the message
+// origin, then forward raw intercept events to the SW. All parsing/normalizing
+// happens in the SW so this script stays resistant to page interference.
+
+import { THREADFORGE_CAPTURE_CONTROL, type RelayMessage } from '../shared/types.js';
+import { ext } from '../shared/browser.js';
+import { getSettings, siteEnabled } from '../background/settings.js';
+import { isInterceptEvent, isThreadforgePageMessage, siteForHost } from '../shared/messages.js';
+
+const site = siteForHost(window.location.hostname);
+let captureEnabled = false;
+
+async function refreshCaptureState(): Promise<void> {
+  try {
+    const settings = await getSettings();
+    captureEnabled = site !== undefined && siteEnabled(settings, site);
+  } catch {
+    captureEnabled = false;
+  }
+  window.postMessage({ source: THREADFORGE_CAPTURE_CONTROL, enabled: captureEnabled }, window.location.origin);
+}
+
+void refreshCaptureState();
+ext.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.settings) void refreshCaptureState();
+});
+
+/**
+ * True only when the extension context this content script belongs to is still
+ * alive. After the extension is reloaded/updated, previously-injected content
+ * scripts in already-open tabs are orphaned: `runtime` is torn down and
+ * touching `.sendMessage` throws. Guarding here degrades gracefully (a tab
+ * refresh re-injects a fresh, connected content script).
+ */
+function extensionAlive(): boolean {
+  try {
+    return ext != null && !!ext.runtime && !!ext.runtime.id;
+  } catch {
+    return false;
+  }
+}
+
+let warnedInvalidated = false;
+
+window.addEventListener('message', (event: MessageEvent) => {
+  // Only trust messages from this same window/frame.
+  if (event.source !== window) return;
+  if (!captureEnabled || !isThreadforgePageMessage(event.data)) return;
+  const data = event.data;
+  if (!isInterceptEvent(data.event, window.location.origin)) return;
+
+  if (!extensionAlive()) {
+    if (!warnedInvalidated) {
+      warnedInvalidated = true;
+      console.debug('[threadforge] extension context invalidated; refresh this tab to resume capture.');
+    }
+    return;
+  }
+
+  const relay: RelayMessage = { type: 'THREADFORGE_RAW', event: data.event };
+  // Fire-and-forget; the SW may be asleep and will wake to handle it. Wrap in
+  // try/catch in case the context is invalidated between the check and the call.
+  try {
+    void ext.runtime.sendMessage(relay).catch(() => {
+      /* SW not ready / extension reloading — safe to drop a single event */
+    });
+  } catch {
+    /* context invalidated mid-flight */
+  }
+});

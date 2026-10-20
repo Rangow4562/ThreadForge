@@ -1,0 +1,34 @@
+# Dependency and license audit status
+
+Status: **open; not legal clearance for redistribution.** This workpaper records the repository inventory checked on **October 19, 2026**. It separates machine-readable lock metadata from actual license review; a package's declared license field or a successful build does not by itself establish compatibility.
+
+The fresh `scripts/generate_dependency_inventory.py --repo-root .` inventory on October 19, 2026 contains 664 components across 9 manifests. Its 230 `missing_declared_license_metadata` entries mean **license metadata was not collected**, not that those components are unlicensed. Inventory v2 breaks the missing declarations down as 77 Go module records and 153 Python requirement records; it does not infer licenses. The inventory reports 30 `unresolved_versions`, from optional Python declarations. All 434 npm lock entries have a nonempty declared license field. Every entry still has `license_review_status=unreviewed`, and `release_clearance=false`.
+
+Uncollected license metadata by source manifest: `containers/engineering/build-requirements.lock` (pypi): 3, `containers/engineering/requirements-linux-x86_64-py312.lock` (pypi): 120, `go.mod` (golang): 77, `python/pyproject.toml` (pypi): 30.
+
+## Inventory observed
+
+| Area | Current evidence | Remaining review |
+|---|---|---|
+| Threadforge-authored code | Top-level `LICENSE` and `NOTICE` declare the Apache-2.0 project boundary. | Confirm every distributed file is either covered by this license or has its upstream notice retained. |
+| Go modules | The latest `go list -m all` reports 78 module records including the Threadforge main module (77 external); versions and checksums are in `go.mod`/`go.sum`. Inventory v2 reports 77 module-graph components with license metadata not collected. | `THIRD_PARTY.md` describes selected modules, not a reviewed license disposition for every transitive module. Produce a complete module-to-SPDX/license-text inventory for each release graph. |
+| Adapter npm dependencies | `adapters/package-lock.json` contains 3 package entries and the browser-extension lock contains 431; all 434 have nonempty license metadata in the lockfiles. | Verify license expressions, bundled notices, and actual production dependency inclusion; metadata presence is not legal review. |
+| Engineering container Python runtime | `containers/engineering/requirements-linux-x86_64-py312.lock` pins 120 runtime distributions with hashes; `build-requirements.lock` pins 3 build distributions. Inventory v2 separately counts these as 120 and 3 license-metadata gaps; it does not infer package licenses from names or hashes. | The container/base-image and transitive package licenses have not been reviewed. The local image was built and passed a network-disabled, read-only, non-root import/permission smoke on October 9; that is runtime evidence, not license clearance. |
+| Python package extras | `python/pyproject.toml` defines `decisions`, `hf`, `typed-data`, `evolution`, `workspace`, and `test` extras. The latest inventory reports 30 unresolved version declarations and 30 license-metadata gaps, including the `setuptools>=77` and `wheel` build-backend tools required by the offline distribution smoke. No universal Python lockfile is committed, and the inventory does not resolve versions or infer license fields for these declarations. | Lock and review the supported extra/platform combinations. A `uv lock --dry-run` on this checkout resolved 179 candidates but was not committed: it emitted metadata-specifier normalization warnings and proposed major versions not covered by the current acceptance runs. |
+| Vendored source | Notices currently exist for Beacon, AnyJev, RRSI, Archipelago, and the Harbor Terminus-2 fork; file-level scope and modifications are described in `THIRD_PARTY.md` and `python/UPSTREAM_MODIFICATIONS.md`. | Reconcile every vendored file and generated distribution against required copyright, license, and modification notices. Review excluded RRSI `third_party/` and external benchmark/evaluator components before adding them. |
+| Mancode-derived contracts | No Mancode implementation source or documentation prose is intentionally copied; the contract-derived importer is identified in `THIRD_PARTY.md`. | Obtain a clean-room/license review before distribution. The source project's AGPL-3.0-only terms make this a release blocker even if tests pass. |
+| Benchmark datasets and external runtimes | Threadforge stores source commitments and metadata for selected datasets; task rows and benchmark datasets are not bundled. | Review each dataset/evaluator's execution and redistribution terms before enabling real benchmark runs or shipping data. |
+
+The npm counts are a snapshot of lockfile fields, not a claim that all licenses have been classified. Likewise, Go module checksums prove byte identity, not license compliance. The flexible Python extras are not covered by the Engineering-only platform lock.
+
+## Repeatable dependency inventory
+
+Run `python scripts/generate_dependency_inventory.py --repo-root .` to print the inventory, or add `--output <new-file>` to write a JSON file. The versioned `threadforge.dependency-inventory.v2` contract records hashes for its input manifests and entries for the resolved Go module graph, both npm lockfiles, the Engineering runtime/build Python locks, and each unlocked Python optional-extra declaration. V2 adds deterministic missing-license-metadata counts by ecosystem and source manifest, without inferring licenses. npm integrity values, Go module sums, and Python wheel hashes are preserved; registry URLs and machine-local paths are omitted. The v1 schema remains available for earlier inventory payloads.
+
+The report marks every component `license_review_status=unreviewed`; missing license metadata stays missing, automatic license inference is false, Python extras remain unresolved declarations, and `release_clearance` is always false. The detailed gap breakdown is triage evidence only, not a complete release-artifact SBOM, license classification, or legal approval. `test.ps1` generates it only under a unique temporary path.
+
+## Release gate
+
+Before distribution, generate a complete transitive SBOM/license inventory for the exact release artifacts and supported platform/runtime combinations; reconcile it against retained notices; review the Mancode-derived contract boundary and every dataset/evaluator; and obtain independent legal approval. Keep the all-or-nothing cutover closed until those checks, full feature parity, migration reconciliation, and held-out efficacy gates pass.
+
+See [`THIRD_PARTY.md`](../THIRD_PARTY.md) for pinned upstream revisions, reuse scope, and retained notice locations.

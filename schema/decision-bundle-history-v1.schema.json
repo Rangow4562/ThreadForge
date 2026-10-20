@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-bundle-history-v1.schema.json",
+  "title": "Threadforge local AnyJev bundle revision history",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "history"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-bundle-history.v1" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "history": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["bundle", "action", "actor", "reason", "created_at"],
+        "properties": {
+          "bundle": { "$ref": "decision-bundle-summary-v1.schema.json" },
+          "action": { "enum": ["imported", "approved", "rejected", "retired"] },
+          "actor": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}

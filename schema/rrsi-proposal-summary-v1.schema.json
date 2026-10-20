@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/rrsi-proposal-summary-v1.schema.json",
+  "title": "Threadforge inert RRSI proposal summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "domain", "proposal_status", "file_edit_count", "declared_edit_count",
+    "edit_components", "authority", "human_review_required", "selection_accepted",
+    "execution_authorized", "omitted_fields"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.rrsi-proposal-summary.v1" },
+    "domain": { "enum": ["coding", "workspace", "eng"] },
+    "proposal_status": { "enum": ["done", "abort", "max_turns"] },
+    "file_edit_count": { "type": "integer", "minimum": 0, "maximum": 80 },
+    "declared_edit_count": { "type": "integer", "minimum": 0, "maximum": 80 },
+    "edit_components": {
+      "type": "array",
+      "maxItems": 80,
+      "items": { "enum": ["prompt", "control_flow", "config", "output_plumbing", "context_mgmt", "client_tool", "skill", "memory", "subagent"] }
+    },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "selection_accepted": { "const": false },
+    "execution_authorized": { "const": false },
+    "omitted_fields": {
+      "type": "array",
+      "items": { "enum": ["summary", "reason", "mechanism", "targets_mode", "interaction_log", "edit_ids", "hypotheses", "predicted_task_ids", "review_text", "diffs"] },
+      "minItems": 10,
+      "maxItems": 10,
+      "uniqueItems": true
+    }
+  }
+}

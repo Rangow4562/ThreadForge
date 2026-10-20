@@ -1,0 +1,4 @@
+metric,minimum_or_maximum,unit
+output_ripple,40,mV peak-to-peak maximum
+efficiency,92,percent minimum
+case_temperature,derated_policy_limit,C maximum

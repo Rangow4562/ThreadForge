@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-bundle-validation-request-v1.schema.json",
+  "title": "Threadforge native AnyJev artifact-bundle validation request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "bundle"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-bundle-validation-request.v1" },
+    "bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "artifacts", "heads"],
+      "properties": {
+        "model": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "artifacts": { "type": "object", "maxProperties": 256 },
+        "heads": { "type": "object", "maxProperties": 256 },
+        "adaptation": { "type": "object", "maxProperties": 256 },
+        "observations": { "type": "object", "maxProperties": 256 }
+      }
+    },
+    "include_observations": { "type": "boolean", "default": false }
+  }
+}

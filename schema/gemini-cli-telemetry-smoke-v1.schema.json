@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/gemini-cli-telemetry-smoke-v1.schema.json",
+  "title": "Threadforge installed Gemini CLI telemetry smoke result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "version", "response_source", "model_requests",
+    "real_model_invocations", "telemetry_sdk_started", "telemetry_sdk_shutdown_logged",
+    "unexpected_local_routes", "telemetry"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.gemini-cli-telemetry-smoke.v1" },
+    "status": { "enum": ["verified", "not_observed"] },
+    "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "response_source": { "const": "gemini-cli-fake-responses-file" },
+    "model_requests": { "const": 0 },
+    "real_model_invocations": { "const": 0 },
+    "telemetry_sdk_started": { "type": "boolean" },
+    "telemetry_sdk_shutdown_logged": { "type": "boolean" },
+    "unexpected_local_routes": { "const": 0 },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "endpoint", "log_batches", "trace_batches", "metric_batches",
+        "payload_bytes", "content_types", "payload_content_scanned"
+      ],
+      "properties": {
+        "status": { "enum": ["verified", "not_observed"] },
+        "endpoint": { "const": "loopback-only" },
+        "log_batches": { "type": "integer", "minimum": 0 },
+        "trace_batches": { "type": "integer", "minimum": 0 },
+        "metric_batches": { "type": "integer", "minimum": 0 },
+        "payload_bytes": { "type": "integer", "minimum": 0 },
+        "content_types": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "maxLength": 96 }
+        },
+        "payload_content_scanned": { "type": "boolean" },
+        "user_prompt_text_detected": { "type": "boolean" },
+        "model_output_text_detected": { "type": "boolean" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "not_observed" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "telemetry_sdk_started": { "const": true },
+          "telemetry": {
+            "properties": {
+              "status": { "const": "not_observed" },
+              "log_batches": { "const": 0 },
+              "trace_batches": { "const": 0 },
+              "metric_batches": { "const": 0 },
+              "payload_bytes": { "const": 0 },
+              "content_types": { "maxItems": 0 },
+              "payload_content_scanned": { "const": false }
+            },
+            "required": ["status", "log_batches", "trace_batches", "metric_batches", "payload_bytes", "content_types", "payload_content_scanned"]
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "verified" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "telemetry": {
+            "properties": {
+              "status": { "const": "verified" },
+              "log_batches": { "minimum": 1 },
+              "payload_bytes": { "minimum": 1 },
+              "payload_content_scanned": { "const": true },
+              "user_prompt_text_detected": { "const": false },
+              "model_output_text_detected": { "const": false }
+            },
+            "required": ["status", "log_batches", "payload_bytes", "payload_content_scanned", "user_prompt_text_detected", "model_output_text_detected"]
+          }
+        }
+      }
+    }
+  ]
+}

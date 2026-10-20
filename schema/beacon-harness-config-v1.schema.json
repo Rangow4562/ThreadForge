@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/beacon-harness-config-v1.schema.json",
+  "title": "Threadforge sanitized Beacon host hook configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_format",
+    "kind",
+    "harness",
+    "beacon_hooks_configured",
+    "hook_events",
+    "omitted_fields",
+    "human_review_required",
+    "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.beacon-harness-config.v1" },
+    "source_format": { "enum": ["json", "toml"] },
+    "kind": { "const": "host_hook_configuration" },
+    "harness": { "enum": ["claude_code", "qwen_code", "factory", "cursor", "codex_cli", "antigravity", "openhands", "kiro", "kimi_code", "muse_code"] },
+    "beacon_hooks_configured": { "type": "boolean" },
+    "hook_events": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 13,
+      "items": {
+        "enum": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "PreToolUse",
+          "PostToolUse",
+          "PostToolUseFailure",
+          "Stop",
+          "SubagentStart",
+          "SubagentStop",
+          "PermissionRequest",
+          "SessionEnd",
+          "PreInvocation",
+          "sessionStart",
+          "beforeSubmitPrompt",
+          "preToolUse",
+          "afterAgentThought",
+          "afterFileEdit",
+          "postToolUse",
+          "postToolUseFailure",
+          "stop",
+          "sessionEnd",
+          "PostInvocation",
+          "session_start",
+          "user_prompt_submit",
+          "pre_tool_use",
+          "post_tool_use",
+          "stop",
+          "session_end",
+          "PermissionResult",
+          "PreCompact",
+          "PostCompact"
+        ]
+      }
+    },
+    "omitted_fields": {
+      "const": [
+        "credentials",
+        "environment",
+        "hook_commands",
+        "hook_matchers",
+        "local_paths",
+        "unrelated_settings"
+      ]
+    },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "harness": { "const": "codex_cli" } },
+        "required": ["harness"]
+      },
+      "then": {
+        "properties": {
+          "hook_events": {
+            "items": { "enum": ["SessionStart", "Stop"] }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "harness": { "const": "antigravity" } },
+        "required": ["harness"]
+      },
+      "then": {
+        "properties": {
+          "hook_events": {
+            "items": {
+              "enum": ["PreInvocation", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostInvocation", "Stop"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "harness": { "const": "openhands" } },
+        "required": ["harness"]
+      },
+      "then": {
+        "properties": {
+          "hook_events": {
+            "items": {
+              "enum": [
+                "session_start",
+                "user_prompt_submit",
+                "pre_tool_use",
+                "post_tool_use",
+                "stop",
+                "session_end",
+                "SessionStart",
+                "UserPromptSubmit",
+                "PreToolUse",
+                "PostToolUse",
+                "Stop",
+                "SessionEnd"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "harness": { "const": "kiro" } },
+        "required": ["harness"]
+      },
+      "then": {
+        "properties": {
+          "hook_events": {
+            "items": { "enum": ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"] }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "harness": { "const": "kimi_code" } },
+        "required": ["harness"]
+      },
+      "then": {
+        "properties": {
+          "source_format": { "const": "toml" },
+          "hook_events": {
+            "items": {
+              "enum": [
+                "SessionStart",
+                "UserPromptSubmit",
+                "PreToolUse",
+                "PostToolUse",
+                "PostToolUseFailure",
+                "PermissionRequest",
+                "PermissionResult",
+                "Stop",
+                "SessionEnd",
+                "SubagentStart",
+                "SubagentStop",
+                "PreCompact",
+                "PostCompact"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "harness": { "const": "muse_code" } },
+        "required": ["harness"]
+      },
+      "then": {
+        "properties": {
+          "source_format": { "const": "json" },
+          "hook_events": {
+            "items": {
+              "enum": [
+                "SessionStart",
+                "UserPromptSubmit",
+                "PreToolUse",
+                "PermissionRequest",
+                "PostToolUse",
+                "PreCompact",
+                "PostCompact",
+                "SubagentStart",
+                "SubagentStop",
+                "Stop"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "harness": {
+            "enum": ["claude_code", "qwen_code", "factory", "cursor", "codex_cli", "antigravity", "openhands", "kiro", "muse_code"]
+          }
+        },
+        "required": ["harness"]
+      },
+      "then": { "properties": { "source_format": { "const": "json" } } }
+    }
+  ]
+}

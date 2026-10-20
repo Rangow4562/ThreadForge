@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-calibration-v1.schema.json",
+  "title": "Threadforge local AnyJev calibration request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "question", "examples", "level"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-calibration.v1" },
+    "question": { "$ref": "decision-request-v1.schema.json#/$defs/question" },
+    "examples": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["state", "label"],
+        "properties": { "state": {}, "label": { "type": "integer", "minimum": 0 } }
+      }
+    },
+    "backend": { "type": "object" },
+    "level": { "enum": ["L1", "L2"] },
+    "fit_options": { "$ref": "decision-observe-request-v1.schema.json#/$defs/fit_options" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "level": { "const": "L1" } }, "required": ["level"] },
+      "then": { "not": { "required": ["fit_options"] } }
+    }
+  ]
+}

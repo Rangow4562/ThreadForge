@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-critic-v2.schema.json",
+  "title": "Threadforge source-verified local RRSI critic result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "domain", "status", "action_ready", "findings", "matched_rule_indices", "matched_domain_rule_ids", "component", "domain_rules_loaded", "domain_rules_complete", "domain_rule_set_version", "verified_inventory_sources", "missing_inventory_sources", "verdict", "reason_code", "critic_review_required", "human_approval_required", "execution_authorized"],
+  "properties": {
+    "schema_version": {"const": "threadforge.evolution-critic.v2"},
+    "domain": {"enum": ["rrsi-coding", "rrsi-agentic-workspace", "rrsi-engineering-design"]},
+    "status": {"enum": ["reviewed", "blocked", "incomplete", "privacy_blocked"]},
+    "action_ready": {"const": false},
+    "findings": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 128}},
+    "matched_rule_indices": {"type": "array", "maxItems": 512, "items": {"type": "integer", "minimum": 0}},
+    "matched_domain_rule_ids": {"type": "array", "maxItems": 32, "items": {"type": "string", "pattern": "^[a-z0-9-]{1,64}$"}},
+    "component": {"enum": ["prompt", "control_flow", "config", "output_plumbing", "context_mgmt", "client_tool", "skill", "memory", "subagent", "unknown"]},
+    "domain_rules_loaded": {"const": true},
+    "domain_rules_complete": {"type": "boolean"},
+    "domain_rule_set_version": {"enum": ["rrsi-domain-rules.v2", "rrsi-domain-rules.v3"]},
+    "verified_inventory_sources": {"type": "array", "uniqueItems": true, "items": {"enum": ["terminal-bench/terminal-bench-2-1", "engdesign-open", "engdesign-v1"]}},
+    "missing_inventory_sources": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+    "verdict": {"enum": ["accept", "reject", null]},
+    "reason_code": {"enum": ["deterministic_screen_block", "credential_material", "local_hf_backend_required", "local_model_unavailable", "unsafe_model_output", "invalid_critic_output", "local_critic_accept", "local_critic_reject"]},
+    "reason_count": {"type": "integer", "minimum": 0, "maximum": 8},
+    "risk_count": {"type": "integer", "minimum": 0, "maximum": 8},
+    "critic_review_required": {"type": "boolean"},
+    "human_approval_required": {"const": true},
+    "execution_authorized": {"const": false}
+  }
+}

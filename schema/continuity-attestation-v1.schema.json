@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/continuity-attestation-v1.schema.json",
+  "title": "Threadforge signed continuity mutation attestation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "subject", "key_id", "policy_sha256", "claims", "issued_at", "signature"],
+  "properties": {
+    "schema_version": { "const": "threadforge.continuity-attestation.v1" },
+    "subject": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$" },
+    "key_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "policy_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "claims": { "$ref": "#/$defs/claims" },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "contentEncoding": "base64", "minLength": 88, "maxLength": 88 }
+  },
+  "$defs": {
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "audit_action", "project_id", "resource_type", "resource_id", "expected_revision", "payload_sha256"],
+      "properties": {
+        "action": { "enum": ["task.create", "task.update", "task.requirements.update", "task.requirements.finalize", "task.requirements.reopen", "task.plan.revise", "task.plan.confirm", "session.start", "session.update", "continuity.entry.append", "continuity.review.append"] },
+        "audit_action": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+        "project_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$" },
+        "resource_type": { "enum": ["task", "session", "entry"] },
+        "resource_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+        "expected_revision": { "type": "integer", "minimum": 0 },
+        "payload_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

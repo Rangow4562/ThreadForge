@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-distillation-fit-result-v1.schema.json",
+  "title": "Threadforge AnyJev distillation fit result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "teacher_sha256", "calibration_examples", "budgets", "bootstrap_resamples", "question_count",
+    "total_test_examples", "teacher", "students", "per_question", "input_digests",
+    "human_review_required", "model_inference_verified", "execution_verified", "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-distillation-fit-result.v1"},
+    "teacher_sha256": {"$ref": "#/$defs/sha256"},
+    "calibration_examples": {"type": "integer", "minimum": 8, "maximum": 5000},
+    "budgets": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"type": "integer", "minimum": 1, "maximum": 5000}},
+    "bootstrap_resamples": {"type": "integer", "minimum": 100, "maximum": 10000},
+    "question_count": {"type": "integer", "minimum": 1, "maximum": 256},
+    "total_test_examples": {"type": "integer", "minimum": 2, "maximum": 100000},
+    "teacher": {"$ref": "#/$defs/summary"},
+    "students": {
+      "type": "array", "minItems": 1, "maxItems": 8,
+      "items": {"$ref": "#/$defs/studentResult"}
+    },
+    "per_question": {
+      "type": "array", "minItems": 1, "maxItems": 256,
+      "items": {"$ref": "#/$defs/questionResult"}
+    },
+    "input_digests": {
+      "type": "array", "minItems": 5, "maxItems": 20000,
+      "items": {"$ref": "#/$defs/inputDigest"}
+    },
+    "human_review_required": {"const": true},
+    "model_inference_verified": {"const": false},
+    "execution_verified": {"const": false},
+    "cutover_evidence_eligible": {"const": false}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["accuracy", "expected_calibration_error", "negative_log_loss", "examples", "accuracy_ci95"],
+      "properties": {
+        "accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "expected_calibration_error": {"type": "number", "minimum": 0, "maximum": 1},
+        "negative_log_loss": {"type": "number", "minimum": 0, "maximum": 35},
+        "examples": {"type": "integer", "minimum": 2, "maximum": 100000},
+        "accuracy_ci95": {"$ref": "#/$defs/interval"}
+      },
+      "patternProperties": {"^diff_vs_gold[1-9][0-9]*_ci95$": {"$ref": "#/$defs/differenceInterval"}}
+    },
+    "interval": {
+      "type": "array", "prefixItems": [{"type": "number", "minimum": 0, "maximum": 1}, {"type": "number", "minimum": 0, "maximum": 1}],
+      "minItems": 2, "maxItems": 2
+    },
+    "differenceInterval": {
+      "type": "array", "prefixItems": [{"type": "number", "minimum": -1, "maximum": 1}, {"type": "number", "minimum": -1, "maximum": 1}],
+      "minItems": 2, "maxItems": 2
+    },
+    "methodName": {
+      "type": "string",
+      "pattern": "^(teacher|gold[1-9][0-9]*|synth[1-9][0-9]*-(hard|soft)|gold[1-9][0-9]*\\+synth[1-9][0-9]*-(hard|soft))$"
+    },
+    "methodMetrics": {"type": "object", "additionalProperties": {"$ref": "#/$defs/summary"}, "propertyNames": {"$ref": "#/$defs/methodName"}},
+    "studentResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["student_sha256", "block", "methods"],
+      "properties": {
+        "student_sha256": {"$ref": "#/$defs/sha256"},
+        "block": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "methods": {"$ref": "#/$defs/methodMetrics"}
+      }
+    },
+    "perQuestionMethod": {
+      "type": "object", "additionalProperties": false,
+      "required": ["accuracy", "examples"],
+      "properties": {
+        "accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "examples": {"type": "integer", "minimum": 2, "maximum": 100000}
+      }
+    },
+    "perQuestionMethods": {
+      "type": "object", "additionalProperties": {"$ref": "#/$defs/perQuestionMethod"},
+      "propertyNames": {"$ref": "#/$defs/methodName"}
+    },
+    "questionStudent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_sha256", "block", "methods", "budgets_used"],
+      "properties": {
+        "model_sha256": {"$ref": "#/$defs/sha256"},
+        "block": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "methods": {"$ref": "#/$defs/perQuestionMethods"},
+        "budgets_used": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"type": "integer", "minimum": 1, "maximum": 10000}}
+      }
+    },
+    "questionResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["question_sha256", "examples", "students"],
+      "properties": {
+        "question_sha256": {"$ref": "#/$defs/sha256"},
+        "examples": {"type": "integer", "minimum": 2, "maximum": 100000},
+        "students": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"$ref": "#/$defs/questionStudent"}}
+      }
+    },
+    "inputDigest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["role", "question_sha256", "sha256"],
+      "properties": {
+        "role": {"enum": ["teacher_synthetic_probabilities", "teacher_test_probabilities", "student_gold_train_features", "student_gold_test_features", "student_synthetic_features"]},
+        "question_sha256": {"$ref": "#/$defs/sha256"},
+        "model_sha256": {"$ref": "#/$defs/sha256"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

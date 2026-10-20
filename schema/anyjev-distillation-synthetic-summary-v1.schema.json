@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/anyjev-distillation-synthetic-summary-v1.schema.json",
+  "title": "Threadforge AnyJev synthetic-state dataset summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "workflow_sha256", "generator_sha256", "requested_states", "generation_attempts",
+    "rejected_generations", "stored_states", "state_collection_sha256", "state_schema_sha256",
+    "state_schema_variants", "settings", "omitted_fields", "human_review_required",
+    "execution_verified", "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.anyjev-distillation-synthetic-summary.v1" },
+    "workflow_sha256": { "$ref": "#/$defs/sha256" },
+    "generator_sha256": { "$ref": "#/$defs/sha256" },
+    "requested_states": { "type": "integer", "minimum": 1, "maximum": 10000 },
+    "generation_attempts": { "type": "integer", "minimum": 1, "maximum": 100000 },
+    "rejected_generations": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "stored_states": { "type": "integer", "minimum": 1, "maximum": 10000 },
+    "state_collection_sha256": { "$ref": "#/$defs/sha256" },
+    "state_schema_sha256": { "$ref": "#/$defs/sha256" },
+    "state_schema_variants": { "type": "integer", "minimum": 1, "maximum": 64 },
+    "settings": { "$ref": "#/$defs/settings" },
+    "omitted_fields": {
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 6,
+      "items": { "enum": ["state_bodies", "workflow_label", "generator_label", "generation_date", "environment", "rejection_reason_labels"] }
+    },
+    "human_review_required": { "const": true },
+    "execution_verified": { "const": false },
+    "cutover_evidence_eligible": { "const": false }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["temperature", "top_p", "seed", "max_new_tokens", "exemplars_per_prompt"],
+      "properties": {
+        "temperature": { "type": "number", "minimum": 0, "maximum": 5 },
+        "top_p": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "seed": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "max_new_tokens": { "type": "integer", "minimum": 1, "maximum": 8192 },
+        "exemplars_per_prompt": { "type": "integer", "minimum": 3, "maximum": 10 }
+      }
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-distillation-export-cases-result-v1.schema.json",
+  "title": "Threadforge local AnyJev typed-case export result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "dataset_sha256", "split", "workflow_count", "case_count", "example_count",
+    "output_count", "outputs", "human_review_required", "model_inference_verified",
+    "execution_verified", "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-distillation-export-cases-result.v1"},
+    "dataset_sha256": {"$ref": "#/$defs/sha256"},
+    "split": {"enum": ["train", "test"]},
+    "workflow_count": {"type": "integer", "minimum": 1, "maximum": 4},
+    "case_count": {"type": "integer", "minimum": 1, "maximum": 40000},
+    "example_count": {"type": "integer", "minimum": 1, "maximum": 100000},
+    "output_count": {"type": "integer", "minimum": 1, "maximum": 256},
+    "outputs": {
+      "type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/$defs/output"}
+    },
+    "human_review_required": {"const": true},
+    "model_inference_verified": {"const": false},
+    "execution_verified": {"const": false},
+    "cutover_evidence_eligible": {"const": false}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "workflow_sha256", "examples", "relative_path", "sha256"],
+      "properties": {
+        "role": {"enum": ["exemplars", "train_cases", "test_cases"]},
+        "workflow_sha256": {"$ref": "#/$defs/sha256"},
+        "question_sha256": {"$ref": "#/$defs/sha256"},
+        "examples": {"type": "integer", "minimum": 1, "maximum": 5000},
+        "relative_path": {"type": "string", "maxLength": 1024},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"role": {"const": "exemplars"}}, "required": ["role"]},
+          "then": {
+            "not": {"required": ["question_sha256"]},
+            "properties": {"relative_path": {"pattern": "^distillation/source/[a-f0-9]{64}/train/exemplars/[a-f0-9]{64}\\.json$"}}
+          }
+        },
+        {
+          "if": {"properties": {"role": {"const": "test_cases"}}, "required": ["role"]},
+          "then": {
+            "required": ["question_sha256"],
+            "properties": {"relative_path": {"pattern": "^distillation/source/[a-f0-9]{64}/test/test-cases/[a-f0-9]{64}/[a-f0-9]{64}\\.json$"}}
+          }
+        },
+        {
+          "if": {"properties": {"role": {"const": "train_cases"}}, "required": ["role"]},
+          "then": {
+            "required": ["question_sha256"],
+            "properties": {"relative_path": {"pattern": "^distillation/source/[a-f0-9]{64}/train/train-cases/[a-f0-9]{64}/[a-f0-9]{64}\\.json$"}}
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/migration-format-coverage-v1.schema.json",
+  "title": "Threadforge privacy-safe migration format coverage v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "product", "source_fingerprint", "snapshot_sha256", "files_scanned",
+    "source_bytes", "records_found", "records_imported", "credential_excluded_records",
+    "rejected_records", "snapshot_files", "joined_files", "unsupported_files", "unconverted_files", "unclassified_files", "formats"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.migration-format-coverage.v1" },
+    "product": { "enum": ["beacon", "mancode", "anyjev", "rrsi"] },
+    "source_fingerprint": { "$ref": "#/$defs/sha256" },
+    "snapshot_sha256": { "$ref": "#/$defs/sha256" },
+    "files_scanned": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "source_bytes": { "type": "integer", "minimum": 0, "maximum": 1073741824 },
+    "records_found": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "records_imported": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "credential_excluded_records": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "rejected_records": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "snapshot_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "joined_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "unsupported_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "unconverted_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "unclassified_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "formats": { "type": "array", "items": { "$ref": "#/$defs/format" }, "minItems": 1, "maxItems": 64 }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "format": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "files", "source_bytes", "records_found", "records_imported",
+        "credential_excluded_records", "rejected_records", "snapshot_files", "joined_files",
+        "unsupported_files", "unconverted_files", "file_set_sha256"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^(?:(?:beacon|mancode|anyjev|rrsi)\\.[a-z0-9]+(?:-[a-z0-9]+)*|unclassified)$" },
+        "files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "source_bytes": { "type": "integer", "minimum": 0, "maximum": 1073741824 },
+        "records_found": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "records_imported": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "credential_excluded_records": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "rejected_records": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "snapshot_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "joined_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "unsupported_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "unconverted_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "file_set_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

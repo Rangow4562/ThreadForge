@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-rrsi-source-inventory-request-v1.schema.json",
+  "title": "Threadforge local RRSI source inventory derivation request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "params"],
+  "properties": {
+    "schema_version": { "const": "threadforge.evolution-rrsi-source-inventory-request.v1" },
+    "params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id"],
+      "properties": {
+        "rrsi_source_root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Absolute local root of the pinned RRSI checkout. The path is never returned."
+        },
+        "frontier_source_root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Absolute local root of a clean Frontier-Eng Git checkout. Used only to create an unanchored local candidate; the path is never returned."
+        },
+        "source_id": {
+          "enum": ["terminal-bench/terminal-bench-2-1", "engdesign-open", "engdesign-v1", "frontier-eng"]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "source_id": { "const": "frontier-eng" } }, "required": ["source_id"] },
+          "then": { "required": ["frontier_source_root"], "not": { "required": ["rrsi_source_root"] } },
+          "else": { "required": ["rrsi_source_root"], "not": { "required": ["frontier_source_root"] } }
+        }
+      ]
+    }
+  }
+}

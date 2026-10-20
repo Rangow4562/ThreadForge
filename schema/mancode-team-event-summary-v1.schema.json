@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-team-event-summary-v1.schema.json",
+  "title": "Threadforge Mancode team-event migration summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "authority", "human_review_required", "execution_authorized",
+    "event_type", "entity_kind", "task_reference_present", "task_revision_present",
+    "created_at", "source_identities_omitted"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-team-event-summary.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "event_type": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+    "entity_kind": {
+      "enum": ["workflow", "claim", "checkpoint", "handoff", "actor", "decision", "team_policy", "project_config", "transport"]
+    },
+    "task_reference_present": { "type": "boolean" },
+    "task_revision_present": { "type": "boolean" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "source_identities_omitted": { "const": true }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "entity_kind": { "enum": ["workflow", "claim", "checkpoint", "handoff"] } }, "required": ["entity_kind"] },
+      "then": {
+        "properties": { "task_reference_present": { "const": true }, "task_revision_present": { "const": true } }
+      },
+      "else": {
+        "properties": { "task_reference_present": { "const": false }, "task_revision_present": { "const": false } }
+      }
+    }
+  ]
+}

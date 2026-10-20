@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schema/anyjev-universal-result-v1.schema.json",
+  "title": "Threadforge AnyJev universal-study result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "study_kind",
+    "model_sha256",
+    "layers",
+    "absolute_layers",
+    "forms",
+    "lambdas",
+    "rows",
+    "omitted_fields",
+    "human_review_required",
+    "execution_verified",
+    "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-universal-result.v1"},
+    "study_kind": {"enum": ["loqo", "cross_domain", "phase0"]},
+    "model_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "layers": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {"type": "integer", "minimum": -10000, "maximum": 10000}
+    },
+    "absolute_layers": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {"type": "integer", "minimum": 1, "maximum": 10000}
+    },
+    "forms": {
+      "type": "array",
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {"enum": ["probe", "clogit", "residual", "pos", "prod"]}
+    },
+    "lambdas": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000}
+    },
+    "train_order": {"enum": ["id", "rand"]},
+    "extraction": {"enum": ["last", "newline"]},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 1000000},
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {"$ref": "#/$defs/resultRow"}
+    },
+    "omitted_fields": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "human_review_required": {"const": true},
+    "execution_verified": {"const": false},
+    "cutover_evidence_eligible": {"const": false}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"study_kind": {"enum": ["loqo", "cross_domain"]}}},
+      "then": {
+        "required": ["train_order", "extraction", "seed"],
+        "properties": {
+          "absolute_layers": {"minItems": 1},
+          "forms": {"minItems": 1},
+          "lambdas": {"minItems": 1}
+        }
+      },
+      "else": {
+        "properties": {
+          "absolute_layers": {"maxItems": 0},
+          "forms": {"maxItems": 0},
+          "lambdas": {"maxItems": 0}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "metricMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "acc": {"type": "number", "minimum": 0, "maximum": 1},
+        "ece": {"type": "number", "minimum": 0, "maximum": 1},
+        "brier": {"type": "number", "minimum": 0, "maximum": 2},
+        "nll": {"type": "number", "minimum": 0, "maximum": 1000000},
+        "cov5": {"type": "number", "minimum": 0, "maximum": 1},
+        "flip": {"type": "number", "minimum": 0, "maximum": 1},
+        "ece_pooled": {"type": "number", "minimum": 0, "maximum": 1},
+        "raw": {"type": "number", "minimum": 0, "maximum": 1},
+        "L0-perm": {"type": "number", "minimum": 0, "maximum": 1},
+        "per-question:lda": {"type": "number", "minimum": 0, "maximum": 1},
+        "pooled:diff_means": {"type": "number", "minimum": 0, "maximum": 1},
+        "pooled:diff_means:ece": {"type": "number", "minimum": 0, "maximum": 1},
+        "pooled:diff_means:layer": {"type": "number", "minimum": 0, "maximum": 10000},
+        "pooled:lda": {"type": "number", "minimum": 0, "maximum": 1},
+        "pooled:lda:ece": {"type": "number", "minimum": 0, "maximum": 1},
+        "pooled:lda:layer": {"type": "number", "minimum": 0, "maximum": 10000},
+        "pooled:ridge": {"type": "number", "minimum": 0, "maximum": 1},
+        "pooled:ridge:ece": {"type": "number", "minimum": 0, "maximum": 1},
+        "pooled:ridge:layer": {"type": "number", "minimum": 0, "maximum": 10000},
+        "soft_acc": {"type": "number", "minimum": 0, "maximum": 1},
+        "brier_mean": {"type": "number", "minimum": 0, "maximum": 2},
+        "score_mae": {"type": "number", "minimum": 0, "maximum": 1000000},
+        "count": {"type": "number", "minimum": 0, "maximum": 256},
+        "mean_logreg_minus_head": {"type": "number", "minimum": -1, "maximum": 1},
+        "logreg_minus_head": {"type": "number", "minimum": -1, "maximum": 1}
+      }
+    },
+    "intervalMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "acc_ci95": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"type": "number", "minimum": 0, "maximum": 1}
+        },
+        "diff_vs_L0-perm_ci95": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"type": "number", "minimum": -1, "maximum": 1}
+        },
+        "diff_vs_raw_ci95": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"type": "number", "minimum": -1, "maximum": 1}
+        },
+        "diff_vs_L0_ci95": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"type": "number", "minimum": -1, "maximum": 1}
+        }
+      }
+    },
+    "headSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layer", "layer_absolute", "lambda", "temperature", "oof_nll", "oof_accuracy", "folds"],
+      "properties": {
+        "layer": {"type": "integer", "minimum": 0, "maximum": 255},
+        "layer_absolute": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "lambda": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000},
+        "temperature": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000},
+        "oof_nll": {"type": "number", "minimum": 0, "maximum": 1000000},
+        "oof_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "folds": {"type": "integer", "minimum": 2, "maximum": 20}
+      }
+    },
+    "resultRow": {
+      "type": "object",
+      "required": ["scope", "method", "metrics"],
+      "properties": {
+        "scope": {"enum": ["question", "pooled", "domain", "phase0_question", "phase0_mean", "phase0_depth", "phase0_layer_histogram", "phase0_selected_layer", "phase0_comparison", "phase0_gradient_summary", "phase0_gradient_question"]},
+        "method": {"type": "string", "minLength": 1, "maxLength": 128},
+        "unit_key_sha256": {"$ref": "#/$defs/hash"},
+        "workflow_sha256": {"$ref": "#/$defs/hash"},
+        "domain": {"enum": ["typed", "extra", "games"]},
+        "kind": {"enum": ["choice", "noul", "score"]},
+        "options": {"type": "integer", "minimum": 2, "maximum": 26},
+        "examples": {"type": "integer", "minimum": 1, "maximum": 10000000},
+        "index": {"type": "integer", "minimum": 1, "maximum": 256},
+        "feature_variant": {"enum": ["id", "rand", "avg"]},
+        "block": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "selection_method": {"enum": ["head:lda", "head:lda/avg", "head:lda/rand", "head:ridge", "head:ridge/avg", "head:ridge/rand"]},
+        "head_selection": {"$ref": "#/$defs/headSelection"},
+        "metrics": {"$ref": "#/$defs/metricMap"},
+        "intervals": {"$ref": "#/$defs/intervalMap"}
+      },
+      "allOf": [
+        {"if": {"properties": {"scope": {"const": "question"}}, "required": ["scope"]}, "then": {"required": ["unit_key_sha256", "workflow_sha256", "domain", "kind", "options", "examples"]}},
+        {"if": {"properties": {"scope": {"enum": ["pooled", "domain", "phase0_comparison"]}}, "required": ["scope"]}, "then": {"required": ["examples"]}},
+        {"if": {"properties": {"scope": {"const": "domain"}}, "required": ["scope"]}, "then": {"required": ["domain"]}},
+        {"if": {"properties": {"scope": {"const": "phase0_question"}}, "required": ["scope"]}, "then": {"required": ["unit_key_sha256", "feature_variant"]}},
+        {"if": {"properties": {"scope": {"const": "phase0_mean"}}, "required": ["scope"]}, "then": {"required": ["feature_variant"]}},
+        {"if": {"properties": {"scope": {"enum": ["phase0_depth", "phase0_layer_histogram"]}}, "required": ["scope"]}, "then": {"required": ["block"]}},
+        {"if": {"properties": {"scope": {"const": "phase0_selected_layer"}}, "required": ["scope"]}, "then": {"required": ["unit_key_sha256", "block", "selection_method"]}},
+        {"if": {"properties": {"scope": {"const": "phase0_gradient_question"}}, "required": ["scope"]}, "then": {"required": ["index"]}},
+        {"if": {"properties": {"scope": {"const": "question"}, "method": {"pattern": "^universal:"}}, "required": ["scope", "method"]}, "then": {"required": ["head_selection"]}}
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

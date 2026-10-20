@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.invalid/schema/project-bootstrap-result-v1.schema.json",
+  "title": "Threadforge Project MCP Bootstrap Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "action", "status", "hosts", "atomic", "partial_changes_possible", "host_trust_changed", "permissions_changed", "telemetry_enabled", "guidance_only", "execution_authorized"],
+  "properties": {
+    "schema_version": { "const": "threadforge.project-bootstrap-result.v1" },
+    "action": { "enum": ["install", "update", "uninstall"] },
+    "status": { "enum": ["complete", "partial"] },
+    "hosts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 11,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["host", "config_path", "result"],
+        "properties": {
+          "host": { "enum": ["claude-code", "command-code", "github-copilot", "cursor", "antigravity", "gemini-cli", "qwen-code", "codex-cli", "chatgpt-desktop-codex", "codex-ide", "opencode"] },
+          "config_path": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "result": { "enum": ["installed", "updated", "unchanged", "removed", "absent", "failed"] },
+          "failure_code": { "const": "configuration_conflict_or_unavailable" }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "result": { "const": "failed" } }, "required": ["result"] },
+            "then": { "required": ["failure_code"] },
+            "else": { "not": { "required": ["failure_code"] } }
+          }
+        ]
+      }
+    },
+    "atomic": { "const": false },
+    "partial_changes_possible": { "type": "boolean" },
+    "host_trust_changed": { "const": false },
+    "permissions_changed": { "const": false },
+    "telemetry_enabled": { "const": false },
+    "guidance_only": { "const": true },
+    "execution_authorized": { "const": false }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "partial" } }, "required": ["status"] },
+      "then": { "properties": { "partial_changes_possible": { "const": true } } },
+      "else": { "properties": { "partial_changes_possible": { "const": false } } }
+    }
+  ]
+}

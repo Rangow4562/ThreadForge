@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schemas/anyjev-markdown-benchmark-result-v1.schema.json",
+  "title": "Threadforge AnyJev Markdown Benchmark Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_sha256",
+    "rows",
+    "omitted_fields",
+    "human_review_required",
+    "execution_verified",
+    "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-markdown-benchmark-result.v1"},
+    "model_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["task_key_sha256", "option_count", "level", "metrics"],
+        "properties": {
+          "task_key_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "option_count": {"type": "integer", "minimum": 2, "maximum": 26},
+          "test_examples": {"type": "integer", "minimum": 1, "maximum": 10000000},
+          "level": {"enum": ["raw", "L0", "L0-bc", "L0-cf", "L0-perm", "L0-perm+bc", "L0-perm+cf", "L1"]},
+          "metrics": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "required": ["acc"],
+            "properties": {
+              "acc": {"type": "number", "minimum": 0, "maximum": 1},
+              "macro_f1": {"type": "number", "minimum": 0, "maximum": 1},
+              "brier": {"type": "number", "minimum": 0, "maximum": 2},
+              "ece": {"type": "number", "minimum": 0, "maximum": 1},
+              "flip": {"type": "number", "minimum": 0, "maximum": 1},
+              "cov@5%": {"type": "number", "minimum": 0, "maximum": 1}
+            }
+          }
+        }
+      }
+    },
+    "omitted_fields": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "human_review_required": {"const": true},
+    "execution_verified": {"const": false},
+    "cutover_evidence_eligible": {"const": false}
+  }
+}

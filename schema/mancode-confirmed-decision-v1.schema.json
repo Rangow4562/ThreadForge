@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-confirmed-decision-v1.schema.json",
+  "title": "Threadforge Mancode confirmed decision migration projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authority",
+    "human_review_required",
+    "execution_authorized",
+    "legacy_confirmation_advisory",
+    "source_authorization_omitted",
+    "source_schema_version",
+    "decision_id",
+    "title",
+    "statement",
+    "confirmed_at",
+    "task_reference_present"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-confirmed-decision.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "legacy_confirmation_advisory": { "const": true },
+    "source_authorization_omitted": { "const": true },
+    "source_schema_version": { "enum": [1, 2] },
+    "decision_id": { "type": "string", "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "statement": { "type": "string", "minLength": 1, "maxLength": 12000 },
+    "confirmed_at": { "type": "string", "format": "date-time" },
+    "task_reference_present": { "type": "boolean" },
+    "details": { "$ref": "#/$defs/details" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "source_schema_version": { "const": 1 } } },
+      "then": { "not": { "required": ["details"] } }
+    },
+    {
+      "if": { "properties": { "source_schema_version": { "const": 2 } } },
+      "then": { "required": ["details"] }
+    }
+  ],
+  "$defs": {
+    "clauseId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" },
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "decisionId": { "type": "string", "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+    "decisionText": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "target_id", "target_digest", "clauses"],
+      "properties": {
+        "action": { "enum": ["supersede", "revoke"] },
+        "target_id": { "$ref": "#/$defs/decisionId" },
+        "target_digest": { "$ref": "#/$defs/digest" },
+        "clauses": {
+          "oneOf": [
+            { "const": "all" },
+            { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/clauseId" } }
+          ]
+        }
+      }
+    },
+    "details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record_kind", "rationale", "alternatives", "tradeoffs", "revisit_when", "applicability", "clauses", "relations"],
+      "properties": {
+        "record_kind": { "enum": ["decision", "revocation"] },
+        "rationale": { "$ref": "#/$defs/decisionText" },
+        "alternatives": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["option", "reason_not_chosen"],
+            "properties": {
+              "option": { "$ref": "#/$defs/decisionText" },
+              "reason_not_chosen": { "$ref": "#/$defs/decisionText" }
+            }
+          }
+        },
+        "tradeoffs": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/decisionText" } },
+        "revisit_when": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/decisionText" } },
+        "applicability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["modules", "paths"],
+          "properties": {
+            "modules": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+            "paths": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 256 } }
+          }
+        },
+        "clauses": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "statement"],
+            "properties": { "id": { "$ref": "#/$defs/clauseId" }, "statement": { "$ref": "#/$defs/decisionText" } }
+          }
+        },
+        "relations": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/relation" } },
+        "resolution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["records"],
+          "properties": {
+            "records": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["decision_id", "digest"],
+                "properties": { "decision_id": { "$ref": "#/$defs/decisionId" }, "digest": { "$ref": "#/$defs/digest" } }
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "record_kind": { "const": "decision" } } },
+          "then": {
+            "properties": {
+              "clauses": { "minItems": 1 },
+              "relations": { "items": { "properties": { "action": { "const": "supersede" } } } },
+              "applicability": {
+                "anyOf": [
+                  { "properties": { "modules": { "minItems": 1 } } },
+                  { "properties": { "paths": { "minItems": 1 } } }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "record_kind": { "const": "revocation" } } },
+          "then": {
+            "properties": {
+              "clauses": { "maxItems": 0 },
+              "relations": { "minItems": 1, "items": { "properties": { "action": { "const": "revoke" } } } }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

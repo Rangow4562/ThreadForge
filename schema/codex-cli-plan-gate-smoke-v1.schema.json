@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/codex-cli-plan-gate-smoke-v1.schema.json",
+  "title": "Threadforge installed Codex CLI task-plan gate smoke result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "host_cli_version", "install_action", "hook_event", "tool", "tool_calls", "target_tool_available", "denial_feedback_observed", "denied_file_created", "provider", "real_model_invocations"],
+  "properties": {
+    "schema_version": { "const": "threadforge.codex-cli-plan-gate-smoke.v1" },
+    "status": { "enum": ["verified", "unsupported"] },
+    "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "install_action": { "enum": ["installed", "updated", "unchanged"] },
+    "hook_event": { "const": "PreToolUse" },
+    "tool": { "const": "exec_command" },
+    "tool_calls": { "enum": [0, 1] },
+    "target_tool_available": { "type": "boolean" },
+    "denial_feedback_observed": { "type": "boolean" },
+    "denied_file_created": { "const": false },
+    "unsupported_reason": { "const": "exec-command-not-exposed" },
+    "provider": { "const": "deterministic-loopback-fixture" },
+    "real_model_invocations": { "const": 0 }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "status": { "const": "verified" },
+        "tool_calls": { "const": 1 },
+        "target_tool_available": { "const": true },
+        "denial_feedback_observed": { "const": true }
+      },
+      "not": { "required": ["unsupported_reason"] }
+    },
+    {
+      "required": ["unsupported_reason"],
+      "properties": {
+        "status": { "const": "unsupported" },
+        "tool_calls": { "const": 0 },
+        "target_tool_available": { "const": false },
+        "denial_feedback_observed": { "const": false }
+      }
+    }
+  ]
+}

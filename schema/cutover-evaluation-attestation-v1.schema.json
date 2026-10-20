@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/cutover-evaluation-attestation-v1.schema.json",
+  "title": "Signed Threadforge held-out evaluation attestation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "key_id", "evaluator_id", "domain", "legacy_commit", "candidate_commit", "dataset_sha256", "task_set_sha256", "evaluator_sha256", "outcome_sha256", "split_role", "issued_at", "signature"],
+  "properties": {
+    "schema_version": { "const": "threadforge.cutover-evaluation-attestation.v1" },
+    "key_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "evaluator_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "domain": { "enum": ["beacon", "mancode", "anyjev", "rrsi-coding", "rrsi-agentic-workspace", "rrsi-engineering-design"] },
+    "legacy_commit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+    "candidate_commit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+    "dataset_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "task_set_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "evaluator_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "outcome_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "split_role": { "const": "held_out" },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "minLength": 80, "maxLength": 100, "contentEncoding": "base64" }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/cutover-assessment-v2.schema.json",
+  "title": "Threadforge cutover assessment v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ready", "blockers"],
+  "properties": {
+    "schema_version": { "const": "threadforge.cutover-assessment.v2" },
+    "ready": { "type": "boolean" },
+    "trusted_evaluators_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "blockers": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

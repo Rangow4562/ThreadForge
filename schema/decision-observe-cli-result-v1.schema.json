@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-observe-cli-result-v1.schema.json",
+  "title": "Threadforge private AnyJev observation CLI result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "stream_id", "revision", "model", "question_key", "observation_count", "total_fits", "checkpoint_sha256", "artifact", "human_review_required", "activation_allowed", "execution_authorized", "cutover_evidence_eligible"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-observe-cli-result.v1" },
+    "status": { "enum": ["collecting", "fitted"] },
+    "stream_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,47}$" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "model": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "question_key": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "observation_count": { "type": "integer", "minimum": 1, "maximum": 4096 },
+    "total_fits": { "type": "integer", "minimum": 0, "maximum": 4096 },
+    "checkpoint_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "artifact": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "revision", "status", "level", "model", "question_key", "calibration_examples", "content_sha256"],
+          "properties": {
+            "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+            "revision": { "const": 1 }, "status": { "const": "candidate" }, "level": { "const": "L2" },
+            "model": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "question_key": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+            "calibration_examples": { "type": "integer", "minimum": 8, "maximum": 100000 },
+            "content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          }
+        }
+      ]
+    },
+    "human_review_required": { "const": true },
+    "activation_allowed": { "const": false },
+    "execution_authorized": { "const": false },
+    "cutover_evidence_eligible": { "const": false }
+  }
+}

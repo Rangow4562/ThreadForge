@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/beacon-opencode-plugin-config-v1.schema.json",
+  "title": "Threadforge sanitized Beacon OpenCode plugin-presence record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "source_format",
+    "harness",
+    "managed_marker_present",
+    "omitted_fields",
+    "human_review_required",
+    "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.beacon-opencode-plugin-config.v1" },
+    "kind": { "const": "managed_plugin_presence" },
+    "source_format": { "const": "typescript_plugin" },
+    "harness": { "const": "opencode" },
+    "managed_marker_present": { "const": true },
+    "omitted_fields": {
+      "const": [
+        "plugin_source",
+        "commands",
+        "credentials",
+        "environment",
+        "local_paths",
+        "unrelated_configuration"
+      ]
+    },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false }
+  }
+}

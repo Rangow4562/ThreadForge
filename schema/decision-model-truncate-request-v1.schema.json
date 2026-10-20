@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-model-truncate-request-v1.schema.json",
+  "title": "Threadforge local AnyJev checkpoint truncation request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "model_path", "blocks", "output_path"],
+  "properties": {
+    "schema_version": { "const": "threadforge.anyjev-truncate-request.v1" },
+    "model_path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "tokenizer_path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "blocks": { "type": "integer", "minimum": 1, "maximum": 4096 },
+    "output_path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "dtype": { "enum": ["auto", "float16", "bfloat16", "float32"], "default": "auto" }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/ci-public-summary-v1.schema.json",
+  "title": "Threadforge CI Public Summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "harness",
+    "status",
+    "telemetry_required",
+    "validation_status",
+    "total_events",
+    "matched_events",
+    "malformed_rows",
+    "minimum_events"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.ci-public-summary.v1" },
+    "harness": { "enum": ["claude_code", "codex_cli"] },
+    "status": { "enum": ["passed", "failed"] },
+    "telemetry_required": { "type": "boolean" },
+    "validation_status": { "enum": ["passed", "failed"] },
+    "total_events": { "type": "integer", "minimum": 0 },
+    "matched_events": { "type": "integer", "minimum": 0 },
+    "malformed_rows": { "type": "integer", "minimum": 0 },
+    "minimum_events": { "type": "integer", "minimum": 1 }
+  }
+}

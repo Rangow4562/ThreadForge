@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schema/local-store-recovery-v1.schema.json",
+  "title": "Threadforge local SQLite recovery manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "id",
+    "created_at",
+    "store_file",
+    "store_user_version",
+    "store_size_bytes",
+    "store_sha256",
+    "activation_allowed"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.local-store-recovery.v1" },
+    "kind": { "enum": ["snapshot", "staged_restore", "activated_restore"] },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "store_file": { "const": "store.sqlite" },
+    "store_user_version": { "const": 12 },
+    "store_size_bytes": { "type": "integer", "minimum": 1, "maximum": 17179869184 },
+    "store_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "source_snapshot_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "source_snapshot_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "reason": { "type": "string", "minLength": 4, "maxLength": 1024 },
+    "activation_reason": { "type": "string", "minLength": 4, "maxLength": 1024 },
+    "activated_at": { "type": "string", "format": "date-time" },
+    "activation_method": { "enum": ["local-explicit-confirmation", "signed-team-scope-freezes", "verified-existing-team-freezes"] },
+    "team_project_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "team_scopes_frozen": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "team_audit_status": { "enum": ["passed", "no_team_projects"] },
+    "activation_allowed": { "type": "boolean" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "snapshot" } }, "required": ["kind"] },
+      "then": {
+        "properties": { "activation_allowed": { "const": false } },
+        "not": { "anyOf": [
+          { "required": ["source_snapshot_id"] },
+          { "required": ["source_snapshot_sha256"] },
+          { "required": ["reason"] },
+          { "required": ["activation_reason"] },
+          { "required": ["activated_at"] },
+          { "required": ["activation_method"] },
+          { "required": ["team_project_count"] },
+          { "required": ["team_scopes_frozen"] },
+          { "required": ["team_audit_status"] }
+        ] }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "staged_restore" } }, "required": ["kind"] },
+      "then": {
+        "properties": { "activation_allowed": { "const": false } },
+        "required": ["source_snapshot_id", "source_snapshot_sha256", "reason"],
+        "not": { "anyOf": [
+          { "required": ["activation_reason"] },
+          { "required": ["activated_at"] },
+          { "required": ["activation_method"] },
+          { "required": ["team_project_count"] },
+          { "required": ["team_scopes_frozen"] },
+          { "required": ["team_audit_status"] }
+        ] }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "activated_restore" } }, "required": ["kind"] },
+      "then": {
+        "properties": { "activation_allowed": { "const": true } },
+        "required": [
+          "source_snapshot_id",
+          "source_snapshot_sha256",
+          "reason",
+          "activation_reason",
+          "activated_at",
+          "activation_method",
+          "team_project_count",
+          "team_scopes_frozen",
+          "team_audit_status"
+        ],
+        "allOf": [
+          {
+            "if": { "properties": { "team_project_count": { "const": 0 } }, "required": ["team_project_count"] },
+            "then": {
+              "properties": {
+                "activation_method": { "const": "local-explicit-confirmation" },
+                "team_scopes_frozen": { "const": 0 },
+                "team_audit_status": { "const": "no_team_projects" }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "team_project_count": { "minimum": 1 } }, "required": ["team_project_count"] },
+            "then": {
+              "properties": {
+                "activation_method": { "enum": ["signed-team-scope-freezes", "verified-existing-team-freezes"] },
+                "team_scopes_frozen": { "minimum": 1 },
+                "team_audit_status": { "const": "passed" }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

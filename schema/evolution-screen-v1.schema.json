@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-screen-v1.schema.json",
+  "title": "Threadforge deterministic RRSI pre-screen response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "domain", "status", "action_ready", "findings", "matched_rule_indices", "matched_domain_rule_ids", "component", "domain_rules_loaded", "domain_rules_complete", "domain_rule_set_version"],
+  "properties": {
+    "schema_version": { "const": "threadforge.evolution-screen.v1" },
+    "domain": { "enum": ["rrsi-coding", "rrsi-agentic-workspace", "rrsi-engineering-design"] },
+    "status": { "enum": ["blocked", "incomplete", "privacy_blocked"] },
+    "action_ready": { "const": false },
+    "findings": { "type": "array", "items": { "type": "string", "maxLength": 128 } },
+    "matched_rule_indices": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+    "matched_domain_rule_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" } },
+    "component": { "enum": ["prompt", "control_flow", "config", "output_plumbing", "context_mgmt", "client_tool", "skill", "memory", "subagent", "unknown"] },
+    "domain_rules_loaded": { "const": true },
+    "domain_rules_complete": { "const": false },
+    "domain_rule_set_version": { "const": "rrsi-domain-rules.v1" },
+    "requires_critic_review": { "type": "boolean" }
+  }
+}

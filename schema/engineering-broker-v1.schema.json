@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/engineering-broker-v1.schema.json",
+  "title": "Threadforge Engineering offline model broker frame",
+  "description": "One bounded JSON-lines request or response between the no-network Engineering sandbox and the host model broker. It carries model request/response data only, never provider endpoint configuration or credentials.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "type", "id", "operation", "payload"],
+      "properties": {
+        "schema_version": {"const": "threadforge.engineering-broker.v1"},
+        "type": {"const": "request"},
+        "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "operation": {"const": "model.chat.completions"},
+        "payload": {"type": "object"}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "type", "id", "ok", "payload", "error"],
+      "properties": {
+        "schema_version": {"const": "threadforge.engineering-broker.v1"},
+        "type": {"const": "response"},
+        "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "ok": {"type": "boolean"},
+        "payload": {"type": ["object", "null"]},
+        "error": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["code"],
+              "properties": {
+                "code": {
+                  "enum": ["model_unavailable", "provider_unavailable", "request_rejected", "request_limit"]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"ok": {"const": true}}, "required": ["ok"]},
+          "then": {"properties": {"payload": {"type": "object"}, "error": {"type": "null"}}},
+          "else": {"properties": {"payload": {"type": "null"}, "error": {"type": "object"}}}
+        }
+      ]
+    }
+  ]
+}

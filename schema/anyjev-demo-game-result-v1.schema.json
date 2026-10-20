@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schema/anyjev-demo-game-result-v1.schema.json",
+  "title": "Threadforge AnyJev demo-game result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "game",
+    "model_sha256",
+    "levels",
+    "baselines",
+    "episodes",
+    "omitted_fields",
+    "human_review_required",
+    "execution_verified",
+    "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-demo-game-result.v1"},
+    "game": {"enum": ["2048", "minesweeper"]},
+    "model_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "levels": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["level", "decisions", "oracle_agreement", "regret", "ece", "brier", "outcome_summaries"],
+        "properties": {
+          "level": {"enum": ["raw", "L0", "L1"]},
+          "decisions": {"type": "integer", "minimum": 1, "maximum": 10000000},
+          "oracle_agreement": {"type": "number", "minimum": 0, "maximum": 1},
+          "regret": {"type": "number", "minimum": 0, "maximum": 1},
+          "ece": {"type": "number", "minimum": 0, "maximum": 1},
+          "brier": {"type": "number", "minimum": 0, "maximum": 2},
+          "flip_rate": {"type": "number", "minimum": 0, "maximum": 1},
+          "illegal_mass": {"type": "number", "minimum": 0, "maximum": 1},
+          "outcome_summaries": {"$ref": "#/$defs/outcomeMetrics"}
+        }
+      }
+    },
+    "baselines": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "games", "metrics"],
+        "properties": {
+          "kind": {"enum": ["random", "first-listed", "oracle"]},
+          "games": {"type": "integer", "minimum": 1, "maximum": 1000},
+          "metrics": {"$ref": "#/$defs/outcomeMetrics"}
+        }
+      }
+    },
+    "episodes": {"type": "integer", "minimum": 1, "maximum": 1000},
+    "board": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "integer", "minimum": 2, "maximum": 100},
+        {"type": "integer", "minimum": 2, "maximum": 100},
+        {"type": "integer", "minimum": 1, "maximum": 9999}
+      ],
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "oracle_depth": {"type": "integer", "minimum": 1, "maximum": 16},
+    "preview": {"type": "boolean"},
+    "omitted_fields": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "human_review_required": {"const": true},
+    "execution_verified": {"const": false},
+    "cutover_evidence_eligible": {"const": false}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"game": {"const": "2048"}}, "required": ["game"]},
+      "then": {
+        "required": ["oracle_depth"],
+        "not": {"required": ["board"]},
+        "properties": {
+          "levels": {
+            "items": {
+              "required": ["flip_rate", "illegal_mass"],
+              "properties": {
+                "outcome_summaries": {
+                  "required": ["mean_score", "score_population_stddev", "maximum_tile", "mean_moves"],
+                  "minProperties": 4,
+                  "maxProperties": 4
+                }
+              }
+            }
+          },
+          "baselines": {
+            "items": {
+              "properties": {
+                "metrics": {
+                  "required": ["mean_score", "score_population_stddev", "maximum_tile", "mean_moves"],
+                  "minProperties": 4,
+                  "maxProperties": 4
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "required": ["board"],
+        "not": {"anyOf": [{"required": ["oracle_depth"]}, {"required": ["preview"]}]},
+        "properties": {
+          "levels": {
+            "items": {
+              "properties": {
+                "outcome_summaries": {
+                  "required": ["win_rate", "clear_rate", "mean_turns", "deaths"],
+                  "minProperties": 4,
+                  "maxProperties": 4
+                }
+              }
+            }
+          },
+          "baselines": {
+            "items": {
+              "properties": {
+                "kind": {"enum": ["random", "oracle"]},
+                "metrics": {
+                  "required": ["win_rate", "clear_rate", "mean_turns", "deaths"],
+                  "minProperties": 4,
+                  "maxProperties": 4
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "outcomeMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mean_score": {"type": "number", "minimum": 0, "maximum": 1000000000},
+        "score_population_stddev": {"type": "number", "minimum": 0, "maximum": 1000000000},
+        "maximum_tile": {"type": "number", "minimum": 0, "maximum": 1000000000},
+        "mean_moves": {"type": "number", "minimum": 0, "maximum": 1000000},
+        "win_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "clear_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "mean_turns": {"type": "number", "minimum": 0, "maximum": 1000000},
+        "deaths": {"type": "number", "minimum": 0, "maximum": 1000}
+      }
+    }
+  }
+}

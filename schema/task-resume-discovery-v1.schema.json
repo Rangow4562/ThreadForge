@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/task-resume-discovery-v1.schema.json",
+  "title": "Threadforge project-scoped task resume discovery v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "candidate_count",
+    "action_ready",
+    "guidance_only",
+    "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.task-resume-discovery.v1"
+    },
+    "status": {
+      "enum": ["available", "no_active_task", "task_selection_required"]
+    },
+    "candidate_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "context": {
+      "$ref": "https://threadforge.dev/schema/task-resume-context-v1.schema.json"
+    },
+    "action_ready": {
+      "const": false
+    },
+    "guidance_only": {
+      "const": true
+    },
+    "execution_authorized": {
+      "const": false
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "status": {"const": "available"},
+        "candidate_count": {"const": 1}
+      },
+      "required": ["context"]
+    },
+    {
+      "properties": {
+        "status": {"const": "no_active_task"},
+        "candidate_count": {"const": 0}
+      },
+      "not": {"required": ["context"]}
+    },
+    {
+      "properties": {
+        "status": {"const": "task_selection_required"},
+        "candidate_count": {"minimum": 2}
+      },
+      "not": {"required": ["context"]}
+    }
+  ]
+}

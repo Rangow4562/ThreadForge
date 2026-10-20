@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-batch-request-v1.schema.json",
+  "title": "Threadforge bounded typed decision batch request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "question", "states"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-batch-request.v1" },
+    "question": { "$ref": "decision-request-v1.schema.json#/$defs/question" },
+    "states": { "type": "array", "minItems": 1, "maxItems": 128 },
+    "backend": { "type": "object" },
+    "level": { "enum": ["raw", "L0", "L1", "L2", "auto"] },
+    "require_level": { "enum": ["raw", "L0", "L1", "L2"] }
+  }
+}

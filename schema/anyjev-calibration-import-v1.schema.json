@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/anyjev-calibration-import-v1.schema.json",
+  "title": "Local-review AnyJev calibration import",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "model", "question_key", "level", "calibration_examples", "content_sha256", "content"],
+  "properties": {
+    "schema_version": { "const": "threadforge.anyjev-calibration-import.v1" },
+    "model": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "question_key": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "level": { "enum": ["L1", "L2"] },
+    "calibration_examples": { "type": "integer", "minimum": 2, "maximum": 100000 },
+    "content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "content": { "type": "object" }
+  }
+}

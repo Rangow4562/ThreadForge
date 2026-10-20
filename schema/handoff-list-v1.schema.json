@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/handoff-list-v1.schema.json",
+  "title": "Threadforge Native Handoff Session List v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "sessions", "warnings"],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.native-session-list.v1"
+    },
+    "sessions": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["harness", "id", "updated_at"],
+        "properties": {
+          "harness": {"type": "string", "minLength": 1, "maxLength": 64},
+          "id": {"type": "string", "minLength": 1, "maxLength": 256},
+          "title": {"type": "string", "maxLength": 8192},
+          "directory": {"type": "string", "maxLength": 4096},
+          "branch": {"type": "string", "maxLength": 1024},
+          "source_path": {"type": "string", "maxLength": 4096},
+          "store": {"type": "string", "maxLength": 64},
+          "key": {"type": "string", "maxLength": 1024},
+          "updated_at": {"type": "string", "format": "date-time"},
+          "subagent": {"type": "boolean"},
+          "parent_id": {"type": "string", "maxLength": 256}
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "maxItems": 14,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code"],
+        "properties": {
+          "harness": {"type": "string", "maxLength": 64},
+          "code": {"enum": ["store_unavailable", "scan_truncated"]}
+        }
+      }
+    }
+  }
+}

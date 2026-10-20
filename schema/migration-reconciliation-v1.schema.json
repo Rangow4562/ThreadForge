@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/migration-reconciliation-v1.schema.json",
+  "title": "Threadforge Migration Reconciliation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "migration_id",
+    "product",
+    "source_fingerprint",
+    "expected_state",
+    "actual_state",
+    "status",
+    "snapshot_record_count",
+    "staged_record_count",
+    "excluded_record_count",
+    "cutover_authorized",
+    "mismatches"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.migration-reconciliation.v1"
+    },
+    "migration_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96
+    },
+    "product": {
+      "enum": ["beacon", "mancode", "anyjev", "rrsi"]
+    },
+    "source_fingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "expected_state": {
+      "enum": ["applied", "rolled_back"]
+    },
+    "actual_state": {
+      "enum": ["applied", "rolled_back", "not_found", "staging", "unknown"]
+    },
+    "status": {
+      "enum": ["reconciled", "rollback_reconciled", "mismatch"]
+    },
+    "snapshot_record_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "staged_record_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "excluded_record_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "cutover_authorized": {
+      "const": false
+    },
+    "mismatches": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "migration_receipt_missing",
+          "receipt_manifest_mismatch",
+          "database_state_mismatch",
+          "receipt_record_count_mismatch",
+          "snapshot_duplicate_key",
+          "staged_record_limit_exceeded",
+          "staged_record_count_changed_during_read",
+          "rolled_back_records_present",
+          "unexpected_staged_record",
+          "staged_record_content_mismatch",
+          "snapshot_records_missing_from_store"
+        ]
+      }
+    }
+  }
+}

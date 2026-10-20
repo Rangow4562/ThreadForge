@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-privacy-exclusions-summary-v1.schema.json",
+  "title": "Threadforge Mancode privacy-exclusions migration summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy_kind",
+    "authority",
+    "human_review_required",
+    "execution_authorized",
+    "revision",
+    "entry_count",
+    "decision_exclusion_count",
+    "checkpoint_exclusion_count",
+    "source_canonical_digest",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-privacy-exclusions-summary.v1" },
+    "policy_kind": { "const": "privacy_exclusions" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "revision": { "type": "integer", "minimum": 1 },
+    "entry_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "decision_exclusion_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "checkpoint_exclusion_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "source_canonical_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-artifact-v1.schema.json",
+  "title": "Threadforge local AnyJev calibration artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "revision", "status", "model", "question_key", "level", "calibration_examples", "content_sha256", "content", "created_at", "updated_at"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-artifact.v1" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "status": { "enum": ["candidate", "active", "rejected", "retired"] },
+    "model": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "model_checkpoint_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "question_key": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "level": { "enum": ["L1", "L2"] },
+    "calibration_examples": { "type": "integer", "minimum": 2, "maximum": 100000 },
+    "content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "content": { "type": "object" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    { "if": { "properties": { "status": { "const": "candidate" } } }, "then": { "properties": { "revision": { "const": 1 } } } },
+    { "if": { "properties": { "status": { "const": "active" } } }, "then": { "properties": { "revision": { "const": 2 } } } },
+    { "if": { "properties": { "status": { "const": "rejected" } } }, "then": { "properties": { "revision": { "const": 2 } } } },
+    { "if": { "properties": { "status": { "const": "retired" } } }, "then": { "properties": { "revision": { "const": 3 } } } },
+    { "if": { "properties": { "status": { "enum": ["candidate", "rejected"] } }, "required": ["status"] }, "then": { "not": { "required": ["model_checkpoint_sha256"] } } }
+  ]
+}

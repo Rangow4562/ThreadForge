@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/metric-catalog-v1.schema.json",
+  "title": "Threadforge local metric catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "metrics", "metrics_truncated", "older_events_omitted", "malformed_lines"],
+  "properties": {
+    "schema_version": { "const": "threadforge.metric-catalog.v1" },
+    "metrics": {
+      "type": "array",
+      "maxItems": 250,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "harness", "unit", "aggregation", "point_count", "first_timestamp", "last_timestamp"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$" },
+          "harness": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$" },
+          "unit": { "type": "string", "maxLength": 32, "pattern": "^[A-Za-z0-9%{}./_-]*$" },
+          "aggregation": { "enum": ["gauge", "sum", "histogram", "exponentialHistogram", "summary"] },
+          "point_count": { "type": "integer", "minimum": 1 },
+          "first_timestamp": { "type": "string", "format": "date-time" },
+          "last_timestamp": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "metrics_truncated": { "type": "boolean" },
+    "older_events_omitted": { "type": "boolean" },
+    "malformed_lines": { "type": "integer", "minimum": 0 }
+  }
+}

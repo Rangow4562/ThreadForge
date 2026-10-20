@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/task-claim-read-v1.schema.json",
+  "title": "Threadforge task claim read result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "claims", "execution_authorized"],
+  "properties": {
+    "schema_version": { "const": "threadforge.task-claim-read.v1" },
+    "task_id": { "$ref": "continuity-v1.schema.json#/$defs/id" },
+    "claims": { "type": "array", "maxItems": 100000, "items": { "$ref": "#/$defs/assessment" } },
+    "execution_authorized": { "const": false }
+  },
+  "$defs": {
+    "assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim", "lease_status", "task_revision_status", "baseline_status", "execution_authorized"],
+      "properties": {
+        "claim": { "$ref": "task-claim-v1.schema.json" },
+        "lease_status": { "enum": ["active", "expired", "released", "invalid"] },
+        "task_revision_status": { "enum": ["current", "stale"] },
+        "baseline_status": { "enum": ["match", "mismatch", "unverified"] },
+        "execution_authorized": { "const": false }
+      }
+    }
+  }
+}

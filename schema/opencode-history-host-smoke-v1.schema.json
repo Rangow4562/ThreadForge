@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/opencode-history-host-smoke-v1.schema.json",
+  "title": "Threadforge installed OpenCode history host-smoke result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "host_version", "provider", "provider_requests",
+    "real_model_invocations", "synthetic_session_count", "events_previewed", "preview_complete",
+    "content_mode", "prompt_text_retained", "raw_session_ids_retained", "cursor_written"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.opencode-history-host-smoke.v1" },
+    "status": { "const": "verified" },
+    "host_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$" },
+    "provider": { "const": "loopback-only-fixture" },
+    "provider_requests": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "real_model_invocations": { "const": 0 },
+    "synthetic_session_count": { "type": "integer", "minimum": 1, "maximum": 200 },
+    "events_previewed": { "type": "integer", "minimum": 1, "maximum": 20000 },
+    "preview_complete": { "const": true },
+    "content_mode": { "const": "metadata" },
+    "prompt_text_retained": { "const": false },
+    "raw_session_ids_retained": { "const": false },
+    "cursor_written": { "const": false }
+  }
+}

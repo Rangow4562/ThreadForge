@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-distillation-exemplars-v1.schema.json",
+  "title": "Threadforge AnyJev synthetic-state exemplars v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "workflow", "examples"],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-distillation-exemplars.v1"},
+    "workflow": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+    "examples": {"type": "array", "minItems": 3, "maxItems": 10000, "items": {"type": "object"}}
+  }
+}

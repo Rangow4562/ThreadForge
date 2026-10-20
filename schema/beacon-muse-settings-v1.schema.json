@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/beacon-muse-settings-v1.schema.json",
+  "title": "Sanitized Beacon Muse managed-hook pointer evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_format",
+    "kind",
+    "harness",
+    "managed_hooks_path_configured",
+    "target_basename_matches_beacon_file",
+    "effective_registration_verified",
+    "omitted_fields",
+    "human_review_required",
+    "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.beacon-muse-settings.v1" },
+    "source_format": { "const": "json" },
+    "kind": { "const": "muse_managed_hooks_pointer" },
+    "harness": { "const": "muse_code" },
+    "managed_hooks_path_configured": { "type": "boolean" },
+    "target_basename_matches_beacon_file": { "type": "boolean" },
+    "effective_registration_verified": { "const": false },
+    "omitted_fields": {
+      "const": [
+        "credentials",
+        "managed_hooks_path",
+        "local_paths",
+        "unrelated_settings"
+      ]
+    },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "managed_hooks_path_configured": { "const": false } },
+        "required": ["managed_hooks_path_configured"]
+      },
+      "then": {
+        "properties": { "target_basename_matches_beacon_file": { "const": false } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "target_basename_matches_beacon_file": { "const": true } },
+        "required": ["target_basename_matches_beacon_file"]
+      },
+      "then": {
+        "properties": { "managed_hooks_path_configured": { "const": true } }
+      }
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { max-width: 520px; margin: 24px auto; padding: 0 16px; font: 14px system-ui, sans-serif; color: #111; }
+      h1 { font-size: 18px; }
+      label { display: block; margin: 14px 0 4px; font-weight: 600; }
+      input[type="text"] { width: 100%; padding: 6px 8px; font: inherit; box-sizing: border-box; }
+      .site { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 6px 0; }
+      button { margin-top: 16px; padding: 8px 14px; font: inherit; }
+      .saved { color: #2a7; margin-left: 10px; }
+      .perm { margin: 12px 0; padding: 10px; border: 1px solid #e0a800; background: #fff8e1; border-radius: 4px; }
+      .perm p { margin: 0 0 8px; }
+      .perm button { margin-top: 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Threadforge Browser Capture</h1>
+    <p>Browser chat streams use private, undocumented site APIs. Capture is off until you enable it; select only the sites you intend to monitor. The first-use defaults retain metadata only.</p>
+
+    <div class="perm" id="perm-missing" data-testid="perm-missing" hidden>
+      <p><strong>Site access not granted.</strong> The extension captures nothing, and cannot reach
+        the local collector, until the browser allows access to:
+        <span id="perm-list" data-testid="perm-list"></span></p>
+      <button id="perm-grant" data-testid="perm-grant">Grant site access</button>
+    </div>
+
+    <label>Local OTLP logs endpoint</label>
+    <code id="endpoint" data-testid="endpoint"></code>
+
+    <label>Sites</label>
+    <div class="site"><input type="checkbox" id="site_claude_web" /><span>claude.ai</span></div>
+    <div class="site"><input type="checkbox" id="site_chatgpt_web" /><span>chatgpt.com</span></div>
+
+    <div>
+      <button id="save">Save</button>
+      <span class="saved" id="saved" hidden>Saved ✓</span>
+      <span id="error" role="alert" hidden></span>
+    </div>
+
+    <script src="options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.invalid/schema/procedure-graph-v1.schema.json",
+  "title": "Threadforge Procedure Graph v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "project_id", "title", "revision", "status", "applicability", "nodes", "edges", "evidence"],
+  "properties": {
+    "schema_version": { "const": "threadforge.procedure-graph.v1" },
+    "id": { "$ref": "#/$defs/id" },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+    "revision": { "type": "integer", "minimum": 1 },
+    "status": { "enum": ["draft", "validated", "approved", "rejected", "superseded", "stale"] },
+    "applicability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "modules": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "paths": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } }
+      }
+    },
+    "nodes": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/node" } },
+    "edges": { "type": "array", "maxItems": 1024, "items": { "$ref": "#/$defs/edge" } },
+    "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } },
+    "source_files": {
+      "type": "array", "maxItems": 500,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "validation": { "$ref": "#/$defs/validation" },
+    "approval": { "$ref": "#/$defs/approval" },
+    "superseded_by": { "$ref": "#/$defs/id" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "instruction"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "enum": ["trigger", "state", "action", "check", "output"] },
+        "instruction": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "module": { "type": "string", "maxLength": 128 },
+        "paths": { "type": "array", "uniqueItems": true, "items": { "type": "string", "maxLength": 256 } }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "relation"],
+      "properties": {
+        "from": { "$ref": "#/$defs/id" },
+        "to": { "$ref": "#/$defs/id" },
+        "relation": { "enum": ["requires", "enables", "leads_to", "branches_to", "loops_to", "validates"] },
+        "condition": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["origin", "content_sha256", "redacted"],
+      "properties": {
+        "origin": { "enum": ["trace", "document", "human", "benchmark"] },
+        "content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "harness": { "type": "string", "maxLength": 128 },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "local_trace_ref": { "type": "string", "maxLength": 256 },
+        "redacted": { "type": "boolean" }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dataset_fingerprint", "held_out", "baseline_runs", "baseline_score", "candidate_score", "noise_floor", "cost_unit", "baseline_cost", "candidate_cost", "max_cost_increase", "status"],
+      "properties": {
+        "dataset_fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "held_out": { "type": "boolean" },
+        "baseline_runs": { "type": "integer", "minimum": 1 },
+        "baseline_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "candidate_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "noise_floor": { "type": "number", "minimum": 0, "maximum": 1 },
+        "cost_unit": { "enum": ["tokens", "usd"] },
+        "baseline_cost": { "type": "number", "minimum": 0 },
+        "candidate_cost": { "type": "number", "minimum": 0 },
+        "max_cost_increase": { "type": "number", "minimum": 0 },
+        "status": { "enum": ["passed", "failed"] }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approved_by", "approved_at", "reason", "privacy_reviewed"],
+      "properties": {
+        "approved_by": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "approved_at": { "type": "string", "format": "date-time" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "privacy_reviewed": { "type": "boolean" }
+      }
+    }
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.invalid/schema/goose-history-sync-v1.schema.json",
+  "title": "Threadforge Goose History Sync v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "sessions", "sessions_changed", "sessions_truncated", "missing_tracked_sessions",
+    "messages_seen", "events_emitted", "events_previewed", "history_truncated_sessions",
+    "content_items_truncated", "cursor_conflicts", "content_mode", "complete", "preview_truncated", "errors"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.goose-history-sync.v1" },
+    "source_schema_version": { "const": 17 },
+    "sessions": { "type": "integer", "minimum": 0, "maximum": 500 },
+    "sessions_changed": { "type": "integer", "minimum": 0, "maximum": 500 },
+    "sessions_truncated": { "type": "boolean" },
+    "missing_tracked_sessions": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "messages_seen": { "type": "integer", "minimum": 0, "maximum": 20000 },
+    "events_emitted": { "type": "integer", "minimum": 0, "maximum": 20000 },
+    "events_previewed": { "type": "integer", "minimum": 0, "maximum": 20000 },
+    "history_truncated_sessions": { "type": "integer", "minimum": 0, "maximum": 500 },
+    "content_items_truncated": { "type": "integer", "minimum": 0, "maximum": 20000 },
+    "cursor_conflicts": { "type": "integer", "minimum": 0, "maximum": 500 },
+    "content_mode": { "enum": ["metadata", "include-content"] },
+    "complete": { "type": "boolean" },
+    "preview_truncated": { "type": "boolean" },
+    "errors": {
+      "type": "array",
+      "maxItems": 501,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": {
+          "session_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "message": { "type": "string", "minLength": 1, "maxLength": 256 }
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/event" }
+    }
+  },
+  "$defs": {
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timestamp", "vendor", "product", "schema_version", "event", "severity", "endpoint", "harness", "session", "content", "raw"],
+      "properties": {
+        "timestamp": { "type": "string", "format": "date-time" },
+        "vendor": { "const": "beacon" },
+        "product": { "const": "endpoint-agent" },
+        "schema_version": { "const": "1.0" },
+        "event": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "kind", "action", "category", "fidelity"],
+          "properties": {
+            "id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "kind": { "const": "agent_runtime" },
+            "action": { "enum": ["prompt.submitted", "agent.message"] },
+            "category": { "enum": ["prompt", "agent"] },
+            "fidelity": { "const": "observed" }
+          }
+        },
+        "severity": { "const": "info" },
+        "endpoint": {
+          "type": "object", "additionalProperties": false, "required": ["os"],
+          "properties": { "os": { "enum": ["windows", "macos", "linux", "other"] } }
+        },
+        "harness": {
+          "type": "object", "additionalProperties": false, "required": ["name", "collection_method"],
+          "properties": { "name": { "const": "goose" }, "collection_method": { "const": "poll" } }
+        },
+        "session": {
+          "type": "object", "additionalProperties": false, "required": ["id"],
+          "properties": { "id": { "type": "string", "pattern": "^goose:[a-f0-9]{64}$" } }
+        },
+        "content": {
+          "type": "object", "additionalProperties": false, "required": ["included", "hash", "bytes"],
+          "properties": {
+            "included": { "type": "boolean" },
+            "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "bytes": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+            "truncated": { "type": "boolean" }
+          }
+        },
+        "raw": {
+          "type": "object", "additionalProperties": false,
+          "required": ["source", "session_sha256", "message_sha256"],
+          "properties": {
+            "source": { "const": "goose_sessions_db" },
+            "session_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "message_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          }
+        },
+        "prompt": {
+          "type": "object", "additionalProperties": false, "required": ["text"],
+          "properties": { "text": { "type": "string", "maxLength": 4096 } }
+        },
+        "gen_ai": { "type": "object" }
+      }
+    }
+  }
+}

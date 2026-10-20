@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/inventory-summary-v2.schema.json",
+  "title": "Threadforge Dashboard Inventory Summary v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "complete",
+    "configured_runtime_count",
+    "config_file_count",
+    "mcp_server_count",
+    "skill_manifest_count",
+    "incomplete_source_count",
+    "runtimes"
+  ],
+  "properties": {
+    "schema_version": {"const": "threadforge.inventory-summary.v2"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "complete": {"type": "boolean"},
+    "configured_runtime_count": {"type": "integer", "minimum": 0},
+    "config_file_count": {"type": "integer", "minimum": 0},
+    "mcp_server_count": {"type": "integer", "minimum": 0},
+    "skill_manifest_count": {"type": "integer", "minimum": 0},
+    "incomplete_source_count": {"type": "integer", "minimum": 0},
+    "runtimes": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runtime",
+          "config_file_count",
+          "config_files_by_scope",
+          "mcp_server_count",
+          "skill_manifest_count",
+          "skill_manifests_by_scope",
+          "incomplete_source_count"
+        ],
+        "properties": {
+          "runtime": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9_]+$"},
+          "config_file_count": {"type": "integer", "minimum": 0},
+          "config_files_by_scope": {"$ref": "#/$defs/scopeCounts"},
+          "mcp_server_count": {"type": "integer", "minimum": 0},
+          "skill_manifest_count": {"type": "integer", "minimum": 0},
+          "skill_manifests_by_scope": {"$ref": "#/$defs/scopeCounts"},
+          "incomplete_source_count": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "scopeCounts": {
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scope", "count"],
+        "properties": {
+          "scope": {"enum": ["user", "project", "managed", "system", "workspace", "unknown"]},
+          "count": {"type": "integer", "minimum": 1}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,3 @@
+recursive-include threadforge_domains/workspace/runtime *
+include CREDITS.anyjev.md UPSTREAM_MODIFICATIONS.md
+global-exclude *.py[cod]

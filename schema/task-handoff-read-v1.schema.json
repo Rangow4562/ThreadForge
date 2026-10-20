@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/task-handoff-read-v1.schema.json",
+  "title": "Threadforge task handoff read v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "handoffs", "execution_authorized"],
+  "properties": {
+    "schema_version": { "const": "threadforge.task-handoff-read.v1" },
+    "task_id": { "$ref": "continuity-v1.schema.json#/$defs/id" },
+    "handoffs": { "type": "array", "maxItems": 100000, "items": { "$ref": "task-handoff-v1.schema.json" } },
+    "execution_authorized": { "const": false }
+  }
+}

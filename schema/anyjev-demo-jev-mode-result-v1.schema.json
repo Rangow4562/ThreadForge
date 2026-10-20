@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schema/anyjev-demo-jev-mode-result-v1.schema.json",
+  "title": "Threadforge AnyJev Jev-mode demo result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mode",
+    "backend",
+    "model_sha256",
+    "runtime_seconds",
+    "omitted_fields",
+    "human_review_required",
+    "execution_verified",
+    "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-demo-jev-mode-result.v1"},
+    "mode": {"enum": ["typed", "lifecycle"]},
+    "backend": {"enum": ["hf", "fake"]},
+    "model_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "runtime_seconds": {"type": "number", "minimum": 0, "maximum": 1000000},
+    "typed": {"$ref": "#/$defs/typedMode"},
+    "lifecycle": {"$ref": "#/$defs/lifecycleMode"},
+    "omitted_fields": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "human_review_required": {"const": true},
+    "execution_verified": {"const": false},
+    "cutover_evidence_eligible": {"const": false}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"mode": {"const": "typed"}}, "required": ["mode"]},
+      "then": {
+        "required": ["typed"],
+        "not": {"required": ["lifecycle"]}
+      },
+      "else": {
+        "required": ["lifecycle"],
+        "not": {"required": ["typed"]}
+      }
+    }
+  ],
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "typedLevel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accuracy", "ece", "examples", "prompts_per_decision", "blocks_executed", "model_blocks", "milliseconds_per_decision", "readout"],
+      "properties": {
+        "accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "ece": {"type": "number", "minimum": 0, "maximum": 1},
+        "examples": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "prompts_per_decision": {"type": "integer", "minimum": 1, "maximum": 100},
+        "blocks_executed": {"type": "integer", "minimum": 0, "maximum": 1024},
+        "model_blocks": {"type": "integer", "minimum": 1, "maximum": 1024},
+        "milliseconds_per_decision": {"type": "number", "minimum": 0, "maximum": 1000000},
+        "readout": {"enum": ["L0", "head:lda", "head:ridge", "head:rrr", "head:diff_means"]}
+      }
+    },
+    "pooledLevel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accuracy", "ece"],
+      "properties": {
+        "accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "ece": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "routeVariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accuracy", "flip_vs_exact"],
+      "properties": {
+        "accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "flip_vs_exact": {"type": "number", "minimum": 0, "maximum": 1},
+        "routed_from_sha256": {"$ref": "#/$defs/hash"},
+        "adapted": {"type": "boolean"},
+        "adapt_n": {"type": "integer", "minimum": 0, "maximum": 10000000},
+        "reordered": {"type": "boolean"}
+      }
+    },
+    "typedRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question_sha256", "variant", "exact_accuracy"],
+      "properties": {
+        "question_sha256": {"$ref": "#/$defs/hash"},
+        "variant": {"enum": ["w1", "w2", "w3", "o1", "custom"]},
+        "exact_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "routed_from_sha256": {"$ref": "#/$defs/hash"},
+        "as_is": {"$ref": "#/$defs/routeVariant"},
+        "recentred": {"$ref": "#/$defs/routeVariant"},
+        "reversed": {"$ref": "#/$defs/routeVariant"},
+        "l0_reworded_accuracy": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "typedFit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question_sha256", "label_count", "fit_seconds", "method", "layer_absolute", "oof_accuracy", "accuracy", "l0_accuracy"],
+      "properties": {
+        "question_sha256": {"$ref": "#/$defs/hash"},
+        "label_count": {"type": "integer", "minimum": 1, "maximum": 10000000},
+        "fit_seconds": {"type": "number", "minimum": 0, "maximum": 1000000},
+        "method": {"enum": ["head:lda", "head:ridge", "head:rrr", "head:diff_means"]},
+        "layer_absolute": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "oof_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "shipped_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "l0_accuracy": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "typedMode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device", "dtype", "batch_size", "model_blocks", "test_examples", "reword_variant", "adapt_after", "fit_labels", "model_load_seconds", "questions", "pooled", "routing", "fits", "round_trip"],
+      "properties": {
+        "device": {"enum": ["cpu", "cuda", "mps"]},
+        "dtype": {"enum": ["float16", "float32", "float64", "bfloat16"]},
+        "batch_size": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "head_block": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "model_blocks": {"type": "integer", "minimum": 1, "maximum": 1024},
+        "test_examples": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "reword_variant": {"enum": ["none", "w1", "w2", "w3", "o1"]},
+        "adapt_after": {"type": "integer", "minimum": 0, "maximum": 10000000},
+        "fit_labels": {"type": "integer", "minimum": 0, "maximum": 10000000},
+        "model_load_seconds": {"type": "number", "minimum": 0, "maximum": 1000000},
+        "questions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["question_sha256", "kind", "options", "examples", "shipped_head", "l0", "l2"],
+            "properties": {
+              "question_sha256": {"$ref": "#/$defs/hash"},
+              "kind": {"enum": ["choice", "noul", "score"]},
+              "options": {"type": "integer", "minimum": 2, "maximum": 26},
+              "examples": {"type": "integer", "minimum": 1, "maximum": 1000000},
+              "shipped_head": {"type": "boolean"},
+              "l0": {"$ref": "#/$defs/typedLevel"},
+              "l2": {"$ref": "#/$defs/typedLevel"}
+            }
+          }
+        },
+        "pooled": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["examples", "l0", "l2"],
+          "properties": {
+            "examples": {"type": "integer", "minimum": 1, "maximum": 10000000},
+            "l0": {"$ref": "#/$defs/pooledLevel"},
+            "l2": {"$ref": "#/$defs/pooledLevel"}
+          }
+        },
+        "routing": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {"$ref": "#/$defs/typedRoute"}
+        },
+        "pooled_routing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["exact_accuracy"],
+          "properties": {
+            "exact_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+            "as_is_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+            "recentred_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+            "reversed_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+            "l0_reworded_accuracy": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "fits": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {"$ref": "#/$defs/typedFit"}
+        },
+        "pooled_fit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["accuracy", "ece"],
+          "properties": {
+            "accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+            "ece": {"type": "number", "minimum": 0, "maximum": 1},
+            "shipped_accuracy": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "round_trip": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["head_count", "artifact_bytes", "max_probability_delta", "decision_count", "auto_without_head"],
+          "properties": {
+            "head_count": {"type": "integer", "minimum": 1, "maximum": 100000},
+            "artifact_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+            "max_probability_delta": {"type": "number", "minimum": 0, "maximum": 1},
+            "decision_count": {"type": "integer", "minimum": 1, "maximum": 10000000},
+            "auto_without_head": {"const": "L0"}
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"fit_labels": {"minimum": 1}}, "required": ["fit_labels"]},
+          "then": {
+            "required": ["pooled_fit"],
+            "properties": {"fits": {"minItems": 1}}
+          },
+          "else": {
+            "properties": {"fits": {"maxItems": 0}}
+          }
+        }
+      ]
+    },
+    "lifecycleFit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "accuracy", "ece", "level", "method", "layer_absolute", "oof_accuracy"],
+      "properties": {
+        "at": {"type": "integer", "minimum": 0, "maximum": 10000000},
+        "accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "ece": {"type": "number", "minimum": 0, "maximum": 1},
+        "level": {"const": "L2"},
+        "method": {"enum": ["head:lda", "head:ridge", "head:rrr", "head:diff_means"]},
+        "layer_absolute": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "oof_accuracy": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "lifecycleMode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question_sha256", "day0", "stream_examples", "fit_at", "fits", "wording", "restart"],
+      "properties": {
+        "question_sha256": {"$ref": "#/$defs/hash"},
+        "day0": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["level", "accuracy", "examples"],
+          "properties": {
+            "level": {"enum": ["raw", "L0", "L1"]},
+            "accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+            "examples": {"type": "integer", "minimum": 1, "maximum": 1000000}
+          }
+        },
+        "stream_examples": {"type": "integer", "minimum": 1, "maximum": 10000000},
+        "fit_at": {"type": "integer", "minimum": 1, "maximum": 10000000},
+        "fits": {"type": "array", "minItems": 1, "maxItems": 128, "items": {"$ref": "#/$defs/lifecycleFit"}},
+        "wording": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["first_examples", "accuracy_unadapted", "accuracy_adapted", "accuracy_control", "routed_from_sha256", "adapt_examples"],
+          "properties": {
+            "first_examples": {"type": "integer", "minimum": 1, "maximum": 10000000},
+            "accuracy_unadapted": {"type": "number", "minimum": 0, "maximum": 1},
+            "accuracy_adapted": {"type": "number", "minimum": 0, "maximum": 1},
+            "accuracy_control": {"type": "number", "minimum": 0, "maximum": 1},
+            "routed_from_sha256": {"$ref": "#/$defs/hash"},
+            "adapt_examples": {"type": "integer", "minimum": 0, "maximum": 10000000}
+          }
+        },
+        "restart": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["head_count", "observation_count", "adaptation_count", "artifact_bytes", "adapted_on_first_request", "adapt_examples_on_first", "max_probability_delta"],
+          "properties": {
+            "head_count": {"type": "integer", "minimum": 0, "maximum": 100000},
+            "observation_count": {"type": "integer", "minimum": 0, "maximum": 10000000},
+            "adaptation_count": {"type": "integer", "minimum": 0, "maximum": 10000000},
+            "artifact_bytes": {"type": "integer", "minimum": 0, "maximum": 1073741824},
+            "adapted_on_first_request": {"type": "boolean"},
+            "adapt_examples_on_first": {"type": "integer", "minimum": 0, "maximum": 10000000},
+            "max_probability_delta": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/metadata-export-v1.schema.json",
+  "title": "Threadforge metadata-only telemetry export v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "timestamp",
+    "severity",
+    "threadforge_export"
+  ],
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "severity": {
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical",
+        "unknown"
+      ]
+    },
+    "threadforge_export": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "raw_content"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "threadforge.metadata-export.v1"
+        },
+        "raw_content": {
+          "const": false
+        }
+      }
+    }
+  }
+}

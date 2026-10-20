@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/shared-procedure-record-v1.schema.json",
+  "title": "Threadforge authenticated shared procedure record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "procedure", "authorization"],
+  "properties": {
+    "schema_version": { "const": "threadforge.shared-procedure-record.v1" },
+    "procedure": { "$ref": "https://threadforge.invalid/schema/procedure-graph-v1.schema.json" },
+    "authorization": { "$ref": "team-attestation-v1.schema.json" }
+  }
+}

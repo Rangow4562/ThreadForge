@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-observe-cli-request-v1.schema.json",
+  "title": "Threadforge private AnyJev observation CLI request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "question", "observations"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-observe-cli.v1" },
+    "question": { "$ref": "decision-request-v1.schema.json#/$defs/question" },
+    "observations": {
+      "type": "array", "minItems": 1, "maxItems": 128,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["state", "label"],
+        "properties": { "state": {}, "label": { "type": "integer", "minimum": 0 } }
+      }
+    },
+    "backend": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "type": { "const": "hf" }, "model_path": { "type": "string", "minLength": 1 },
+            "device": { "enum": ["cpu", "mps", "cuda"] },
+            "dtype": { "enum": ["auto", "float32", "float16", "bfloat16"] },
+            "batch_size": { "type": "integer", "minimum": 1, "maximum": 64 }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["type"],
+          "properties": { "type": { "const": "fake" } }
+        }
+      ]
+    },
+    "fit_at": { "type": "integer", "minimum": 1, "maximum": 10000 },
+    "refit_factor": { "type": "number", "exclusiveMinimum": 1, "maximum": 10 },
+    "fit_options": { "$ref": "decision-observe-request-v1.schema.json#/$defs/fit_options" }
+  }
+}

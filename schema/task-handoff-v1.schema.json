@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/task-handoff-v1.schema.json",
+  "title": "Threadforge task handoff v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "project_id", "task_id", "from_owner", "to_owner", "task_revision", "claim_id", "claim_revision", "baseline_sha256", "checkpoint_entry_id", "checkpoint_summary", "status", "revision", "created_at", "updated_at"],
+  "properties": {
+    "schema_version": { "const": "threadforge.task-handoff.v1" },
+    "id": { "$ref": "continuity-v1.schema.json#/$defs/id" },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "task_id": { "$ref": "continuity-v1.schema.json#/$defs/id" },
+    "from_owner": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "to_owner": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "task_revision": { "type": "integer", "minimum": 1 },
+    "claim_id": { "$ref": "continuity-v1.schema.json#/$defs/id" },
+    "claim_revision": { "type": "integer", "minimum": 1 },
+    "baseline_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "checkpoint_entry_id": { "$ref": "continuity-v1.schema.json#/$defs/id" },
+    "checkpoint_summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "checkpoint_details": { "type": "string", "maxLength": 8000 },
+    "status": { "enum": ["draft", "offered", "accepted", "rejected", "cancelled"] },
+    "revision": { "type": "integer", "minimum": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "transferred_task_revision": { "type": "integer", "minimum": 1 },
+    "transferred_claim_revision": { "type": "integer", "minimum": 1 }
+  },
+  "allOf": [{
+    "if": { "properties": { "status": { "const": "accepted" } }, "required": ["status"] },
+    "then": { "required": ["transferred_task_revision", "transferred_claim_revision"] },
+    "else": { "not": { "anyOf": [
+      { "required": ["transferred_task_revision"] },
+      { "required": ["transferred_claim_revision"] }
+    ] } }
+  }]
+}

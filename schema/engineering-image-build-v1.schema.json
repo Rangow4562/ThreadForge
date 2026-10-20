@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.local/schema/engineering-image-build-v1.schema.json",
+  "title": "Threadforge Engineering Image Build Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "platform",
+    "image_id",
+    "tag",
+    "base_image",
+    "runtime_requirements_sha256",
+    "build_requirements_sha256",
+    "benchmark_data_included",
+    "evaluator_included"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.engineering-image-build.v1"
+    },
+    "platform": {
+      "const": "linux/amd64"
+    },
+    "image_id": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "tag": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 241,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}(:[A-Za-z0-9][A-Za-z0-9._-]{0,119})?$"
+    },
+    "base_image": {
+      "type": "string",
+      "pattern": "^python:3\\.12\\.[0-9]+-slim-bookworm@sha256:[0-9a-f]{64}$"
+    },
+    "runtime_requirements_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "build_requirements_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "benchmark_data_included": {
+      "const": false
+    },
+    "evaluator_included": {
+      "const": false
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

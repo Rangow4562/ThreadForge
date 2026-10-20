@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/cutover-evidence-v3.schema.json",
+  "title": "Threadforge all-or-nothing cutover evidence v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "candidate_commit", "features", "adapters", "migrations", "cross_harness_tests", "evaluations", "approvals"],
+  "properties": {
+    "schema_version": { "const": "threadforge.cutover-evidence.v3" },
+    "candidate_commit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+    "features": { "type": "array", "items": { "$ref": "cutover-evidence-v2.schema.json#/$defs/feature" } },
+    "adapters": { "type": "array", "items": { "$ref": "cutover-evidence-v2.schema.json#/$defs/adapter" } },
+    "migrations": { "type": "array", "items": { "$ref": "cutover-evidence-v2.schema.json#/$defs/migration" } },
+    "cross_harness_tests": { "type": "array", "items": { "$ref": "cutover-evidence-v2.schema.json#/$defs/cross_harness" } },
+    "evaluations": { "type": "array", "items": { "$ref": "#/$defs/evaluation" } },
+    "approvals": { "type": "array", "items": { "$ref": "cutover-evidence-v2.schema.json#/$defs/approval" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "evidence": { "$ref": "cutover-evidence-v2.schema.json#/$defs/evidence" },
+    "evaluation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["domain", "legacy_version", "legacy_commit", "dataset_sha256", "task_set_sha256", "held_out", "task_count", "baseline_runs", "candidate_runs", "baseline_repeat_failure_rate", "candidate_repeat_failure_rate", "noise_floor", "baseline_task_success_rate", "candidate_task_success_rate", "baseline_cost_usd", "candidate_cost_usd", "max_cost_overhead_ratio", "baseline_tokens", "candidate_tokens", "max_token_overhead_ratio", "outcome_artifact", "attestation", "evidence"],
+      "properties": {
+        "domain": { "enum": ["beacon", "mancode", "anyjev", "rrsi-coding", "rrsi-agentic-workspace", "rrsi-engineering-design"] },
+        "legacy_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "legacy_commit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+        "dataset_sha256": { "$ref": "#/$defs/sha256" },
+        "task_set_sha256": { "$ref": "#/$defs/sha256" },
+        "held_out": { "type": "boolean" },
+        "task_count": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "baseline_runs": { "const": 8 },
+        "candidate_runs": { "type": "integer", "minimum": 4, "maximum": 8 },
+        "baseline_repeat_failure_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "candidate_repeat_failure_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "noise_floor": { "type": "number", "minimum": 0, "maximum": 1 },
+        "baseline_task_success_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "candidate_task_success_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "baseline_cost_usd": { "type": "number", "exclusiveMinimum": 0 },
+        "candidate_cost_usd": { "type": "number", "minimum": 0 },
+        "max_cost_overhead_ratio": { "type": "number", "minimum": 0, "maximum": 10 },
+        "baseline_tokens": { "type": "integer", "minimum": 1 },
+        "candidate_tokens": { "type": "integer", "minimum": 0 },
+        "max_token_overhead_ratio": { "type": "number", "minimum": 0, "maximum": 10 },
+        "outcome_artifact": { "$ref": "#/$defs/evidence" },
+        "attestation": { "$ref": "#/$defs/evidence" },
+        "evidence": { "$ref": "cutover-evidence-v2.schema.json#/$defs/evidence_list" }
+      }
+    }
+  }
+}

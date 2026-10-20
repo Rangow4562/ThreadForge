@@ -1,0 +1,5 @@
+signal,connector,pin
+12V_OUT,J2,1
+RETURN,J2,2
+REMOTE_ENABLE,J2,3
+STATUS,J2,4

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/cutover-evidence-v4.schema.json",
+  "title": "Threadforge all-or-nothing cutover evidence v4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "candidate_commit", "features", "adapters", "migrations", "cross_harness_tests", "evaluations", "approvals"],
+  "properties": {
+    "schema_version": { "const": "threadforge.cutover-evidence.v4" },
+    "candidate_commit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+    "features": { "type": "array", "items": { "$ref": "cutover-evidence-v2.schema.json#/$defs/feature" } },
+    "adapters": { "type": "array", "items": { "$ref": "cutover-evidence-v2.schema.json#/$defs/adapter" } },
+    "migrations": { "type": "array", "items": { "$ref": "#/$defs/migration" } },
+    "cross_harness_tests": { "type": "array", "items": { "$ref": "cutover-evidence-v2.schema.json#/$defs/cross_harness" } },
+    "evaluations": { "type": "array", "items": { "$ref": "cutover-evidence-v3.schema.json#/$defs/evaluation" } },
+    "approvals": { "type": "array", "items": { "$ref": "cutover-evidence-v2.schema.json#/$defs/approval" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "evidence": { "$ref": "cutover-evidence-v2.schema.json#/$defs/evidence" },
+    "evidence_list": { "$ref": "cutover-evidence-v2.schema.json#/$defs/evidence_list" },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "product", "source_fingerprint", "snapshot_sha256", "format_coverage", "source_records",
+        "imported_records", "excluded_records", "unresolved_conflicts", "credential_records_migrated",
+        "interruption_recovery_tested", "rollback_rehearsed", "evidence"
+      ],
+      "properties": {
+        "product": { "enum": ["beacon", "mancode", "anyjev", "rrsi"] },
+        "source_fingerprint": { "$ref": "#/$defs/sha256" },
+        "snapshot_sha256": { "$ref": "#/$defs/sha256" },
+        "format_coverage": { "$ref": "#/$defs/evidence" },
+        "source_records": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "imported_records": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "excluded_records": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "unresolved_conflicts": { "type": "integer", "minimum": 0 },
+        "credential_records_migrated": { "type": "integer", "minimum": 0 },
+        "interruption_recovery_tested": { "type": "boolean" },
+        "rollback_rehearsed": { "type": "boolean" },
+        "evidence": { "$ref": "#/$defs/evidence_list" }
+      }
+    }
+  }
+}

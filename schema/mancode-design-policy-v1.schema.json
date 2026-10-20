@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-design-policy-v1.schema.json",
+  "title": "Threadforge Mancode design-policy migration projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authority",
+    "human_review_required",
+    "execution_authorized",
+    "revision",
+    "source_enabled",
+    "preset",
+    "icon_policy",
+    "emoji_policy",
+    "motion_policy",
+    "browser_validation",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-design-policy.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "revision": { "type": "integer", "minimum": 1 },
+    "source_enabled": { "type": "boolean" },
+    "preset": { "enum": ["preserve", "refine", "experimental"] },
+    "icon_policy": { "enum": ["existing-first", "lucide"] },
+    "emoji_policy": { "enum": ["allow", "forbid-as-interface-icon"] },
+    "motion_policy": { "enum": ["minimal", "purposeful"] },
+    "browser_validation": { "enum": ["off", "when-available", "required"] },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

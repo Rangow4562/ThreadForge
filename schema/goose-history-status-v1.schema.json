@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.invalid/schema/goose-history-status-v1.schema.json",
+  "title": "Threadforge Goose History Status v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "database_present", "sessions", "sessions_truncated", "tracked_sessions", "cursor_file_present", "errors"],
+  "properties": {
+    "schema_version": { "const": "threadforge.goose-history-status.v1" },
+    "database_present": { "type": "boolean" },
+    "source_schema_version": { "const": 17 },
+    "sessions": { "type": "integer", "minimum": 0, "maximum": 500 },
+    "sessions_truncated": { "type": "boolean" },
+    "tracked_sessions": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "cursor_file_present": { "type": "boolean" },
+    "errors": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": { "message": { "type": "string", "minLength": 1, "maxLength": 256 } }
+      }
+    }
+  }
+}

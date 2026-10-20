@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-paired-evaluation-v2.schema.json",
+  "title": "Threadforge paired held-out evaluation response v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "metric_gate_status", "evidence_status", "evidence", "statistics", "gate_decisions", "acceptance_status", "cutover_evidence_eligible", "benchmark_execution_performed", "human_approval_required", "execution_authorized"],
+  "properties": {
+    "schema_version": { "const": "threadforge.evolution-paired-evaluation.v2" },
+    "status": { "enum": ["compared", "privacy_blocked"] },
+    "metric_gate_status": { "enum": ["passed", "failed", "privacy_blocked"] },
+    "evidence_status": { "enum": ["referenced_unverified", "privacy_blocked"] },
+    "evidence": { "oneOf": [{ "$ref": "#/$defs/evidence" }, { "type": "null" }] },
+    "statistics": { "oneOf": [{ "$ref": "#/$defs/statistics" }, { "type": "null" }] },
+    "gate_decisions": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "failure_reduction_beyond_noise": { "type": "boolean" },
+        "task_success_non_regression": { "type": "boolean" },
+        "cost_overhead_within_limit": { "type": "boolean" },
+        "token_overhead_within_limit": { "type": "boolean" }
+      }
+    },
+    "acceptance_status": { "const": "not_evaluated" },
+    "cutover_evidence_eligible": { "const": false },
+    "benchmark_execution_performed": { "const": false },
+    "human_approval_required": { "const": true },
+    "execution_authorized": { "const": false }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "interval": {
+      "type": "object", "additionalProperties": false, "required": ["lower", "upper"],
+      "properties": { "lower": { "type": "number" }, "upper": { "type": "number" } }
+    },
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evaluation_id", "split_role", "dataset_sha256", "evaluator", "config_hashes", "baseline_run_count", "candidate_run_count", "task_count", "cost_unit", "request_sha256", "artifact_hashes_verified"],
+      "properties": {
+        "evaluation_id": { "type": "string" },
+        "split_role": { "const": "held_out" },
+        "dataset_sha256": { "$ref": "#/$defs/sha256" },
+        "evaluator": {
+          "type": "object", "additionalProperties": false, "required": ["id", "version", "sha256"],
+          "properties": { "id": { "type": "string" }, "version": { "type": "string" }, "sha256": { "$ref": "#/$defs/sha256" } }
+        },
+        "config_hashes": {
+          "type": "object", "additionalProperties": false, "required": ["baseline", "candidate"],
+          "properties": { "baseline": { "$ref": "#/$defs/sha256" }, "candidate": { "$ref": "#/$defs/sha256" } }
+        },
+        "baseline_run_count": { "type": "integer", "minimum": 8, "maximum": 8 },
+        "candidate_run_count": { "type": "integer", "minimum": 4, "maximum": 8 },
+        "task_count": { "type": "integer", "minimum": 1, "maximum": 2048 },
+        "cost_unit": { "type": "string" },
+        "request_sha256": { "$ref": "#/$defs/sha256" },
+        "artifact_hashes_verified": { "const": false }
+      }
+    },
+    "noise_calibration": {
+      "type": "object", "additionalProperties": false,
+      "required": ["method", "baseline_run_count", "baseline_comparison_run_count", "calibration_sample_count", "quantile"],
+      "properties": {
+        "method": { "const": "paired_baseline_run_bootstrap_null" },
+        "baseline_run_count": { "type": "integer", "minimum": 8, "maximum": 8 },
+        "baseline_comparison_run_count": { "type": "integer", "minimum": 4, "maximum": 8 },
+        "calibration_sample_count": { "type": "integer", "minimum": 100, "maximum": 10000 },
+        "quantile": { "type": "number", "minimum": 0.95, "maximum": 0.99 }
+      }
+    },
+    "overhead": {
+      "type": "object", "additionalProperties": false, "required": ["point", "ci", "maximum"],
+      "properties": { "point": { "type": "number" }, "ci": { "$ref": "#/$defs/interval" }, "maximum": { "type": "number", "minimum": 0 } }
+    },
+    "statistics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["confidence_level", "bootstrap_resamples", "seed", "resampling_unit", "run_level_uncertainty_included", "repeated_failures", "task_success", "cost_overhead_pct", "token_overhead_pct"],
+      "properties": {
+        "confidence_level": { "type": "number", "minimum": 0.95, "maximum": 0.99 },
+        "bootstrap_resamples": { "type": "integer", "minimum": 100, "maximum": 10000 },
+        "seed": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "resampling_unit": { "const": "paired_task_id_and_independent_run_resampling" },
+        "run_level_uncertainty_included": { "const": true },
+        "repeated_failures": {
+          "type": "object", "additionalProperties": false,
+          "required": ["baseline_mean_per_task", "candidate_mean_per_task", "reduction_per_task", "reduction_ci", "baseline_repeat_noise_floor", "noise_calibration"],
+          "properties": {
+            "baseline_mean_per_task": { "type": "number" },
+            "candidate_mean_per_task": { "type": "number" },
+            "reduction_per_task": { "type": "number" },
+            "reduction_ci": { "$ref": "#/$defs/interval" },
+            "baseline_repeat_noise_floor": { "type": "number", "minimum": 0 },
+            "noise_calibration": { "$ref": "#/$defs/noise_calibration" }
+          }
+        },
+        "task_success": {
+          "type": "object", "additionalProperties": false, "required": ["baseline_rate", "candidate_rate", "difference", "difference_ci"],
+          "properties": {
+            "baseline_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+            "candidate_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+            "difference": { "type": "number" },
+            "difference_ci": { "$ref": "#/$defs/interval" }
+          }
+        },
+        "cost_overhead_pct": { "$ref": "#/$defs/overhead" },
+        "token_overhead_pct": { "$ref": "#/$defs/overhead" }
+      }
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/handoff-export-v1.schema.json",
+  "title": "Threadforge Handoff Export Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source",
+    "harness",
+    "session_id",
+    "brief_sha256",
+    "brief_bytes",
+    "output_path",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.handoff-export.v1"
+    },
+    "source": {
+	  "enum": [
+	    "threadforge_runtime_log",
+	    "native_session_store"
+	  ]
+    },
+    "harness": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "brief_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "brief_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 49152
+    },
+    "output_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "warnings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "older_events_omitted": {
+          "type": "boolean"
+        },
+        "malformed_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "directory_conflict": {
+          "type": "boolean"
+        },
+        "branch_conflict": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

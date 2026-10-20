@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/copilot-cli-plan-gate-hook-result-v1.schema.json",
+  "title": "Threadforge GitHub Copilot CLI plan-gate hook result v1",
+  "description": "Flat preToolUse hook response consumed by GitHub Copilot CLI. Threadforge returns either an empty no-opinion object or a deny; it never emits allow.",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["permissionDecision", "permissionDecisionReason"],
+      "properties": {
+        "permissionDecision": { "const": "deny" },
+        "permissionDecisionReason": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "maxProperties": 0
+    }
+  ]
+}

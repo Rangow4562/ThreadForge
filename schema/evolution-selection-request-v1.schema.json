@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-selection-request-v1.schema.json",
+  "title": "Threadforge RRSI Selection Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "params"],
+  "properties": {
+    "schema_version": { "const": "threadforge.evolution-selection-request.v1" },
+    "params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["incumbent", "candidates", "delta"],
+      "properties": {
+        "incumbent": { "$ref": "#/$defs/evaluation" },
+        "candidates": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/candidate" }
+        },
+        "delta": { "type": "number", "minimum": 0, "maximum": 1 },
+        "s_star": { "type": "number", "minimum": 0, "maximum": 1 },
+        "incumbent_counts": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "beta0": { "type": "number", "minimum": 0 },
+            "beta1": { "type": "number", "minimum": 0 },
+            "w_s": { "type": "number", "minimum": 0 },
+            "w_c": { "type": "number", "minimum": 0 },
+            "w_n": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "cost"],
+      "properties": {
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "cost": { "type": "number", "exclusiveMinimum": 0 },
+        "job": { "type": "string", "maxLength": 256 }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "diff": { "type": "string", "maxLength": 120000 },
+        "measured": { "type": "boolean", "default": true },
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "cost": { "type": "number", "exclusiveMinimum": 0 },
+        "job": { "type": "string", "maxLength": 256 },
+        "edits": {
+          "type": "array",
+          "maxItems": 80,
+          "items": {
+            "type": "object",
+            "required": ["component"],
+            "properties": {
+              "component": {
+                "enum": ["prompt", "control_flow", "config", "output_plumbing", "context_mgmt", "client_tool", "skill", "memory", "subagent"]
+              }
+            }
+          }
+        },
+        "guards": { "type": "array", "maxItems": 256, "items": { "type": "string", "maxLength": 1000 } },
+        "gate_failure": { "type": "string", "maxLength": 1000 },
+        "detail": { "type": "string", "maxLength": 1000 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "measured": { "const": false } }, "required": ["measured"] },
+          "then": {},
+          "else": { "required": ["score", "cost"] }
+        }
+      ]
+    }
+  }
+}

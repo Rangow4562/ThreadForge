@@ -1,0 +1,6 @@
+reference,value,role
+U1,PWR-17,isolated power module
+C10,100 uF,output bulk capacitor
+R7,0.25 ohm,current sense shunt
+D4,SS14,reverse polarity protection
+F1,3 A,input fuse

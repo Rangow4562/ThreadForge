@@ -1,0 +1,42 @@
+# Go
+/bin/
+/dist/
+/coverage/
+*.test.exe
+/.playwright-cli/
+/python/build/
+/python/dist/
+/python/*.egg-info/
+adapters/browser-extension/dist/
+adapters/browser-extension/dist-firefox/
+adapters/browser-extension/dist-safari/
+adapters/browser-extension/artifacts/
+adapters/browser-extension/test-results/
+adapters/browser-extension/playwright-report/
+
+# Local data and credentials
+.threadforge/local/
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.key
+
+# JavaScript
+node_modules/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

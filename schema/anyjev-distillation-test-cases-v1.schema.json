@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-distillation-test-cases-v1.schema.json",
+  "title": "Threadforge AnyJev distillation held-out cases v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "question_id", "question", "examples"],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-distillation-test-cases.v1"},
+    "question_id": {"type": "string", "minLength": 1, "maxLength": 512},
+    "question": {"$ref": "#/$defs/question"},
+    "examples": {
+      "type": "array", "minItems": 1, "maxItems": 5000,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["state", "gold_index"],
+        "properties": {"state": {}, "gold_index": {"type": "integer", "minimum": 0, "maximum": 25}}
+      }
+    }
+  },
+  "$defs": {
+    "question": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "text"],
+      "properties": {
+        "kind": {"enum": ["choice", "score", "noul"]},
+        "text": {"type": "string", "minLength": 1, "maxLength": 10000},
+        "name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "options": {"type": "array", "minItems": 2, "maxItems": 26, "items": {"type": "string"}},
+        "scale": {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}], "minItems": 2, "maxItems": 2},
+        "bins": {"type": "integer", "minimum": 2, "maximum": 10},
+        "levels": {"type": "array", "minItems": 2, "maxItems": 10, "items": {"type": "string"}}
+      }
+    }
+  }
+}

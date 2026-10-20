@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/continuity-v1.schema.json",
+  "title": "Threadforge task and session continuity",
+  "oneOf": [
+    { "$ref": "#/$defs/task" },
+    { "$ref": "#/$defs/session" },
+    { "$ref": "#/$defs/entry" }
+  ],
+  "$defs": {
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "id", "project_id", "title", "objective", "acceptance_criteria", "status", "revision", "created_at", "updated_at"],
+      "properties": {
+        "schema_version": { "const": "threadforge.continuity.v1" },
+        "id": { "$ref": "#/$defs/id" },
+        "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "owner": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "objective": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "acceptance_criteria": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string", "minLength": 1, "maxLength": 1000 } },
+        "requirements": { "$ref": "task-requirements-v1.schema.json" },
+        "plan": { "$ref": "task-plan-v1.schema.json" },
+        "status": { "enum": ["open", "in_progress", "blocked", "completed", "abandoned"] },
+        "summary": { "type": "string", "maxLength": 8000 },
+        "next_action": { "type": "string", "maxLength": 2000 },
+        "revision": { "type": "integer", "minimum": 1 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "id", "project_id", "task_id", "harness", "status", "revision", "started_at", "updated_at"],
+      "properties": {
+        "schema_version": { "const": "threadforge.continuity.v1" },
+        "id": { "$ref": "#/$defs/id" },
+        "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "task_id": { "$ref": "#/$defs/id" },
+        "harness": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": { "enum": ["active", "closed"] },
+        "summary": { "type": "string", "maxLength": 8000 },
+        "completed": { "type": "array", "maxItems": 64, "items": { "type": "string", "minLength": 1, "maxLength": 1000 } },
+        "next_action": { "type": "string", "maxLength": 2000 },
+        "revision": { "type": "integer", "minimum": 1 },
+        "started_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "ended_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "id", "project_id", "task_id", "kind", "actor", "summary", "created_at"],
+      "properties": {
+        "schema_version": { "const": "threadforge.continuity.v1" },
+        "id": { "$ref": "#/$defs/id" },
+        "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "task_id": { "$ref": "#/$defs/id" },
+        "session_id": { "$ref": "#/$defs/id" },
+        "kind": { "enum": ["checkpoint", "handoff", "review", "verification", "task_claim", "task_handoff"] },
+        "actor": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "details": { "type": "string", "maxLength": 8000 },
+        "result": { "enum": ["passed", "failed", "inconclusive"] },
+        "evidence_sha256": { "type": "array", "maxItems": 100, "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" } },
+        "created_at": { "type": "string", "format": "date-time" },
+        "authorization": { "$ref": "continuity-attestation-v1.schema.json" },
+        "task_claim": { "$ref": "task-claim-event-v1.schema.json" },
+        "task_handoff": { "$ref": "task-handoff-event-v1.schema.json" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "task_claim" } }, "required": ["kind"] },
+          "then": { "required": ["task_claim"] },
+          "else": { "not": { "required": ["task_claim"] } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "task_handoff" } }, "required": ["kind"] },
+          "then": { "required": ["task_handoff"] },
+          "else": { "not": { "required": ["task_handoff"] } }
+        }
+      ]
+    },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" }
+  }
+}

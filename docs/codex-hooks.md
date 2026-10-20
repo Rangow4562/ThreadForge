@@ -1,0 +1,42 @@
+# Codex telemetry hook slice
+
+## Deny-only task-plan gate
+
+Codex CLI has a separate opt-in project PreToolUse hook for apply_patch and exec_command. It path-checks direct apply_patch targets and denies them when the task is plan_only, lacks finalized requirements, has an invalid plan, or a target is outside implementation scope. It denies all exec_command calls unless the configured task has finalized requirements and a valid governed_execution plan; for a governed shell command it returns no opinion and does not parse or enforce command paths. It never grants permission. The installer merges one matcher into the project .codex/hooks.json, preserves unrelated hook groups, and never enables hooks or changes project trust. The hook command has a five-second timeout.
+
+    npm.cmd --prefix adapters run adapter -- codex plan-gate install --project-root <absolute-project-path> --command 'threadforge task plan guard --host codex-cli --task-id <task-id> --project-id <project-id> --project-root <absolute-project-path> --db <local-threadforge.sqlite> --threadforge-managed-codex-plan-gate=v1 --threadforge-plan-gate=codex-v1'
+    npm.cmd --prefix adapters run adapter -- codex plan-gate uninstall --project-root <absolute-project-path>
+
+Enable Codex hooks and review/trust the project hook using the current Codex CLI controls; Threadforge deliberately leaves both choices unchanged. Hook timeout, launch, or malformed-output behavior may fail open. This guard does not mediate MCP tools, other write-capable tools, or races between the check and a later write. For governed_execution shell commands it does not enforce file scope. Treat it as a best-effort workflow guard, never as a sandbox or security boundary. Smoke v29 uses a disposable workspace, persisted synthetic plan_only task, and deterministic loopback provider. Codex CLI 0.163.0 did not expose direct apply_patch in the fixture request; the smoke therefore attempts the available exec_command path and reports exactly which hook result it observed.
+
+See docs/codex-cli-plan-gate.md for details and limitations.
+
+The Codex telemetry adapter remains pre-release and does not claim complete Codex integration. It writes a project `.codex/hooks.json` based on the documented Codex hook-file surface and Beacon's preserved `docs/runtimes/codex-cli.mdx` / `cli/beacon/internal/endpoint/hooks/codex.go` implementation. Codex also supports inline hook configuration; Threadforge does not modify `config.toml` or enable hooks for users. Installed-host smoke v29 verified one `PreToolUse` denial on Codex CLI 0.163.0 for a synthetic `plan_only` task using a disposable `CODEX_HOME`, deterministic loopback provider, workspace-write sandbox, and test-only hook-trust bypass. It does not verify normal project trust discovery, other versions, or every event contract. OpenAI Docs' [Codex hooks reference](https://learn.chatgpt.com/docs/hooks) is the host-contract authority.
+
+The TypeScript telemetry mapper in `adapters/src/codex-hook.ts` recognizes `SessionStart`, `PostToolUse`, `PostToolUseFailure`, and `SessionEnd`. The telemetry installer subscribes only to `SessionStart` and `PostToolUse`; it deliberately does not install `PreToolUse` or permission hooks. Hook input is bounded to 1 MiB. Session IDs and tool-call IDs are SHA-256 hashed, tool arguments become a digest plus byte count only (with digests omitted beyond 64 KiB), credential-like labels are dropped, and working directories, prompts, tool output, and local user names are not persisted. Events go only to the loopback `/v1/events` endpoint with a 250 ms timeout. The telemetry hook returns `{}` and never emits an allow/deny decision.
+
+## Approved project-memory injection
+
+Codex's documented `UserPromptSubmit` hook can add `hookSpecificOutput.additionalContext`. Threadforge provides this as a separate opt-in from telemetry. The local command reads the prompt and `cwd` transiently, retrieves approved memory for the configured project ID from local SQLite and version-controlled project files, and returns a bounded reference labeled as guidance—not authorization. Retrieval warnings remain visible; memory with path/module applicability is withheld when the hook input has no corresponding scope. Invalid input, local-store errors, and privacy-validation failures return an empty no-opinion result; Threadforge emits no blocking decision. A host-enforced timeout also yields no memory, and the installed host's timeout/failure behavior has not been verified here.
+
+Install the hook into the project's `.codex/hooks.json`:
+
+```powershell
+npm.cmd --prefix adapters run adapter -- codex memory install --project-root <absolute-project-path> --command 'threadforge memory inject-codex --project-id my-project --threadforge-managed-codex-memory=v1 --threadforge-memory=codex-v1'
+npm.cmd --prefix adapters run adapter -- codex memory uninstall --project-root <absolute-project-path>
+```
+
+The command must resolve as `threadforge` in Codex's execution environment. The installer sets a five-second command timeout and preserves unrelated hooks, the separate Threadforge telemetry hooks, trust settings, and feature settings. It does not enable hooks or grant project trust. Codex requires review/trust for changed non-managed hook definitions, and administrators may disable hooks; Threadforge leaves those choices untouched. Default retrieval limits are eight items, 1,600 approximate tokens, and 9,000 Unicode characters of context.
+
+This establishes a local adapter contract, not live Codex acceptance. The current host version, project hook discovery/trust flow, actual model use of injected context, and cross-harness task completion still require installed-host tests. See [OpenAI's Codex hooks reference](https://learn.chatgpt.com/docs/hooks).
+
+Task continuity remains off unless the configured command includes `--task-id <task-id>` or the separate opt-in `--discover-active-task`. Discovery selects a task only when exactly one eligible task exists in the configured `--project-id`: a task marked `in_progress`, or an `open` task with an active session. No task context is added when there are no candidates; when there are multiple candidates, only a generic selection-required note is added and all candidate task details are withheld. For a unique task, multiple active sessions withhold session-specific progress until selected; use explicit `--task-id` plus optional `--session-id`, except a structured `plan_only` task omits all session state. `--max-task-entries <1-20>` defaults to `6`. Handoff summaries omit authorization attestations and evidence digests, and stored text is labeled untrusted guidance. A `plan_only` snapshot preserves the proposal but suppresses old progress, next actions, and handoffs; its derived prompt reminder is advisory and does not enforce host permissions. Since `additionalContext` becomes model context, the host may send task details to its configured model provider; Threadforge does not persist the prompt or itself forward it remotely.
+
+Project config install/update/uninstall manages `.codex/hooks.json` only. It preserves unrelated top-level settings and hook groups, requires the ownership marker `--threadforge-hook=codex`, refuses malformed/oversized JSON and symbolic-link paths, and uses a local lock plus atomic replace. It does not edit Codex trust state, global settings, `config.toml`, or any feature-enable setting. Trust and hook enablement remain entirely under the user's control.
+
+```powershell
+npm.cmd --prefix adapters run adapter -- codex install --project-root <absolute-project-path> --command 'node --experimental-strip-types "<absolute-path-to-codex-hook.ts>" --threadforge-hook=codex'
+npm.cmd --prefix adapters run adapter -- codex uninstall --project-root <absolute-project-path>
+```
+
+Unit, fixture-preservation, loopback-emitter, CLI, and canonical Go intake tests pass locally. They do not launch Codex. User-level config and explicit local rollout backfill are implemented as separate opt-in commands; Codex MCP configuration, live OTLP/token validation, rollout-schema version coverage, packaging, current host trust flow, and live end-to-end validation remain incomplete. See [Codex rollout backfill](codex-cli-rollouts.md), the [source matrix](source-matrix.md), and [feature parity ledger](feature-parity.md).

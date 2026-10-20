@@ -1,0 +1,53 @@
+# Cline adapter and project skills
+
+Threadforge has a partial, observational adapter for Cline's plugin callback shape. The adapter exposes `createThreadforgeClinePlugin()` from `@threadforge/adapter-contracts/cline-plugin` and maps `beforeRun`, `beforeTool`, `afterTool`, and `afterRun` callbacks. `cline plugin install|update|uninstall|status` manages one owned auto-discovery wrapper in the selected user or project plugin directory. The wrapper imports the adapter from its current absolute local source path; keep the Threadforge checkout in place and rerun `update` after moving the checkout or changing the adapter. This is a local development registration, not a self-contained or signed distributable bundle. The installer does not edit Cline settings, MCP configuration, or other plugins. A separate `cline sessions status|sync` poller reads local task JSON, session-message JSON, Kanban state, and the VS Code extension task store; see [Cline local session history](cline-history.md).
+
+Install for the current user (defaults to `~/.cline`, overridden by `CLINE_HOME` or `--cline-dir`):
+
+```sh
+npm run adapter -- cline plugin install [--cline-dir <absolute-path>]
+npm run adapter -- cline plugin status [--cline-dir <absolute-path>]
+npm run adapter -- cline plugin update [--cline-dir <absolute-path>]
+npm run adapter -- cline plugin uninstall [--cline-dir <absolute-path>]
+```
+
+For project scope, supply `--scope project --project-root <absolute-path>`. The managed entry is `.cline/plugins/threadforge.ts`; user scope installs to `<cline-dir>/plugins/threadforge.ts`. The installer records a content digest in its ownership marker, refuses unmanaged collisions or local edits, and changes only this file. Restart Cline after registration changes. Installation does not grant the callbacks authorization: all captured signals remain observational and are delivered only to loopback intake.
+
+## Captured signals
+
+- `beforeRun` emits a session-start event and a prompt event when the run context contains a prompt.
+- `beforeTool` emits an invocation; `afterTool` maps explicit failures, command outcomes, file reads/edits, and the documented Cline MCP tool names.
+- `afterRun` emits a session completion/cancel/failure event and reported token/cost usage once.
+- No approval state is inferred, and plugin callbacks always resolve without a Cline decision, prompt rewrite, or output replacement.
+
+Task/call identifiers and workspace/file paths are SHA-256 hashed. Prompt, tool input, command, tool output, and file-change values are digested locally up to 64 KiB; oversized values are omitted. Context serialization tolerates cycles and is bounded to depth 8 and 2,000 values. Events are delivered only to the shared loopback `/v1/events` intake; `timeoutMs` defaults to 250 ms and can be configured from 100 to 10,000 ms. The callback fails open if intake or mapping fails, though Cline may await the callback while the bounded send completes.
+
+## Integration limits
+
+The plugin API contract is not pinned against an installed Cline release in this environment. Fixture tests validate wrapper ownership and CLI lifecycle but do not prove Cline auto-discovery, module loading, or callback compatibility. This module does not claim support for the VS Code extension or JetBrains plugin surfaces. Verify the loader and callback types in the intended Cline SDK/CLI environment before enabling installation. On October 9, 2026, read-only history status parsed 2 records from the local Cline roots with no errors; no events were sent and no cursor was written. The Cline executable is absent, so this does not verify the live plugin callback, Cline version, or task outcomes. Self-contained packaging/signing, version-pinned host tests, full source-format reconciliation, and cross-harness retrieval remain open release gates.
+
+## Install an approved procedure as a project skill
+
+Threadforge can place an already exported, privacy-reviewed procedure in the project skill directory `.cline/skills/<skill-name>/SKILL.md`. This is separate from the callback adapter above and is a knowledge-only path: it does not install telemetry callbacks, change Cline settings, configure MCP, or grant permission to execute a procedure. Cline must have project skills enabled, and the installed Cline version must recognize project skills before the file will be available to an agent.
+
+First export the approved graph and review the generated file:
+
+```sh
+threadforge procedure export-skill --project-root <project> --id <approved-procedure-id> --privacy-reviewed
+```
+
+The JSON result includes `path` and `sha256`. After reviewing that exact artifact, run the adapter command from the `adapters/` directory, supplying both values:
+
+```sh
+npm run adapter -- cline skills install --project-root <project> --skill-file <exported-path> --sha256 <exported-sha256>
+```
+
+The installer accepts only a regular file under that project's `.threadforge/skills/<id>/rev-NNNNNN/SKILL.md`, validates the generated Threadforge frontmatter and advisory/privacy notices, checks the supplied SHA-256, and copies the exact bytes. It writes an ownership marker beside the skill, refuses unowned or conflicting files, and never overwrites or removes content that has changed since installation. To uninstall, pass the same export path and digest:
+
+```sh
+npm run adapter -- cline skills uninstall --project-root <project> --skill-file <exported-path> --sha256 <exported-sha256>
+```
+
+Each exported revision is immutable and has a revision-specific skill name. Installing a later revision does not remove an earlier one; uninstall an older revision with its original exported file and digest after confirming it is no longer needed. User-added files in the skill directory and neighboring project skills are preserved. The digest check establishes that the installer received the reviewed bytes; it is not a digital signature or proof of who approved them. The skill text itself is advisory and cannot enforce policy or authorize actions.
+
+The project-skill path has automated fixture and CLI coverage, but live Cline loading, project/global name-collision behavior, skills-setting behavior, VS Code/JetBrains surfaces, and cross-harness retrieval have not been verified. Do not treat this partial installer as Cline telemetry or full Beacon/Mancode parity.

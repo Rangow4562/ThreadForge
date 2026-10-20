@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-observe-result-v1.schema.json",
+  "title": "Threadforge AnyJev observation update result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "question_id", "question_key", "model", "new_observations", "observation_count", "fits_this_call", "total_fits", "artifact_training_examples", "artifact", "checkpoint_sha256", "checkpoint", "human_review_required", "activation_allowed", "execution_authorized", "cutover_evidence_eligible"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-observe-result.v1" },
+    "status": { "enum": ["collecting", "fitted"] },
+    "question_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "question_key": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "model": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "new_observations": { "type": "integer", "minimum": 1, "maximum": 128 },
+    "observation_count": { "type": "integer", "minimum": 1, "maximum": 4096 },
+    "fits_this_call": { "type": "integer", "minimum": 0, "maximum": 128 },
+    "total_fits": { "type": "integer", "minimum": 0, "maximum": 4096 },
+    "artifact_training_examples": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 8, "maximum": 4096 }] },
+    "artifact": { "oneOf": [{ "type": "null" }, { "type": "object", "maxProperties": 64 }] },
+    "checkpoint_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "checkpoint": { "$ref": "decision-observe-request-v1.schema.json#/$defs/checkpoint" },
+    "human_review_required": { "const": true },
+    "activation_allowed": { "const": false },
+    "execution_authorized": { "const": false },
+    "cutover_evidence_eligible": { "const": false }
+  }
+}

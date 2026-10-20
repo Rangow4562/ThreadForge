@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/ci-security-gate-v1.schema.json",
+  "title": "Threadforge CI Security Gate Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "validation", "security"],
+  "properties": {
+    "schema_version": {"const": "threadforge.ci-security-gate.v1"},
+    "status": {"enum": ["passed", "failed", "incomplete"]},
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "status", "total_events", "matched_events", "min_events", "malformed_rows", "log_bytes", "generated_at"],
+      "properties": {
+        "schema_version": {"const": "threadforge.ci-validation.v1"},
+        "status": {"enum": ["passed", "failed"]},
+        "harness": {"enum": ["claude_code", "codex_cli"]},
+        "total_events": {"type": "integer", "minimum": 0},
+        "matched_events": {"type": "integer", "minimum": 0},
+        "min_events": {"type": "integer", "minimum": 1},
+        "malformed_rows": {"type": "integer", "minimum": 0},
+        "log_bytes": {"type": "integer", "minimum": 0},
+        "generated_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "event_count", "malformed_lines", "rule_count", "finding_count", "findings_by_severity", "fail_on", "threshold_matched"],
+      "properties": {
+        "complete": {"type": "boolean"},
+        "event_count": {"type": "integer", "minimum": 0},
+        "malformed_lines": {"type": "integer", "minimum": 0},
+        "rule_count": {"type": "integer", "minimum": 0},
+        "finding_count": {"type": "integer", "minimum": 0},
+        "findings_by_severity": {
+          "type": "object",
+          "propertyNames": {"enum": ["info", "low", "medium", "high", "critical"]},
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        },
+        "fail_on": {"enum": ["info", "low", "medium", "high", "critical"]},
+        "threshold_matched": {"type": "boolean"}
+      }
+    }
+  }
+}

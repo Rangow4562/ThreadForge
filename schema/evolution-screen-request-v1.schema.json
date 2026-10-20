@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-screen-request-v1.schema.json",
+  "title": "Threadforge deterministic RRSI pre-screen request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "domain", "diff"],
+  "properties": {
+    "schema_version": { "const": "threadforge.evolution-screen-request.v1" },
+    "domain": { "enum": ["rrsi-coding", "rrsi-agentic-workspace", "rrsi-engineering-design"] },
+    "diff": { "type": "string", "minLength": 1, "maxLength": 120000 },
+    "denied_literals": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["literal", "reason"],
+        "properties": {
+          "literal": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "benchmark_task_ids": {
+      "type": "array", "maxItems": 2048,
+      "items": { "type": "string", "minLength": 3, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$" }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": "threadforge.project-memory.v1",
+  "id": "release-approval-policy",
+  "project_id": "sample-project",
+  "kind": "policy",
+  "title": "Release approval policy",
+  "content": {
+    "rule": "A human reviewer approves a release after the required checks pass.",
+    "scope": "release workflow"
+  },
+  "evidence": [
+    {
+      "origin": "human",
+      "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "redacted": true
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/beacon-gemini-otel-config-v1.schema.json",
+  "title": "Sanitized Beacon Gemini OTEL configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_format",
+    "kind",
+    "harness",
+    "telemetry_configured",
+    "target",
+    "endpoint_scope",
+    "otlp_protocol",
+    "use_collector",
+    "outfile_configured",
+    "omitted_fields",
+    "human_review_required",
+    "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.beacon-gemini-otel-config.v1" },
+    "source_format": { "const": "json" },
+    "kind": { "const": "gemini_otel_configuration" },
+    "harness": { "const": "gemini_cli" },
+    "telemetry_configured": { "const": true },
+    "target": { "const": "local" },
+    "endpoint_scope": { "const": "loopback" },
+    "otlp_protocol": { "const": "grpc" },
+    "use_collector": { "const": true },
+    "enabled": { "type": "boolean" },
+    "log_prompts": { "type": "boolean" },
+    "traces": { "type": "boolean" },
+    "outfile_configured": { "type": "boolean" },
+    "omitted_fields": {
+      "const": [
+        "credentials",
+        "exporter_endpoint",
+        "local_paths",
+        "outfile_path",
+        "unrelated_settings"
+      ]
+    },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false }
+  }
+}

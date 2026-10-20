@@ -1,0 +1,19 @@
+{
+  "_doc": "Harvey LAB workspace RRSI adapter. Evolve/held-out IDs must come from the private verified inventory bundle, never a local regenerated split. Policy inference defaults to loopback; the official Harvey rubric judge is remote and requires separate remote_evaluation_opt_in. Score is criterion-weighted pass fraction. Paper selection values are retained for comparison only; actual baseline, noise, held-out, and cost evidence must be measured before acceptance.",
+  "T": 20, "k": 2, "m": 2,
+  "b_min": 1, "b_max": 3, "w": 3, "m_draft": 1,
+  "delta": 0.004, "delta_z": 2.0,
+  "beta0": 0.10, "beta1": 35.4,
+  "w_s": 1414.0, "w_c": 15.0, "w_n": 0.5,
+  "n_prune": 4,
+  "repair_rounds": 5, "invalid_missing_frac": 0.1,
+  "n_fail_traces": 60, "n_success_traces": 6, "eval_parallel": 1,
+  "harvey_lab_root": "harvey-labs",
+  "harvey_lab_commit": "1da4750171bc5a534960b3d82d15ba7fd2cf653f",
+  "gateway_port": 8992, "max_concurrent": 12,
+  "judge_model": "gemini-3.5-flash",
+  "benchmark_execution_opt_in": false,
+  "remote_inference_opt_in": false,
+  "remote_evaluation_opt_in": false,
+  "_threadforge_modifications": "Consent defaults and the private verified inventory requirement were added by Threadforge; see python/UPSTREAM_MODIFICATIONS.md."
+}

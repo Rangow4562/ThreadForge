@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-bundle-summary-v1.schema.json",
+  "title": "Threadforge local AnyJev bundle lifecycle summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "revision", "status", "model", "artifact_count", "head_count", "adaptation_count", "observation_question_count", "observation_state_count", "content_sha256", "validation_sha256", "created_at", "updated_at"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-bundle.v1" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "revision": { "type": "integer", "minimum": 1, "maximum": 3 },
+    "status": { "enum": ["candidate", "active", "rejected", "retired"] },
+    "model": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "model_checkpoint_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "artifact_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+    "head_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+    "adaptation_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+    "observation_question_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+    "observation_state_count": { "type": "integer", "minimum": 0, "maximum": 4096 },
+    "content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "validation_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

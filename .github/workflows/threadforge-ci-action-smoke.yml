@@ -1,0 +1,81 @@
+name: Threadforge CI action smoke
+
+on:
+  pull_request:
+    paths:
+      - '.github/actions/threadforge-ci/**'
+      - '.github/workflows/threadforge-ci-action-smoke.yml'
+      - 'cmd/**'
+      - 'internal/ci/**'
+      - 'internal/cli/ci.go'
+      - 'internal/security/**'
+      - 'schema/ci-security-gate-v1.schema.json'
+      - 'internal/service/otlp_http.go'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Threadforge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Start local telemetry capture
+        uses: ./.github/actions/threadforge-ci
+        with:
+          mode: start
+          min-events: '1'
+          require-telemetry: 'true'
+
+      - name: Emit one synthetic, content-free harness event
+        shell: bash
+        run: |
+          timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          payload="$(printf '{\"timestamp\":\"%s\",\"vendor\":\"beacon\",\"product\":\"endpoint-agent\",\"schema_version\":\"1.0\",\"event\":{\"kind\":\"agent_runtime\",\"action\":\"session.started\"},\"severity\":\"info\",\"endpoint\":{\"os\":\"linux\"},\"harness\":{\"name\":\"claude_code\",\"collection_method\":\"hook\"}}' "$timestamp")"
+          curl --fail --silent --show-error --max-time 5 \
+            -H 'Content-Type: application/json' \
+            --data "$payload" \
+            "$THREADFORGE_EVENT_ENDPOINT"
+
+      - name: Stop and validate local capture
+        if: always() && env.THREADFORGE_CI_STATE_PATH != ''
+        uses: ./.github/actions/threadforge-ci
+        with:
+          mode: finish
+          upload-summary: 'true'
+          security-fail-on: critical
+
+      - name: Start local Codex CI capture
+        uses: ./.github/actions/threadforge-ci
+        with:
+          mode: start
+          harness: codex-cli
+          min-events: '1'
+          require-telemetry: 'true'
+
+      - name: Validate isolated Codex config and emit one synthetic event
+        shell: bash
+        run: |
+          test -f "$CODEX_HOME/config.toml"
+          grep -q 'metrics_exporter = "none"' "$CODEX_HOME/config.toml"
+          grep -q 'log_user_prompt = false' "$CODEX_HOME/config.toml"
+          timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          payload="$(printf '{\"timestamp\":\"%s\",\"vendor\":\"beacon\",\"product\":\"endpoint-agent\",\"schema_version\":\"1.0\",\"event\":{\"kind\":\"agent_runtime\",\"action\":\"session.started\"},\"severity\":\"info\",\"endpoint\":{\"os\":\"linux\"},\"harness\":{\"name\":\"codex_cli\",\"collection_method\":\"otlp\"}}' "$timestamp")"
+          curl --fail --silent --show-error --max-time 5 \
+            -H 'Content-Type: application/json' \
+            --data "$payload" \
+            "$THREADFORGE_EVENT_ENDPOINT"
+
+      - name: Stop and validate local Codex capture
+        if: always() && env.THREADFORGE_CI_STATE_PATH != ''
+        uses: ./.github/actions/threadforge-ci
+        with:
+          mode: finish
+          harness: codex-cli
+          upload-summary: 'true'
+          security-fail-on: critical

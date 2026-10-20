@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-distillation-label-request-v1.schema.json",
+  "title": "Threadforge AnyJev local teacher-label request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "data_root", "cache_root", "teacher_model", "teacher_model_checkpoint_sha256", "backend", "teacher_artifact", "workflows", "questions"],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-distillation-label-request.v1"},
+    "data_root": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "cache_root": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "teacher_model": {"type": "string", "minLength": 1, "maxLength": 512},
+    "teacher_model_checkpoint_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "backend": {"$ref": "#/$defs/backend"},
+    "teacher_artifact": {"$ref": "#/$defs/artifact"},
+    "workflows": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/$defs/workflow"}},
+    "questions": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/$defs/question"}}
+  },
+  "$defs": {
+    "backend": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "model_path"],
+      "properties": {
+        "type": {"const": "hf"},
+        "model_path": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "device": {"enum": ["cpu", "mps", "cuda", "cuda:0", "cuda:1", "cuda:2", "cuda:3"], "default": "cpu"},
+        "dtype": {"enum": ["auto", "float32", "float16", "bfloat16"], "default": "float32"},
+        "batch_size": {"type": "integer", "minimum": 1, "maximum": 64, "default": 8}
+      }
+    },
+    "artifact": {
+      "type": "object", "required": ["model", "artifacts", "heads"],
+      "properties": {"model": {"type": "string"}, "artifacts": {"type": "object"}, "heads": {"type": "object"}}
+    },
+    "workflow": {
+      "type": "object", "additionalProperties": false,
+      "required": ["workflow", "synthetic_states_path"],
+      "properties": {
+        "workflow": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+        "synthetic_states_path": {"$ref": "#/$defs/relativeJson"}
+      }
+    },
+    "question": {
+      "type": "object", "additionalProperties": false,
+      "required": ["question_id", "workflow", "test_cases_path"],
+      "properties": {
+        "question_id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "workflow": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+        "test_cases_path": {"$ref": "#/$defs/relativeJson"}
+      }
+    },
+    "relativeJson": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*[\\\\:]).+\\.json$"}
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-distillation-cache-v1.schema.json",
+  "title": "Threadforge AnyJev distillation cache projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "cache_kind",
+    "model_sha256",
+    "question_sha256",
+    "split",
+    "examples",
+    "class_count",
+    "block",
+    "omitted_fields",
+    "human_review_required",
+    "execution_verified",
+    "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-distillation-cache.v1"},
+    "cache_kind": {"enum": ["teacher_probabilities", "teacher_test_labels", "student_features"]},
+    "model_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "question_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "split": {"enum": ["synth", "test"]},
+    "examples": {"type": "integer", "minimum": 1, "maximum": 100000},
+    "class_count": {"type": "integer", "minimum": 2, "maximum": 512},
+    "block": {"type": "integer", "minimum": 1, "maximum": 100000},
+    "feature_width": {"type": "integer", "minimum": 1, "maximum": 65536},
+    "mean_top_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "mean_entropy": {"type": "number", "minimum": 0, "maximum": 10},
+    "argmax_counts": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 512,
+      "items": {"type": "integer", "minimum": 0, "maximum": 100000}
+    },
+    "top1_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+    "expected_calibration_error": {"type": "number", "minimum": 0, "maximum": 1},
+    "negative_log_loss": {"type": "number", "minimum": 0, "maximum": 35},
+    "omitted_fields": {
+      "const": [
+        "per_example_probabilities",
+        "gold_labels",
+        "feature_vectors",
+        "synthetic_states",
+        "raw_model_identifiers",
+        "raw_question_identifiers"
+      ]
+    },
+    "human_review_required": {"const": true},
+    "execution_verified": {"const": false},
+    "cutover_evidence_eligible": {"const": false}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"cache_kind": {"const": "student_features"}}, "required": ["cache_kind"]},
+      "then": {
+        "required": ["feature_width"],
+        "not": {"anyOf": [{"required": ["mean_top_confidence"]}, {"required": ["mean_entropy"]}, {"required": ["argmax_counts"]}, {"required": ["top1_accuracy"]}, {"required": ["expected_calibration_error"]}, {"required": ["negative_log_loss"]}]}
+      },
+      "else": {
+        "required": ["mean_top_confidence", "mean_entropy", "argmax_counts"],
+        "not": {"required": ["feature_width"]}
+      }
+    },
+    {
+      "if": {"properties": {"cache_kind": {"const": "teacher_test_labels"}}, "required": ["cache_kind"]},
+      "then": {
+        "required": ["top1_accuracy", "expected_calibration_error", "negative_log_loss"],
+        "properties": {"split": {"const": "test"}}
+      },
+      "else": {
+        "not": {"anyOf": [{"required": ["top1_accuracy"]}, {"required": ["expected_calibration_error"]}, {"required": ["negative_log_loss"]}]}
+      }
+    },
+    {
+      "if": {"properties": {"cache_kind": {"const": "teacher_probabilities"}}, "required": ["cache_kind"]},
+      "then": {"properties": {"split": {"const": "synth"}}}
+    }
+  ]
+}

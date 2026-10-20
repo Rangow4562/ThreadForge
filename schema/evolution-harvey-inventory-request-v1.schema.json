@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-harvey-inventory-request-v1.schema.json",
+  "title": "Threadforge local Harvey LAB inventory derivation request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "params"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.evolution-harvey-inventory-request.v1"
+    },
+    "params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "harvey_lab_root"
+      ],
+      "properties": {
+        "harvey_lab_root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Absolute local path to the Harvey LAB checkout pinned by the vendored RRSI workspace split contract. The path is never returned."
+        }
+      }
+    }
+  }
+}

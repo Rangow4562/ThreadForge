@@ -1,0 +1,37 @@
+{
+  "name": "@threadforge/browser-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Opt-in local browser chat telemetry for Claude.ai and ChatGPT Web.",
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "build:watch": "node esbuild.config.mjs --watch",
+    "build:firefox": "node esbuild.config.mjs --target firefox",
+    "build:safari": "node esbuild.config.mjs --target safari",
+    "package:chromium": "npm run build && web-ext build --source-dir dist --artifacts-dir artifacts/chromium --filename threadforge-browser-chromium.zip --no-input --no-config-discovery --overwrite-dest",
+    "package:firefox": "npm run build:firefox && web-ext build --source-dir dist-firefox --artifacts-dir artifacts/firefox --filename threadforge-browser-firefox.zip --no-input --no-config-discovery --overwrite-dest",
+    "lint:firefox": "npm run build:firefox && web-ext lint --source-dir dist-firefox --warnings-as-errors",
+    "check": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "pretest": "npm run build",
+    "test": "playwright test",
+    "test:headed": "HEADED=1 playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "record:fixtures": "node --experimental-strip-types tools/record-fixtures.ts",
+    "report": "playwright show-report"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/chrome": "^0.0.270",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.28.1",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.0",
+    "web-ext": "^10.7.0"
+  }
+}

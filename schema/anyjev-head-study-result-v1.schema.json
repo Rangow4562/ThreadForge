@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/anyjev-head-study-result-v1.schema.json",
+  "title": "Sanitized historical AnyJev per-question head-study result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "source_kind", "model_sha256", "seed", "layers", "kinds", "labels",
+    "question_count", "test_examples", "calibration_examples", "pooled", "questions",
+    "omitted_fields", "human_review_required", "execution_verified", "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.anyjev-head-study-result.v1" },
+    "source_kind": { "const": "per_question_head_study" },
+    "model_sha256": { "$ref": "#/$defs/sha256" },
+    "seed": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "layers": {
+      "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true,
+      "items": { "type": "integer", "minimum": -4096, "maximum": 4096 }
+    },
+    "kinds": {
+      "type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true,
+      "items": { "enum": ["diff_means", "lda", "ridge", "rrr"] }
+    },
+    "labels": {
+      "type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true,
+      "items": { "enum": ["gold", "self"] }
+    },
+    "question_count": { "type": "integer", "minimum": 1, "maximum": 10000 },
+    "test_examples": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+    "calibration_examples": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+    "pooled": {
+      "type": "array", "minItems": 22, "maxItems": 22,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["method", "metrics"],
+        "properties": {
+          "method": { "$ref": "#/$defs/method" },
+          "metrics": { "$ref": "#/$defs/pooledMetrics" }
+        }
+      }
+    },
+    "questions": {
+      "type": "array", "minItems": 1, "maxItems": 10000,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["question_sha256", "kind", "option_count", "test_examples", "calibration_examples", "rows", "heads"],
+        "properties": {
+          "question_sha256": { "$ref": "#/$defs/sha256" },
+          "kind": { "enum": ["choice", "noul", "score"] },
+          "option_count": { "type": "integer", "minimum": 2, "maximum": 100 },
+          "test_examples": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+          "calibration_examples": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+          "rows": {
+            "type": "array", "minItems": 22, "maxItems": 22,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["method", "metrics"],
+              "properties": {
+                "method": { "$ref": "#/$defs/method" },
+                "metrics": { "$ref": "#/$defs/questionMetrics" }
+              }
+            }
+          },
+          "heads": {
+            "type": "array", "minItems": 16, "maxItems": 16,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["method", "layer", "parameters", "temperature", "label_count", "oof_nll", "oof_accuracy"],
+              "properties": {
+                "method": { "$ref": "#/$defs/headMethod" },
+                "layer": { "type": "integer", "minimum": 0, "maximum": 4096 },
+                "parameters": {
+                  "type": "object", "additionalProperties": false,
+                  "properties": {
+                    "shrinkage": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "lambda": { "type": "number", "minimum": 0, "maximum": 1000000 },
+                    "rank": { "type": "integer", "minimum": 1, "maximum": 4096 }
+                  }
+                },
+                "temperature": { "type": "number", "minimum": 0, "maximum": 1000 },
+                "label_count": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+                "oof_nll": { "type": "number", "minimum": 0, "maximum": 1000000 },
+                "oof_accuracy": { "type": "number", "minimum": 0, "maximum": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "omitted_fields": {
+      "const": [
+        "model_label", "question_keys", "study_date", "environment_details", "hardware_details",
+        "git_commit", "source_paths", "raw_question_content"
+      ]
+    },
+    "human_review_required": { "const": true },
+    "execution_verified": { "const": false },
+    "cutover_evidence_eligible": { "const": false }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "method": {
+      "enum": [
+        "raw", "L1", "L1@self", "L0-perm", "L0-perm+T", "L0-perm+T@self",
+        "head:diff_means", "head:diff_means/avg", "head:diff_means@self", "head:diff_means/avg@self",
+        "head:lda", "head:lda/avg", "head:lda@self", "head:lda/avg@self",
+        "head:ridge", "head:ridge/avg", "head:ridge@self", "head:ridge/avg@self",
+        "head:rrr", "head:rrr/avg", "head:rrr@self", "head:rrr/avg@self"
+      ]
+    },
+    "headMethod": {
+      "enum": [
+        "head:diff_means", "head:diff_means/avg", "head:diff_means@self", "head:diff_means/avg@self",
+        "head:lda", "head:lda/avg", "head:lda@self", "head:lda/avg@self",
+        "head:ridge", "head:ridge/avg", "head:ridge@self", "head:ridge/avg@self",
+        "head:rrr", "head:rrr/avg", "head:rrr@self", "head:rrr/avg@self"
+      ]
+    },
+    "pooledMetrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["n", "acc", "ece", "brier", "nll", "flip"],
+      "properties": {
+        "n": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+        "acc": { "type": "number", "minimum": 0, "maximum": 1 },
+        "ece": { "type": "number", "minimum": 0, "maximum": 1 },
+        "brier": { "type": "number", "minimum": 0, "maximum": 2 },
+        "nll": { "type": "number", "minimum": 0, "maximum": 1000000 },
+        "flip": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "questionMetrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["acc", "ece", "brier", "nll", "flip"],
+      "properties": {
+        "acc": { "type": "number", "minimum": 0, "maximum": 1 },
+        "ece": { "type": "number", "minimum": 0, "maximum": 1 },
+        "brier": { "type": "number", "minimum": 0, "maximum": 2 },
+        "nll": { "type": "number", "minimum": 0, "maximum": 1000000 },
+        "flip": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}

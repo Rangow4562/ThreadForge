@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-distillation-pipeline-result-v1.schema.json",
+  "title": "Threadforge local AnyJev end-to-end distillation pipeline result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "dataset_sha256", "workflow_count", "question_count", "student_count", "train_examples_per_question", "test_examples", "synthetic_examples_per_workflow", "generator_sha256", "generator_checkpoint_sha256", "teacher_sha256", "teacher_checkpoint_sha256", "students", "stages", "human_review_required", "model_inference_verified", "execution_verified", "cutover_evidence_eligible"],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-distillation-pipeline-result.v1"},
+    "dataset_sha256": {"$ref": "#/$defs/sha256"},
+    "workflow_count": {"type": "integer", "minimum": 1, "maximum": 4},
+    "question_count": {"type": "integer", "minimum": 1, "maximum": 128},
+    "student_count": {"type": "integer", "minimum": 1, "maximum": 8},
+    "train_examples_per_question": {"type": "integer", "minimum": 8, "maximum": 5000},
+    "test_examples": {"type": "integer", "minimum": 2, "maximum": 100000},
+    "synthetic_examples_per_workflow": {"type": "integer", "minimum": 1, "maximum": 5000},
+    "generator_sha256": {"$ref": "#/$defs/sha256"},
+    "generator_checkpoint_sha256": {"$ref": "#/$defs/sha256"},
+    "teacher_sha256": {"$ref": "#/$defs/sha256"},
+    "teacher_checkpoint_sha256": {"$ref": "#/$defs/sha256"},
+    "students": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"$ref": "#/$defs/student"}},
+    "stages": {"$ref": "#/$defs/stages"},
+    "human_review_required": {"const": true},
+    "model_inference_verified": {"const": true},
+    "execution_verified": {"const": false},
+    "cutover_evidence_eligible": {"const": false}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "student": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_sha256", "model_checkpoint_sha256", "block", "n_layers"],
+      "properties": {
+        "model_sha256": {"$ref": "#/$defs/sha256"},
+        "model_checkpoint_sha256": {"$ref": "#/$defs/sha256"},
+        "block": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "n_layers": {"type": "integer", "minimum": 1, "maximum": 100000}
+      }
+    },
+    "studentStage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_sha256", "model_checkpoint_sha256", "block", "n_layers", "synthetic_features", "gold_features"],
+      "properties": {
+        "model_sha256": {"$ref": "#/$defs/sha256"},
+        "model_checkpoint_sha256": {"$ref": "#/$defs/sha256"},
+        "block": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "n_layers": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "synthetic_features": {"$ref": "https://threadforge.ai/schemas/anyjev-distillation-extract-result-v1.schema.json"},
+        "gold_features": {"$ref": "https://threadforge.ai/schemas/anyjev-distillation-extract-gold-result-v1.schema.json"}
+      }
+    },
+    "stages": {
+      "type": "object", "additionalProperties": false,
+      "required": ["export_train", "export_test", "synth", "teacher_label", "teacher_gold_features", "student_features", "fit", "soft"],
+      "properties": {
+        "export_train": {"$ref": "https://threadforge.ai/schemas/anyjev-distillation-export-cases-result-v1.schema.json"},
+        "export_test": {"$ref": "https://threadforge.ai/schemas/anyjev-distillation-export-cases-result-v1.schema.json"},
+        "synth": {"$ref": "https://threadforge.ai/schemas/anyjev-distillation-synth-result-v1.schema.json"},
+        "teacher_label": {"$ref": "https://threadforge.ai/schemas/anyjev-distillation-label-result-v1.schema.json"},
+        "teacher_gold_features": {"$ref": "https://threadforge.ai/schemas/anyjev-distillation-extract-gold-result-v1.schema.json"},
+        "student_features": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"$ref": "#/$defs/studentStage"}},
+        "fit": {"$ref": "https://threadforge.ai/schemas/anyjev-distillation-fit-result-v1.schema.json"},
+        "soft": {"$ref": "https://threadforge.ai/schemas/anyjev-distillation-soft-result-v1.schema.json"}
+      }
+    }
+  }
+}

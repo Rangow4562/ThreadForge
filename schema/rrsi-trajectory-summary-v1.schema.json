@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/rrsi-trajectory-summary-v1.schema.json",
+  "title": "Threadforge privacy-minimized RRSI trajectory structure summary v1",
+  "oneOf": [
+    { "$ref": "#/$defs/coding" },
+    { "$ref": "#/$defs/workspace" },
+    { "$ref": "#/$defs/engineering" }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "common": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "domain",
+        "record_kind",
+        "job_id_sha256",
+        "task_id_sha256",
+        "trial_key_sha256",
+        "source_sha256"
+      ],
+      "properties": {
+        "schema_version": { "const": "threadforge.rrsi-trajectory-summary.v1" },
+        "domain": { "enum": ["coding", "workspace", "eng"] },
+        "record_kind": { "enum": ["coding_trajectory", "workspace_trajectory", "engineering_trajectory"] },
+        "job_id_sha256": { "$ref": "#/$defs/sha256" },
+        "task_id_sha256": { "$ref": "#/$defs/sha256" },
+        "trial_key_sha256": { "$ref": "#/$defs/sha256" },
+        "source_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "coding": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["domain", "record_kind", "step_count", "tool_call_count", "observation_result_count"],
+          "properties": {
+            "domain": { "const": "coding" },
+            "record_kind": { "const": "coding_trajectory" },
+            "step_count": { "$ref": "#/$defs/count" },
+            "tool_call_count": { "$ref": "#/$defs/count" },
+            "observation_result_count": { "$ref": "#/$defs/count" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "workspace": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": [
+            "domain",
+            "record_kind",
+            "message_count",
+            "system_message_count",
+            "user_message_count",
+            "assistant_message_count",
+            "tool_message_count",
+            "other_message_count",
+            "tool_call_count"
+          ],
+          "properties": {
+            "domain": { "const": "workspace" },
+            "record_kind": { "const": "workspace_trajectory" },
+            "message_count": { "$ref": "#/$defs/count" },
+            "system_message_count": { "$ref": "#/$defs/count" },
+            "user_message_count": { "$ref": "#/$defs/count" },
+            "assistant_message_count": { "$ref": "#/$defs/count" },
+            "tool_message_count": { "$ref": "#/$defs/count" },
+            "other_message_count": { "$ref": "#/$defs/count" },
+            "tool_call_count": { "$ref": "#/$defs/count" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "engineering": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": [
+            "domain",
+            "record_kind",
+            "message_count",
+            "system_message_count",
+            "user_message_count",
+            "assistant_message_count",
+            "tool_message_count",
+            "other_message_count",
+            "tool_call_count"
+          ],
+          "properties": {
+            "domain": { "const": "eng" },
+            "record_kind": { "const": "engineering_trajectory" },
+            "message_count": { "$ref": "#/$defs/count" },
+            "system_message_count": { "$ref": "#/$defs/count" },
+            "user_message_count": { "$ref": "#/$defs/count" },
+            "assistant_message_count": { "$ref": "#/$defs/count" },
+            "tool_message_count": { "$ref": "#/$defs/count" },
+            "other_message_count": { "$ref": "#/$defs/count" },
+            "tool_call_count": { "$ref": "#/$defs/count" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

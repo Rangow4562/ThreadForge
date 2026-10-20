@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/cutover-evaluator-trust-v1.schema.json",
+  "title": "Out-of-band trusted evaluator signing keys",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "keys"],
+  "properties": {
+    "schema_version": { "const": "threadforge.cutover-evaluator-trust.v1" },
+    "keys": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/key" } }
+  },
+  "$defs": {
+    "key": {
+      "type": "object", "additionalProperties": false,
+      "required": ["key_id", "public_key", "evaluator_id", "domains", "not_before", "not_after"],
+      "properties": {
+        "key_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "public_key": { "type": "string", "minLength": 40, "maxLength": 50, "contentEncoding": "base64" },
+        "evaluator_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "domains": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["beacon", "mancode", "anyjev", "rrsi-coding", "rrsi-agentic-workspace", "rrsi-engineering-design"] } },
+        "not_before": { "type": "string", "format": "date-time" },
+        "not_after": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

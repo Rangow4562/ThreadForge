@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/gemini-task-resume-smoke-v1.schema.json",
+  "title": "Threadforge installed Gemini CLI task-resume smoke result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "host_cli_version", "host_hook", "task_context_observed",
+    "task_context_content_retained_in_report", "task_objective_observed", "requirements_not_finalized_warning_verified",
+    "advisory_safety_statement_verified", "action_ready", "guidance_only", "execution_authorized",
+    "hook_invocations", "response_source", "real_model_invocations"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.gemini-task-resume-smoke.v1" },
+    "status": { "const": "verified" },
+    "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "host_hook": { "const": "BeforeAgent" },
+    "task_context_observed": { "const": true },
+    "task_context_content_retained_in_report": { "const": false },
+    "task_objective_observed": { "const": true },
+    "requirements_not_finalized_warning_verified": { "const": true },
+    "advisory_safety_statement_verified": { "const": true },
+    "action_ready": { "const": false },
+    "guidance_only": { "const": true },
+    "execution_authorized": { "const": false },
+    "hook_invocations": { "type": "integer", "minimum": 1, "maximum": 10 },
+    "response_source": { "const": "gemini-cli-fake-responses-file" },
+    "real_model_invocations": { "const": 0 }
+  }
+}

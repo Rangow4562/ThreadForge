@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schema/security-finding-review-history-v1.schema.json",
+  "title": "Threadforge security finding review audit history",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "events"],
+  "properties": {
+    "schema_version": { "const": "threadforge.security-finding-review-history.v1" },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/event" }
+    }
+  },
+  "$defs": {
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "fingerprint", "revision", "previous_status", "status", "actor", "created_at"],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 1 },
+        "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "revision": { "type": "integer", "minimum": 0 },
+        "previous_status": { "enum": ["", "open", "acknowledged", "resolved", "false_positive"] },
+        "status": { "enum": ["open", "acknowledged", "resolved", "false_positive"] },
+        "actor": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

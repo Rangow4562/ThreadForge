@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-observe-request-v1.schema.json",
+  "title": "Threadforge AnyJev observation update request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "question", "observations"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-observe.v1" },
+    "question": { "$ref": "decision-request-v1.schema.json#/$defs/question" },
+    "observations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["state", "label"],
+        "properties": { "state": {}, "label": { "type": "integer", "minimum": 0 } }
+      }
+    },
+    "backend": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "hf" },
+            "model_path": { "type": "string", "minLength": 1 },
+            "device": { "enum": ["cpu", "mps", "cuda"] },
+            "dtype": { "enum": ["auto", "float32", "float16", "bfloat16"] },
+            "batch_size": { "type": "integer", "minimum": 1, "maximum": 64 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "fake" } }
+        }
+      ]
+    },
+    "checkpoint": { "$ref": "#/$defs/checkpoint" },
+    "fit_at": { "type": "integer", "minimum": 1, "maximum": 10000, "default": 30 },
+    "refit_factor": { "type": "number", "exclusiveMinimum": 1, "maximum": 10, "default": 2.0 },
+    "fit_options": { "$ref": "#/$defs/fit_options" }
+  },
+  "$defs": {
+    "fit_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "layers": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "array", "minItems": 1, "maxItems": 16,
+              "items": { "type": "integer", "minimum": -1024, "maximum": 1024, "not": { "const": 0 } }
+            }
+          ]
+        },
+        "kinds": {
+          "type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true,
+          "items": { "enum": ["diff_means", "lda", "ridge", "rrr"] }
+        },
+        "n_folds": { "type": "integer", "minimum": 2, "maximum": 10 },
+        "seed": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "listing": { "enum": ["auto", "random", "canonical"] }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question_id", "kind", "text", "options", "scale", "ordered", "centers", "states", "labels", "fits", "next_fit"],
+      "properties": {
+        "question_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "kind": { "enum": ["choice", "score", "noul"] },
+        "text": { "type": "string", "minLength": 1, "maxLength": 10000 },
+        "options": { "type": "array", "minItems": 2, "maxItems": 26, "items": { "type": "string", "minLength": 1 } },
+        "scale": { "type": "array", "prefixItems": [{ "type": "number" }, { "type": "number" }], "minItems": 2, "maxItems": 2 },
+        "ordered": { "type": "boolean" },
+        "centers": { "oneOf": [{ "type": "null" }, { "type": "array", "minItems": 2, "maxItems": 26, "items": { "type": "number" } }] },
+        "states": { "type": "array", "minItems": 1, "maxItems": 4096 },
+        "labels": { "type": "array", "minItems": 1, "maxItems": 4096, "items": { "type": "integer", "minimum": 0 } },
+        "fits": { "type": "integer", "minimum": 0, "maximum": 4096 },
+        "next_fit": { "type": "integer", "minimum": 1, "maximum": 100000 }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "model", "question_key", "fit_at", "refit_factor", "fit_options", "observation"],
+      "properties": {
+        "schema_version": { "const": "threadforge.anyjev-observation-checkpoint.v1" },
+        "model": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "question_key": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+        "fit_at": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "refit_factor": { "type": "number", "exclusiveMinimum": 1, "maximum": 10 },
+        "fit_options": { "$ref": "#/$defs/fit_options" },
+        "observation": { "$ref": "#/$defs/observation" }
+      }
+    }
+  }
+}

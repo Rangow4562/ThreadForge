@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-model-truncate-result-v1.schema.json",
+  "title": "Threadforge local AnyJev checkpoint truncation receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "source_checkpoint_sha256", "tokenizer_source_sha256",
+    "original_blocks", "kept_blocks", "kept_tensor_count", "dropped_tensor_count",
+    "dtype", "human_review_required", "execution_verified", "cutover_evidence_eligible",
+    "output_sha256", "output_file_count", "output_total_bytes", "output_ready"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.anyjev-truncated-checkpoint.v1" },
+    "source_checkpoint_sha256": { "$ref": "#/$defs/sha256" },
+    "tokenizer_source_sha256": { "$ref": "#/$defs/sha256" },
+    "original_blocks": { "type": "integer", "minimum": 1, "maximum": 4096 },
+    "kept_blocks": { "type": "integer", "minimum": 1, "maximum": 4096 },
+    "kept_tensor_count": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+    "dropped_tensor_count": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+    "dtype": { "enum": ["auto", "float16", "bfloat16", "float32"] },
+    "human_review_required": { "const": true },
+    "execution_verified": { "const": false },
+    "cutover_evidence_eligible": { "const": false },
+    "output_sha256": { "$ref": "#/$defs/sha256" },
+    "output_file_count": { "type": "integer", "minimum": 1, "maximum": 20000 },
+    "output_total_bytes": { "type": "integer", "minimum": 1, "maximum": 1099511627776 },
+    "output_ready": { "const": true }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

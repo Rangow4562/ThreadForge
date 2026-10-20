@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beacon.dev/spec/threat-rules/v1/schema.json",
+  "title": "Beacon Threat Rule",
+  "description": "Open detection-rule format for AI-agent security threats, native to the Beacon endpoint event schema. Match conditions are CEL expressions; CEL correctness is enforced by an engine, not by this structural schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "title", "severity", "status", "posture", "emit", "tests"],
+  "oneOf": [
+    { "required": ["match"], "not": { "required": ["correlation"] } },
+    { "required": ["correlation"], "not": { "required": ["match"] } }
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Stable unique identity; unique across the pack."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Rule content revision; bump on logic change."
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "severity": {
+      "type": "string",
+      "enum": ["info", "low", "medium", "high", "critical"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["experimental", "stable", "deprecated"]
+    },
+    "posture": {
+      "type": "string",
+      "enum": ["detect", "enforce-capable"]
+    },
+    "taxonomy": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "match": {
+      "type": "string",
+      "minLength": 1,
+      "description": "CEL boolean expression over the event variable `e`."
+    },
+    "correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "window", "steps"],
+      "properties": {
+        "scope": { "type": "string", "enum": ["session"] },
+        "window": {
+          "type": "string",
+          "description": "Go duration string, e.g. 120s, 5m.",
+          "minLength": 1
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "match"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "match": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "emit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason"],
+      "properties": {
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "tests": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "verdict", "events"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "verdict": { "type": "string", "enum": ["match", "no_match"] },
+          "events": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "object" }
+          }
+        }
+      }
+    }
+  }
+}

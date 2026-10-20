@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-exit-latency-result-v1.schema.json",
+  "title": "Threadforge AnyJev exit latency result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_sha256",
+    "transformer_layers",
+    "hidden_size",
+    "params_per_block",
+    "host_condition",
+    "measurements",
+    "omitted_fields",
+    "human_review_required",
+    "execution_verified",
+    "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.anyjev-exit-latency-result.v1"
+    },
+    "model_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "transformer_layers": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "hidden_size": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000000
+    },
+    "params_per_block": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000000
+    },
+    "host_condition": {
+      "enum": ["quiet_gpu", "contended_gpu"]
+    },
+    "measurements": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/measurement"
+      }
+    },
+    "omitted_fields": {
+      "const": ["model_label", "date", "environment_details"]
+    },
+    "human_review_required": {
+      "const": true
+    },
+    "execution_verified": {
+      "const": false
+    },
+    "cutover_evidence_eligible": {
+      "const": false
+    }
+  },
+  "$defs": {
+    "positiveMeasurement": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1000000000
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state_tokens",
+        "prompt_tokens",
+        "depth_fraction",
+        "blocks",
+        "mode",
+        "batch_ms",
+        "single_ms",
+        "gflops"
+      ],
+      "properties": {
+        "state_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "prompt_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "depth_fraction": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "blocks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "mode": {
+          "enum": ["raw", "truncated_head"]
+        },
+        "batch_ms": {
+          "$ref": "#/$defs/positiveMeasurement"
+        },
+        "single_ms": {
+          "$ref": "#/$defs/positiveMeasurement"
+        },
+        "gflops": {
+          "$ref": "#/$defs/positiveMeasurement"
+        }
+      }
+    }
+  }
+}

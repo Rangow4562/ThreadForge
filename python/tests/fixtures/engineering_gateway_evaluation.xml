@@ -1,0 +1,42 @@
+<evaluation>
+  <qa_pair>
+    <question>Cross-check the latest revision note with the part-rating table. Which exact module identifier is installed at U1? Reply with the identifier only.</question>
+    <answer>PWR-17</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Compare the required lower supply boundary with the selected module's own lower boundary. How much positive input-voltage margin is available? Reply with a number and V.</question>
+    <answer>2 V</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Use the module rating and the thermal qualification rule to calculate the maximum allowed case temperature at the stated operating ambient. Reply with the value and C.</question>
+    <answer>110 C</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>After locating the acceptance criterion, what peak-to-peak ripple ceiling is required? Reply with the value and mV.</question>
+    <answer>40 mV</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Compare all repeat-run ripple readings with the acceptance ceiling. What is the largest reading, and does it pass? Reply as “value mV, PASS” or “value mV, FAIL”.</question>
+    <answer>35 mV, PASS</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Subtract the continuous load requirement from the selected module's continuous rating. What current reserve remains? Reply with a value and A.</question>
+    <answer>0.6 A</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What is the nominal isolated output rail described in both the assembly overview and the electrical limits? Reply with the voltage and “DC”.</question>
+    <answer>12.0 V DC</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Find the external enable signal's connector assignment. Reply as connector-pin, for example J2-1.</question>
+    <answer>J2-3</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How many distinct references appear in the assembly bill of materials? Reply with the integer only.</question>
+    <answer>5</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What is the minimum acceptable efficiency stated in the verification matrix? Reply as a percentage.</question>
+    <answer>92%</answer>
+  </qa_pair>
+</evaluation>

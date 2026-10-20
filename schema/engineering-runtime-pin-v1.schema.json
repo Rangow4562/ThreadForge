@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.local/schema/engineering-runtime-pin-v1.schema.json",
+  "title": "Threadforge Engineering Runtime Pin v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "rrsi_source_revision",
+    "evaluator_source_revision",
+    "benchmark_tree_sha256",
+    "evaluator_tree_sha256",
+    "task_count",
+    "task_ids_sha256",
+    "execution_image",
+    "benchmark_license",
+    "evaluator_license",
+    "license_review_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.engineering-runtime-pin.v1"
+    },
+    "rrsi_source_revision": {
+      "const": "be50316e1db05914068a973f322770ef08ed7ba1"
+    },
+    "evaluator_source_revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40,64}$"
+    },
+    "benchmark_tree_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "evaluator_tree_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "task_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2048
+    },
+    "task_ids_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "execution_image": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?:[^\\s,]+@sha256:[0-9a-f]{64}|sha256:[0-9a-f]{64})$"
+    },
+    "benchmark_license": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9.+() -]{0,127}$"
+    },
+    "evaluator_license": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9.+() -]{0,127}$"
+    },
+    "license_review_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,127}$"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

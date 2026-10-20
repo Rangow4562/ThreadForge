@@ -1,0 +1,404 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-harvey-inventory-candidate-v1.schema.json",
+  "title": "Threadforge locally derived Harvey LAB inventory candidate v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "split_generator",
+    "dataset_revision",
+    "inventory_commitments",
+    "benchmark_inventories",
+    "trust_anchor_status",
+    "screening_usable",
+    "benchmark_execution_performed",
+    "cutover_evidence_eligible",
+    "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.rrsi-harvey-inventory-candidate.v1"
+    },
+    "status": {
+      "enum": [
+        "candidate_unanchored",
+        "candidate_source_verified",
+        "privacy_blocked"
+      ]
+    },
+    "split_generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_file",
+        "source_file_sha256",
+        "source_revision"
+      ],
+      "properties": {
+        "source_file": {
+          "const": "domains/workspace/split_workspace.py"
+        },
+        "source_file_sha256": {
+          "const": "1f791a034644828b11e5d01f75a1f35046cc69824ce0e3cb88d36e2f8c87636d"
+        },
+        "source_revision": {
+          "const": "be50316e1db05914068a973f322770ef08ed7ba1"
+        }
+      }
+    },
+    "dataset_revision": {
+      "const": "1da4750171bc5a534960b3d82d15ba7fd2cf653f"
+    },
+    "inventory_commitments": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/commitment"
+      }
+    },
+    "benchmark_inventories": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/inventory"
+      }
+    },
+    "trust_anchor_status": {
+      "enum": [
+        "uncommitted",
+        "committed"
+      ]
+    },
+    "screening_usable": {
+      "type": "boolean"
+    },
+    "benchmark_execution_performed": {
+      "const": false
+    },
+    "cutover_evidence_eligible": {
+      "const": false
+    },
+    "execution_authorized": {
+      "const": false
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "sourceId": {
+      "enum": [
+        "harvey-lab/evolve",
+        "harvey-lab/held-out"
+      ]
+    },
+    "commitment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "task_count",
+        "task_ids_sha256"
+      ],
+      "properties": {
+        "source_id": {
+          "$ref": "#/$defs/sourceId"
+        },
+        "task_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120
+        },
+        "task_ids_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "taskId": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]+$"
+    },
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "source_revision",
+        "source_file_sha256",
+        "task_ids"
+      ],
+      "properties": {
+        "source_id": {
+          "$ref": "#/$defs/sourceId"
+        },
+        "source_revision": {
+          "const": "1da4750171bc5a534960b3d82d15ba7fd2cf653f"
+        },
+        "source_file_sha256": {
+          "const": "1f791a034644828b11e5d01f75a1f35046cc69824ce0e3cb88d36e2f8c87636d"
+        },
+        "task_ids": {
+          "type": "array",
+          "maxItems": 120,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/taskId"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "candidate_unanchored"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "trust_anchor_status": {
+            "const": "uncommitted"
+          },
+          "screening_usable": {
+            "const": false
+          },
+          "inventory_commitments": {
+            "minItems": 2,
+            "maxItems": 2,
+            "allOf": [
+              {
+                "contains": {
+                  "properties": {
+                    "source_id": {
+                      "const": "harvey-lab/evolve"
+                    },
+                    "task_count": {
+                      "const": 120
+                    }
+                  },
+                  "required": [
+                    "source_id",
+                    "task_count"
+                  ]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "source_id": {
+                      "const": "harvey-lab/held-out"
+                    },
+                    "task_count": {
+                      "const": 40
+                    }
+                  },
+                  "required": [
+                    "source_id",
+                    "task_count"
+                  ]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              }
+            ]
+          },
+          "benchmark_inventories": {
+            "minItems": 2,
+            "maxItems": 2,
+            "allOf": [
+              {
+                "contains": {
+                  "properties": {
+                    "source_id": {
+                      "const": "harvey-lab/evolve"
+                    },
+                    "task_ids": {
+                      "minItems": 120,
+                      "maxItems": 120
+                    }
+                  },
+                  "required": [
+                    "source_id",
+                    "task_ids"
+                  ]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "source_id": {
+                      "const": "harvey-lab/held-out"
+                    },
+                    "task_ids": {
+                      "minItems": 40,
+                      "maxItems": 40
+                    }
+                  },
+                  "required": [
+                    "source_id",
+                    "task_ids"
+                  ]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "candidate_source_verified"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "trust_anchor_status": {
+            "const": "committed"
+          },
+          "screening_usable": {
+            "const": true
+          },
+          "inventory_commitments": {
+            "minItems": 2,
+            "maxItems": 2,
+            "allOf": [
+              {
+                "contains": {
+                  "properties": {
+                    "source_id": {
+                      "const": "harvey-lab/evolve"
+                    },
+                    "task_count": {
+                      "const": 120
+                    },
+                    "task_ids_sha256": {
+                      "const": "9d55740ad2cea88e6a094721f127f8e6b7a5902b2321b3e2fdd04accc605471b"
+                    }
+                  },
+                  "required": [
+                    "source_id",
+                    "task_count",
+                    "task_ids_sha256"
+                  ]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "source_id": {
+                      "const": "harvey-lab/held-out"
+                    },
+                    "task_count": {
+                      "const": 40
+                    },
+                    "task_ids_sha256": {
+                      "const": "249c167630271857d81b2bc8ca2854bf287c38cbe7c331657957b57d3a7d601c"
+                    }
+                  },
+                  "required": [
+                    "source_id",
+                    "task_count",
+                    "task_ids_sha256"
+                  ]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              }
+            ]
+          },
+          "benchmark_inventories": {
+            "minItems": 2,
+            "maxItems": 2,
+            "allOf": [
+              {
+                "contains": {
+                  "properties": {
+                    "source_id": {
+                      "const": "harvey-lab/evolve"
+                    },
+                    "task_ids": {
+                      "minItems": 120,
+                      "maxItems": 120
+                    }
+                  },
+                  "required": [
+                    "source_id",
+                    "task_ids"
+                  ]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "source_id": {
+                      "const": "harvey-lab/held-out"
+                    },
+                    "task_ids": {
+                      "minItems": 40,
+                      "maxItems": 40
+                    }
+                  },
+                  "required": [
+                    "source_id",
+                    "task_ids"
+                  ]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "privacy_blocked"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "inventory_commitments": {
+            "maxItems": 0
+          },
+          "benchmark_inventories": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ]
+}

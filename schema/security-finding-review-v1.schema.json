@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schema/security-finding-review-v1.schema.json",
+  "title": "Threadforge persisted security finding review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "rule_id",
+    "severity",
+    "status",
+    "revision",
+    "first_seen",
+    "last_seen",
+    "active",
+    "actor",
+    "updated_at"
+  ],
+  "properties": {
+    "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "rule_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "severity": { "enum": ["info", "low", "medium", "high", "critical"] },
+    "status": { "enum": ["open", "acknowledged", "resolved", "false_positive"] },
+    "revision": { "type": "integer", "minimum": 0 },
+    "first_seen": { "type": "string", "format": "date-time" },
+    "last_seen": { "type": "string", "format": "date-time" },
+    "active": { "type": "boolean" },
+    "actor": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

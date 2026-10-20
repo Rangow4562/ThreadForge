@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-engineering-inventory-bundle-write-v1.schema.json",
+  "title": "Threadforge private engineering inventory bundle write result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "domain",
+    "sha256",
+    "source_count",
+    "task_count",
+    "split_entry_count"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.rrsi-engineering-inventory-bundle-write.v1"
+    },
+    "status": {
+      "enum": [
+        "bundle_written",
+        "bundle_already_present"
+      ]
+    },
+    "domain": {
+      "const": "rrsi-engineering-design"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "source_count": {
+      "const": 2
+    },
+    "task_count": {
+      "const": 61
+    },
+    "split_entry_count": {
+      "const": 122
+    }
+  }
+}

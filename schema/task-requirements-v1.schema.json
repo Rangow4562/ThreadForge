@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/task-requirements-v1.schema.json",
+  "title": "Threadforge Task Requirements v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "questions"],
+  "properties": {
+    "schema_version": { "const": "threadforge.task-requirements.v1" },
+    "status": { "enum": ["draft", "clarifying", "finalized"] },
+    "questions": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/question" }
+    },
+    "finalized_by": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "finalized_at": { "type": "string", "format": "date-time" },
+    "finalize_reason": { "type": "string", "minLength": 1, "maxLength": 2000 }
+  },
+  "$defs": {
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "question", "asked_by", "asked_at"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+        "question": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "asked_by": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "asked_at": { "type": "string", "format": "date-time" },
+        "answer": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "answered_by": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "answered_at": { "type": "string", "format": "date-time" }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["answer"] },
+          "then": { "required": ["answered_by", "answered_at"] },
+          "else": {
+            "not": { "anyOf": [{ "required": ["answered_by"] }, { "required": ["answered_at"] }] }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "clarifying" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "questions": {
+            "contains": {
+              "not": { "required": ["answer"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "draft" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "questions": {
+            "items": { "required": ["answer", "answered_by", "answered_at"] }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "finalized" } }, "required": ["status"] },
+      "then": {
+        "required": ["finalized_by", "finalized_at", "finalize_reason"],
+        "properties": {
+          "questions": {
+            "items": { "required": ["answer", "answered_by", "answered_at"] }
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            { "required": ["finalized_by"] },
+            { "required": ["finalized_at"] },
+            { "required": ["finalize_reason"] }
+          ]
+        }
+      }
+    }
+  ]
+}

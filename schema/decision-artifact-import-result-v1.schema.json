@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-artifact-import-result-v1.schema.json",
+  "title": "Threadforge imported decision artifact candidate receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "artifact_id", "revision", "level", "model", "question_key", "calibration_examples", "content_sha256", "human_review_required"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-artifact-import-result.v1" },
+    "status": { "const": "candidate" },
+    "artifact_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "revision": { "const": 1 },
+    "level": { "enum": ["L1", "L2"] },
+    "model": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "question_key": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "calibration_examples": { "type": "integer", "minimum": 2, "maximum": 100000 },
+    "content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "human_review_required": { "const": true }
+  }
+}

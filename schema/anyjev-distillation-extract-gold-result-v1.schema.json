@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-distillation-extract-gold-result-v1.schema.json",
+  "title": "Threadforge AnyJev checkpoint-pinned gold feature extraction result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "model_role", "model_sha256", "model_checkpoint_sha256", "question_count", "total_train_examples", "total_test_examples", "cache_count", "caches", "human_review_required", "model_inference_verified", "execution_verified", "cutover_evidence_eligible"],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-distillation-extract-gold-result.v1"},
+    "model_role": {"enum": ["teacher", "student"]},
+    "model_sha256": {"$ref": "#/$defs/sha256"},
+    "model_checkpoint_sha256": {"$ref": "#/$defs/sha256"},
+    "question_count": {"type": "integer", "minimum": 1, "maximum": 256},
+    "total_train_examples": {"type": "integer", "minimum": 1, "maximum": 100000},
+    "total_test_examples": {"type": "integer", "minimum": 1, "maximum": 100000},
+    "cache_count": {"type": "integer", "minimum": 2, "maximum": 512},
+    "caches": {"type": "array", "minItems": 2, "maxItems": 512, "items": {"$ref": "#/$defs/cache"}},
+    "human_review_required": {"const": true},
+    "model_inference_verified": {"const": true},
+    "execution_verified": {"const": false},
+    "cutover_evidence_eligible": {"const": false}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "cache": {
+      "type": "object", "additionalProperties": false,
+      "required": ["role", "model_role", "question_sha256", "model_sha256", "model_checkpoint_sha256", "source_sha256", "examples", "classes", "block", "feature_width", "split", "relative_path", "sha256"],
+      "properties": {
+        "role": {"enum": ["teacher_gold_train_features", "teacher_gold_test_features", "student_gold_train_features", "student_gold_test_features"]},
+        "model_role": {"enum": ["teacher", "student"]},
+        "question_sha256": {"$ref": "#/$defs/sha256"},
+        "model_sha256": {"$ref": "#/$defs/sha256"},
+        "model_checkpoint_sha256": {"$ref": "#/$defs/sha256"},
+        "source_sha256": {"$ref": "#/$defs/sha256"},
+        "examples": {"type": "integer", "minimum": 1, "maximum": 5000},
+        "classes": {"type": "integer", "minimum": 2, "maximum": 26},
+        "block": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "feature_width": {"type": "integer", "minimum": 1, "maximum": 65536},
+        "split": {"enum": ["train", "test"]},
+        "relative_path": {"type": "string", "pattern": "^distillation/gold_features/[a-f0-9]{64}/[a-f0-9]{64}\\.(train|test)\\.npz$"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

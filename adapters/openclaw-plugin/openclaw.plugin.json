@@ -1,0 +1,8 @@
+{
+  "id": "threadforge-observability",
+  "name": "Threadforge Observational Telemetry",
+  "description": "Privacy-minimized local OpenClaw agent activity telemetry.",
+  "categories": ["other"],
+  "activation": { "onStartup": true },
+  "configSchema": { "type": "object", "additionalProperties": false }
+}

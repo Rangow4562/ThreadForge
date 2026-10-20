@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-project-glossary-v1.schema.json",
+  "title": "Threadforge Mancode project glossary migration projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authority",
+    "human_review_required",
+    "execution_authorized",
+    "revision",
+    "entries"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-project-glossary.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "revision": { "type": "integer", "minimum": 0 },
+    "entries": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/entry" } }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["term", "definition", "aliases", "confirmed_at", "source_task_reference_present"],
+      "properties": {
+        "term": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "definition": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "aliases": { "type": "array", "maxItems": 4096, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
+        "confirmed_at": { "type": "string", "format": "date-time" },
+        "source_task_reference_present": { "type": "boolean" }
+      }
+    }
+  }
+}

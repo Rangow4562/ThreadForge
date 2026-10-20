@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-actor-summary-v1.schema.json",
+  "title": "Threadforge Mancode actor migration summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "authority", "human_review_required", "execution_authorized",
+    "actor_scope", "display_name_present", "source_created_at", "source_joined_at",
+    "updated_at", "source_actor_identity_omitted"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-actor-summary.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "actor_scope": { "enum": ["local", "shared"] },
+    "display_name_present": { "const": true },
+    "source_created_at": { "type": ["string", "null"], "format": "date-time" },
+    "source_joined_at": { "type": ["string", "null"], "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "source_actor_identity_omitted": { "const": true }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "actor_scope": { "const": "local" } }, "required": ["actor_scope"] },
+      "then": {
+        "properties": {
+          "source_created_at": { "type": "string", "format": "date-time" },
+          "source_joined_at": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "actor_scope": { "const": "shared" } }, "required": ["actor_scope"] },
+      "then": {
+        "properties": {
+          "source_created_at": { "type": "null" },
+          "source_joined_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  ]
+}

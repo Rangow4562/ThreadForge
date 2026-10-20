@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-progress-projection-v1.schema.json",
+  "title": "Threadforge inert Mancode progress projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "source_schema_version", "projection_status", "authority",
+    "task_ids_mapped", "human_review_required", "execution_authorized", "tasks"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-progress-projection.v1" },
+    "source_schema_version": { "const": 1 },
+    "projection_status": { "enum": ["present", "absent_manual_sync"] },
+    "authority": { "const": "local_pending_review" },
+    "task_ids_mapped": { "const": false },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "tasks": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": { "$ref": "#/$defs/task" }
+    }
+  },
+  "$defs": {
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "status", "reason"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "status": { "enum": ["未完成", "进行中", "待审核", "已完成", "阻塞"] },
+        "reason": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "maxLength": 4096 }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+parameter,value,unit
+input_minimum,20,V DC
+input_maximum,28,V DC
+output_nominal,12.0,V DC
+continuous_load_current,2.4,A
+maximum_output_ripple,40,mV peak-to-peak

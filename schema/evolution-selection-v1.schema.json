@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-selection-v1.schema.json",
+  "title": "Threadforge RRSI Selection Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "selected_id",
+    "keep_incumbent",
+    "decisions",
+    "selection_config",
+    "incumbent_counts",
+    "requires_human_approval",
+    "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.evolution-selection.v1" },
+    "status": { "enum": ["selected", "incumbent_retained"] },
+    "selected_id": { "type": ["string", "null"] },
+    "keep_incumbent": { "type": "boolean" },
+    "decisions": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["variant", "admissible", "reason", "S", "C", "delta_S", "delta_C", "novelty", "guards"],
+        "properties": {
+          "variant": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "admissible": { "type": "boolean" },
+          "reason": { "type": "string", "maxLength": 2000 },
+          "S": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+          "C": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+          "delta_S": { "type": ["number", "null"] },
+          "delta_C": { "type": ["number", "null"] },
+          "novelty": { "type": "integer", "minimum": 0 },
+          "guards": { "type": "array", "items": { "type": "string", "maxLength": 1000 } }
+        }
+      }
+    },
+    "selection_config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["beta0", "beta1", "w_s", "w_c", "w_n"],
+      "properties": {
+        "beta0": {"type": "number", "minimum": 0},
+        "beta1": {"type": "number", "minimum": 0},
+        "w_s": {"type": "number", "minimum": 0},
+        "w_c": {"type": "number", "minimum": 0},
+        "w_n": {"type": "number", "minimum": 0}
+      }
+    },
+    "incumbent_counts": {
+      "type": "object",
+      "propertyNames": {"enum": ["prompt", "control_flow", "config", "output_plumbing", "context_mgmt", "client_tool", "skill", "memory", "subagent"]},
+      "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "requires_human_approval": { "const": true },
+    "execution_authorized": { "const": false }
+  }
+}

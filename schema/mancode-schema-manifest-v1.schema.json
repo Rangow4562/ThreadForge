@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-schema-manifest-v1.schema.json",
+  "title": "Threadforge Mancode schema-manifest migration projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "authority", "human_review_required", "execution_authorized",
+    "source_manifest_version", "layout_version", "source_activation_state",
+    "source_activation_is_authority", "min_reader_version", "min_writer_version",
+    "activated_at", "legacy_baseline_present", "managed_adapters", "source_planning_policy",
+    "privacy_policy_reference_present", "privacy_policy_revision", "privacy_policy_digest_omitted",
+    "source_epoch_omitted", "source_operation_id_omitted"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-schema-manifest.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "source_manifest_version": { "type": "integer", "enum": [1, 2, 3] },
+    "layout_version": { "const": 3 },
+    "source_activation_state": {
+      "enum": ["initializing", "dual_read", "activating", "v3_active", "repair_required"]
+    },
+    "source_activation_is_authority": { "const": false },
+    "min_reader_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" },
+    "min_writer_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" },
+    "activated_at": { "type": ["string", "null"], "format": "date-time" },
+    "legacy_baseline_present": { "type": "boolean" },
+    "managed_adapters": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["claude-code", "codex", "cursor", "copilot", "zcode", "kimi-code", "qoder", "dsh"] }
+    },
+    "source_planning_policy": { "type": ["integer", "null"], "enum": [1, 2, null] },
+    "privacy_policy_reference_present": { "type": "boolean" },
+    "privacy_policy_revision": { "type": ["integer", "null"], "minimum": 1, "maximum": 9007199254740991 },
+    "privacy_policy_digest_omitted": { "type": "boolean" },
+    "source_epoch_omitted": { "const": true },
+    "source_operation_id_omitted": { "const": true }
+  }
+}

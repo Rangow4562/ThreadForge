@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schemas/anyjev-latency-markdown-result-v1.schema.json",
+  "title": "Threadforge AnyJev Latency Markdown Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_sha256",
+    "backend",
+    "condition",
+    "rows",
+    "omitted_fields",
+    "human_review_required",
+    "execution_verified",
+    "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-latency-markdown-result.v1"},
+    "model_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "backend": {"enum": ["hf", "vllm"]},
+    "condition": {"enum": ["default", "vllm_cache_on", "vllm_cache_off"]},
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["state_tokens", "option_count", "batch_raw_ms", "batch_l0_full_ms", "single_raw_ms", "single_l0_full_ms"],
+        "properties": {
+          "state_tokens": {"type": "integer", "minimum": 1, "maximum": 10000000},
+          "option_count": {"type": "integer", "minimum": 2, "maximum": 26},
+          "batch_raw_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000000},
+          "batch_l0_full_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000000},
+          "batch_l0_shared_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000000},
+          "single_raw_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000000},
+          "single_l0_full_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000000},
+          "single_l0_shared_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000000}
+        }
+      }
+    },
+    "omitted_fields": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "human_review_required": {"const": true},
+    "execution_verified": {"const": false},
+    "cutover_evidence_eligible": {"const": false}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"backend": {"const": "hf"}}, "required": ["backend"]},
+      "then": {"properties": {"condition": {"const": "default"}}}
+    },
+    {
+      "if": {"properties": {"backend": {"const": "vllm"}}, "required": ["backend"]},
+      "then": {"properties": {"condition": {"enum": ["vllm_cache_on", "vllm_cache_off"]}}}
+    }
+  ]
+}

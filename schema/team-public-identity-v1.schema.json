@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/team-public-identity-v1.schema.json",
+  "title": "Threadforge team public identity v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "key_id", "public_key"],
+  "properties": {
+    "schema_version": { "const": "threadforge.team-public-identity.v1" },
+    "key_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "public_key": { "type": "string", "contentEncoding": "base64", "minLength": 44, "maxLength": 44 }
+  }
+}

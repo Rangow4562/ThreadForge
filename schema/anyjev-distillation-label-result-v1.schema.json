@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-distillation-label-result-v1.schema.json",
+  "title": "Threadforge AnyJev local teacher-label result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "teacher_sha256", "teacher_checkpoint_sha256", "question_count", "total_synthetic_examples", "total_test_examples", "caches", "human_review_required", "model_inference_verified", "execution_verified", "cutover_evidence_eligible"],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-distillation-label-result.v1"},
+    "teacher_sha256": {"$ref": "#/$defs/sha256"},
+    "teacher_checkpoint_sha256": {"$ref": "#/$defs/sha256"},
+    "question_count": {"type": "integer", "minimum": 1, "maximum": 256},
+    "total_synthetic_examples": {"type": "integer", "minimum": 1, "maximum": 100000},
+    "total_test_examples": {"type": "integer", "minimum": 1, "maximum": 100000},
+    "caches": {"type": "array", "minItems": 2, "maxItems": 512, "items": {"$ref": "#/$defs/cache"}},
+    "human_review_required": {"const": true},
+    "model_inference_verified": {"const": true},
+    "execution_verified": {"const": false},
+    "cutover_evidence_eligible": {"const": false}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "cache": {
+      "type": "object", "additionalProperties": false,
+      "required": ["role", "question_sha256", "teacher_sha256", "teacher_checkpoint_sha256", "source_sha256", "examples", "classes", "block", "relative_path", "sha256"],
+      "properties": {
+        "role": {"enum": ["teacher_synthetic_probabilities", "teacher_test_probabilities"]},
+        "question_sha256": {"$ref": "#/$defs/sha256"},
+        "teacher_sha256": {"$ref": "#/$defs/sha256"},
+        "teacher_checkpoint_sha256": {"$ref": "#/$defs/sha256"},
+        "source_sha256": {"$ref": "#/$defs/sha256"},
+        "examples": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "classes": {"type": "integer", "minimum": 2, "maximum": 26},
+        "block": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "relative_path": {"type": "string", "pattern": "^distillation/synth_labels/[a-f0-9]{64}/[a-f0-9]{64}\\.(synth|test)\\.npz$"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

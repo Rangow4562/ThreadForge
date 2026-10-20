@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-domain-verification-v1.schema.json",
+  "title": "Threadforge local RRSI domain artifact verification response v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "domain", "status", "expected_splits", "splits", "missing_evidence",
+    "artifact_hashes_verified", "verified_artifact_count", "artifact_manifest_sha256",
+    "required_split_scope_complete", "split_identity_verified", "acceptance_status",
+    "benchmark_execution_performed", "cutover_evidence_eligible", "human_approval_required", "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.rrsi-domain-verification.v1" },
+    "domain": { "enum": ["rrsi-coding", "rrsi-agentic-workspace", "rrsi-engineering-design"] },
+    "status": { "enum": ["artifacts_verified", "incomplete", "integrity_failed", "privacy_blocked"] },
+    "expected_splits": { "type": "array", "items": { "type": "string" } },
+    "splits": { "type": "array", "items": { "type": "object" } },
+    "missing_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["split_id", "item"],
+        "properties": { "split_id": { "type": "string" }, "item": { "type": "string" } }
+      }
+    },
+    "artifact_hashes_verified": {
+      "type": "boolean",
+      "description": "True only if every artifact reference supplied in this request matched its local file bytes; does not prove split membership, source authenticity, or benchmark execution."
+    },
+    "verified_artifact_count": { "type": "integer", "minimum": 0 },
+    "artifact_manifest_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+    "required_split_scope_complete": { "type": "boolean" },
+    "split_identity_verified": { "const": false },
+    "acceptance_status": { "const": "not_evaluated" },
+    "benchmark_execution_performed": { "const": false },
+    "cutover_evidence_eligible": { "const": false },
+    "human_approval_required": { "const": true },
+    "execution_authorized": { "const": false }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

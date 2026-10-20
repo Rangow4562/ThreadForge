@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-jobbench-inventory-candidate-v1.schema.json",
+  "title": "Threadforge locally derived JobBench inventory candidate v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "source_id", "source_revision", "source_file",
+    "source_file_sha256", "source_file_count", "source_relationship_file",
+    "source_relationship_file_sha256", "inventory_commitment", "benchmark_inventory",
+    "trust_anchor_status", "screening_usable", "benchmark_execution_performed",
+    "cutover_evidence_eligible", "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.jobbench-inventory-candidate.v1" },
+    "status": { "enum": ["candidate_unanchored", "candidate_source_verified"] },
+    "source_id": { "const": "jobbench" },
+    "source_revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "source_file": { "const": "dataset/main-file-manifest.v1" },
+    "source_file_sha256": { "$ref": "#/$defs/sha256" },
+    "source_file_count": { "type": "integer", "minimum": 1, "maximum": 10000 },
+    "source_relationship_file": { "const": "README.md#main-task_id" },
+    "source_relationship_file_sha256": { "$ref": "#/$defs/sha256" },
+    "inventory_commitment": { "$ref": "#/$defs/commitment" },
+    "benchmark_inventory": { "$ref": "#/$defs/inventory" },
+    "trust_anchor_status": { "enum": ["uncommitted", "committed"] },
+    "screening_usable": { "type": "boolean" },
+    "benchmark_execution_performed": { "const": false },
+    "cutover_evidence_eligible": { "const": false },
+    "execution_authorized": { "const": false }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "taskId": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]+$"
+    },
+    "commitment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "task_count", "task_ids_sha256"],
+      "properties": {
+        "source_id": { "const": "jobbench" },
+        "task_count": { "type": "integer", "minimum": 1, "maximum": 2048 },
+        "task_ids_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "source_revision", "source_file_sha256", "task_ids"],
+      "properties": {
+        "source_id": { "const": "jobbench" },
+        "source_revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "source_file_sha256": { "$ref": "#/$defs/sha256" },
+        "task_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2048,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/taskId" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "candidate_unanchored" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "trust_anchor_status": { "const": "uncommitted" },
+          "screening_usable": { "const": false }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "candidate_source_verified" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "source_revision": { "const": "d43a66575635da0d3f6cb9a20976dc1a60f3ffc9" },
+          "source_file_sha256": { "const": "8fee9939969c1a4fa68e280ea99743305d5dcecc2bee83d0f18fd0a532cbddcd" },
+          "source_file_count": { "const": 566 },
+          "source_relationship_file_sha256": { "const": "6793a68d3dac7c0deccd174a85d724e614706049f7579aaac9efe86da79be291" },
+          "trust_anchor_status": { "const": "committed" },
+          "screening_usable": { "const": true },
+          "inventory_commitment": {
+            "properties": {
+              "task_count": { "const": 65 },
+              "task_ids_sha256": { "const": "baadaf4f2afd1fa31506f9b50e5d04078d51908435b2a5328cd0638bcf186171" }
+            }
+          },
+          "benchmark_inventory": {
+            "properties": {
+              "source_revision": { "const": "d43a66575635da0d3f6cb9a20976dc1a60f3ffc9" },
+              "source_file_sha256": { "const": "8fee9939969c1a4fa68e280ea99743305d5dcecc2bee83d0f18fd0a532cbddcd" },
+              "task_ids": { "minItems": 65, "maxItems": 65 }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

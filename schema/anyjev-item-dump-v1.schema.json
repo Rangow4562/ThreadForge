@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schema/anyjev-item-dump-v1.schema.json",
+  "title": "Threadforge AnyJev item-dump projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset_kind",
+    "model_sha256",
+    "units",
+    "omitted_fields",
+    "human_review_required",
+    "execution_verified",
+    "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-item-dump.v1"},
+    "dataset_kind": {"enum": ["task_dump", "typed_question_dump"]},
+    "model_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "units": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "unit_key_sha256",
+          "kind",
+          "options",
+          "examples",
+          "permutation_count",
+          "permutation_layout_sha256",
+          "raw_first_layout_accuracy",
+          "permutation_mean_accuracy",
+          "permutation_logmean_accuracy",
+          "permutation_logmean_nll",
+          "permutation_logmean_brier",
+          "permutation_flip_rate",
+          "content_free_prior_available"
+        ],
+        "properties": {
+          "unit_key_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "workflow_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "kind": {"enum": ["choice", "noul", "score"]},
+          "options": {"type": "integer", "minimum": 2, "maximum": 26},
+          "examples": {"type": "integer", "minimum": 1, "maximum": 10000},
+          "permutation_count": {"type": "integer", "minimum": 1, "maximum": 26},
+          "permutation_layout_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "raw_first_layout_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+          "permutation_mean_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+          "permutation_logmean_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+          "permutation_logmean_nll": {"type": "number", "minimum": 0, "maximum": 1000000},
+          "permutation_logmean_brier": {"type": "number", "minimum": 0, "maximum": 2},
+          "permutation_flip_rate": {"type": "number", "minimum": 0, "maximum": 1},
+          "soft_label_logmean_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+          "content_free_prior_available": {"type": "boolean"}
+        }
+      }
+    },
+    "omitted_fields": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "human_review_required": {"const": true},
+    "execution_verified": {"const": false},
+    "cutover_evidence_eligible": {"const": false}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"dataset_kind": {"const": "typed_question_dump"}}},
+      "then": {
+        "properties": {
+          "units": {"items": {"required": ["workflow_sha256"]}}
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-zero-label-distillation-result-v1.schema.json",
+  "title": "Threadforge AnyJev zero-label teacher distillation result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_kind",
+    "student_sha256",
+    "teacher_sha256",
+    "budgets",
+    "question_count",
+    "pooled",
+    "questions",
+    "omitted_fields",
+    "human_review_required",
+    "execution_verified",
+    "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.anyjev-zero-label-distillation-result.v1"
+    },
+    "source_kind": {
+      "const": "teacher_zero_label"
+    },
+    "student_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "teacher_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "budgets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000000
+      }
+    },
+    "question_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 256
+    },
+    "pooled": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 49,
+      "items": {
+        "$ref": "#/$defs/pooledMethod"
+      }
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/question"
+      }
+    },
+    "omitted_fields": {
+      "const": [
+        "student_label",
+        "teacher_label",
+        "question_labels",
+        "method_labels",
+        "date",
+        "environment_details",
+        "synthetic_states",
+        "per-example_predictions"
+      ]
+    },
+    "human_review_required": {
+      "const": true
+    },
+    "execution_verified": {
+      "const": false
+    },
+    "cutover_evidence_eligible": {
+      "const": false
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "pooledMethod": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method_sha256", "accuracy"],
+      "properties": {
+        "method_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "accuracy": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "questionMethod": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method_sha256", "accuracy", "ece"],
+      "properties": {
+        "method_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "accuracy": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "ece": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question_sha256",
+        "kind",
+        "k",
+        "teacher_train_accuracy",
+        "methods"
+      ],
+      "properties": {
+        "question_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "kind": {
+          "enum": ["choice", "noul", "score"]
+        },
+        "k": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 64
+        },
+        "teacher_train_accuracy": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "methods": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 49,
+          "items": {
+            "$ref": "#/$defs/questionMethod"
+          }
+        }
+      }
+    }
+  }
+}

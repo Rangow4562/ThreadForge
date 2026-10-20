@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/task-resume-context-v1.schema.json",
+  "title": "Threadforge explicit task resume context",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "task", "session_choices", "session_choices_truncated", "entries",
+    "entries_truncated", "warnings", "action_ready", "guidance_only", "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.task-resume-context.v1" },
+    "status": { "enum": ["available", "session_selection_required"] },
+    "task": { "$ref": "continuity-v1.schema.json#/$defs/task" },
+    "selected_session": { "$ref": "continuity-v1.schema.json#/$defs/session" },
+    "session_choices": {
+      "type": "array",
+      "maxItems": 2,
+      "items": { "$ref": "continuity-v1.schema.json#/$defs/session" }
+    },
+    "session_choices_truncated": { "type": "boolean" },
+    "entries": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "$ref": "continuity-v1.schema.json#/$defs/entry" }
+    },
+    "entries_truncated": { "type": "boolean" },
+    "warnings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "requirements_not_finalized", "unanswered_clarifications", "plan_missing",
+          "plan_unconfirmed", "plan_only_recorded", "implementation_scope_missing",
+          "task_blocked", "task_terminal", "multiple_active_sessions"
+        ]
+      }
+    },
+    "action_ready": { "const": false },
+    "guidance_only": { "const": true },
+    "execution_authorized": { "const": false }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "available" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "session_choices": { "maxItems": 0 },
+          "session_choices_truncated": { "const": false }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "session_selection_required" } }, "required": ["status"] },
+      "then": {
+        "required": ["session_choices"],
+        "properties": {
+          "session_choices": { "minItems": 2, "maxItems": 2 },
+          "entries": { "maxItems": 0 }
+        },
+        "not": { "required": ["selected_session"] }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "task": {
+            "properties": {
+              "plan": {
+                "properties": { "decision": { "const": "plan_only" } },
+                "required": ["decision"]
+              }
+            },
+            "required": ["plan"]
+          }
+        },
+        "required": ["task"]
+      },
+      "then": {
+        "properties": {
+          "status": { "const": "available" },
+          "session_choices": { "maxItems": 0 },
+          "session_choices_truncated": { "const": false },
+          "entries": { "maxItems": 0 },
+          "entries_truncated": { "const": false },
+          "warnings": { "contains": { "const": "plan_only_recorded" } }
+        },
+        "not": {
+          "anyOf": [
+            { "required": ["selected_session"] },
+            { "properties": { "task": { "required": ["summary"] } } },
+            { "properties": { "task": { "required": ["next_action"] } } }
+          ]
+        }
+      }
+    }
+  ]
+}

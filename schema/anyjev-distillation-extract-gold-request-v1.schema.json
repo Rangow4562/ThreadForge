@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-distillation-extract-gold-request-v1.schema.json",
+  "title": "Threadforge AnyJev checkpoint-pinned gold feature extraction request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "data_root", "cache_root", "model_role", "model", "model_checkpoint_sha256", "backend", "block", "questions"],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-distillation-extract-gold-request.v1"},
+    "data_root": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "cache_root": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "model_role": {"enum": ["teacher", "student"]},
+    "model": {"type": "string", "minLength": 1, "maxLength": 512},
+    "model_checkpoint_sha256": {"$ref": "#/$defs/sha256"},
+    "backend": {"$ref": "#/$defs/backend"},
+    "block": {"type": "integer", "minimum": 1, "maximum": 100000},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295, "default": 0},
+    "questions": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/$defs/question"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "backend": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "model_path"],
+      "properties": {
+        "type": {"const": "hf"},
+        "model_path": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "device": {"type": "string", "pattern": "^(cpu|mps|cuda(:[0-9]+)?)$", "default": "cpu"},
+        "dtype": {"enum": ["auto", "float32", "float16", "bfloat16"], "default": "float32"},
+        "batch_size": {"type": "integer", "minimum": 1, "maximum": 64, "default": 8}
+      }
+    },
+    "questionSpec": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "text"],
+      "properties": {
+        "kind": {"enum": ["choice", "score", "noul"]},
+        "text": {"type": "string", "minLength": 1, "maxLength": 10000},
+        "name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "options": {"type": "array", "minItems": 2, "maxItems": 26, "items": {"type": "string"}},
+        "scale": {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}], "minItems": 2, "maxItems": 2},
+        "bins": {"type": "integer", "minimum": 2, "maximum": 10},
+        "levels": {"type": "array", "minItems": 2, "maxItems": 10, "items": {"type": "string"}}
+      }
+    },
+    "relativeJson": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*[\\\\:]).+\\.json$"},
+    "question": {
+      "type": "object", "additionalProperties": false,
+      "required": ["question_id", "workflow", "question", "train_cases_path", "test_cases_path"],
+      "properties": {
+        "question_id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "workflow": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+        "question": {"$ref": "#/$defs/questionSpec"},
+        "train_cases_path": {"$ref": "#/$defs/relativeJson"},
+        "test_cases_path": {"$ref": "#/$defs/relativeJson"}
+      }
+    }
+  }
+}

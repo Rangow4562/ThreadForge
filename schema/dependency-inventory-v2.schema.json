@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/dependency-inventory-v2.schema.json",
+  "title": "Threadforge source-manifest dependency inventory v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release_clearance", "coverage", "counts", "manifests", "components"],
+  "properties": {
+    "schema_version": { "const": "threadforge.dependency-inventory.v2" },
+    "release_clearance": { "const": false },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "resolved_python_optional_extras", "license_review_complete", "license_metadata_collection", "note"],
+      "properties": {
+        "status": { "const": "source-manifest-inventory-only" },
+        "resolved_python_optional_extras": { "const": false },
+        "license_review_complete": { "const": false },
+        "license_metadata_collection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "declared_components", "missing_components", "missing_by_ecosystem", "missing_by_source_manifest", "automatic_license_inference", "license_review_complete", "release_clearance"],
+          "properties": {
+            "status": { "const": "source-declarations-only" },
+            "declared_components": { "type": "integer", "minimum": 0 },
+            "missing_components": { "type": "integer", "minimum": 0 },
+            "missing_by_ecosystem": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["golang", "npm", "pypi"],
+              "properties": {
+                "golang": { "type": "integer", "minimum": 0 },
+                "npm": { "type": "integer", "minimum": 0 },
+                "pypi": { "type": "integer", "minimum": 0 }
+              }
+            },
+            "missing_by_source_manifest": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["source_manifest", "ecosystem", "components"],
+                "properties": {
+                  "source_manifest": { "type": "string", "minLength": 1, "maxLength": 512 },
+                  "ecosystem": { "enum": ["golang", "npm", "pypi"] },
+                  "components": { "type": "integer", "minimum": 1 }
+                }
+              }
+            },
+            "automatic_license_inference": { "const": false },
+            "license_review_complete": { "const": false },
+            "release_clearance": { "const": false }
+          }
+        },
+        "note": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["components", "manifests", "unresolved_versions", "missing_declared_license_metadata"],
+      "properties": {
+        "components": { "type": "integer", "minimum": 1 },
+        "manifests": { "type": "integer", "minimum": 1 },
+        "unresolved_versions": { "type": "integer", "minimum": 0 },
+        "missing_declared_license_metadata": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "manifests": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "sha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/component" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ecosystem", "name", "version", "version_constraint", "scope", "group", "direct",
+        "license_declared", "license_review_status", "source_manifest", "source_manifest_sha256",
+        "integrity", "replaced"
+      ],
+      "properties": {
+        "ecosystem": { "enum": ["golang", "npm", "pypi"] },
+        "name": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "version": { "type": ["string", "null"], "maxLength": 128 },
+        "version_constraint": { "type": ["string", "null"], "maxLength": 512 },
+        "scope": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "group": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "direct": { "type": ["boolean", "null"] },
+        "license_declared": { "type": ["string", "null"], "maxLength": 512 },
+        "license_review_status": { "const": "unreviewed" },
+        "source_manifest": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "source_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "integrity": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "uniqueItems": true
+        },
+        "replaced": { "type": "boolean" }
+      }
+    }
+  }
+}

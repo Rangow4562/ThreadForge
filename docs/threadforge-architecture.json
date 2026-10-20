@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Threadforge Architecture — Local-First Agent Memory",
+    "locale": "en",
+    "output": "threadforge-architecture.html",
+    "quality_profile": "showcase",
+    "viewBox": [1520, 920]
+  },
+  "components": [
+    { "id": "harness", "type": "external", "label": "AI Coding Hosts", "sublabel": "adapters · hooks · session pollers", "tag": "TypeScript", "pos": [40, 200], "size": [140, 68] },
+    { "id": "intake", "type": "backend", "label": "Loopback Intake Service", "sublabel": "internal/service · :4318 · :4317", "tag": "Go", "pos": [320, 160], "size": [160, 68] },
+    { "id": "jsonl", "type": "database", "label": "Trace Event Log", "sublabel": "traces/events.jsonl · append-only", "pos": [720, 90], "size": [150, 62] },
+    { "id": "sqlite", "type": "database", "label": "SQLite Store", "sublabel": "internal/store · schema v12", "pos": [720, 280], "size": [150, 62] },
+    { "id": "mcp", "type": "backend", "label": "MCP Stdio Server", "sublabel": "internal/mcp · JSON-RPC 2.0", "tag": "Go", "pos": [320, 400], "size": [160, 68] },
+    { "id": "projfiles", "type": "database", "label": "Project Records", "sublabel": "memory · procedures · skills", "pos": [720, 470], "size": [150, 62] },
+    { "id": "beacon", "type": "security", "label": "Threat Rule Scan", "sublabel": "vendored Beacon CEL rules", "pos": [760, 700], "size": [160, 62] },
+    { "id": "cli", "type": "backend", "label": "threadforge CLI", "sublabel": "cmd/threadforge · internal/cli", "tag": "Go", "pos": [1000, 470], "size": [160, 68] },
+    { "id": "python", "type": "backend", "label": "Python Analysis", "sublabel": "threadforge_py · anyjev · rrsi", "tag": "Python", "pos": [1000, 790], "size": [150, 62] },
+    { "id": "devin", "type": "cloud", "label": "Devin Cloud API", "sublabel": "HTTPS pull · digest-first", "pos": [1300, 280], "size": [150, 62] },
+    { "id": "siem", "type": "cloud", "label": "SIEM / Cloud Targets", "sublabel": "via opt-in Vector packs", "pos": [1300, 620], "size": [150, 62] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Local machine · loopback-only listeners", "wraps": ["intake", "jsonl", "sqlite", "mcp", "cli", "projfiles", "python", "beacon"], "pad": 22 },
+    { "kind": "region", "label": "Project repository · .threadforge/", "wraps": ["projfiles"], "pad": 14 },
+    { "kind": "region", "label": "Remote · explicit consent", "wraps": ["devin", "siem"], "pad": 22 }
+  ],
+  "connections": [
+    { "from": "harness", "to": "intake", "label": "OTLP · POST /v1/events", "variant": "emphasis" },
+    { "from": "intake", "to": "jsonl", "label": "redact → append", "variant": "emphasis" },
+    { "from": "harness", "to": "mcp", "label": "stdio JSON-RPC" },
+    { "from": "intake", "to": "sqlite", "label": "dashboard · /v2/context" },
+    { "from": "mcp", "to": "sqlite", "label": "task/session reads" },
+    { "from": "mcp", "to": "projfiles", "label": "freshness-checked reads" },
+    { "from": "cli", "to": "sqlite", "label": "proposals · CAS audit" },
+    { "from": "cli", "to": "projfiles", "label": "publish approved records", "labelDy": 14 },
+    { "from": "cli", "to": "python", "label": "JSON-lines over stdio", "fromSide": "bottom", "toSide": "top" },
+    { "from": "cli", "to": "beacon", "label": "CEL threat scan" },
+    { "from": "cli", "to": "devin", "label": "HTTPS session pull" },
+    { "from": "cli", "to": "siem", "label": "metadata-only packs" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Capture Path", "items": [
+      "Host hooks, OTLP installers, and SDK emitters reach 127.0.0.1 listeners only",
+      "Intake redacts credentials before appending to traces/events.jsonl",
+      "Loopback-only is enforced on both :4318 HTTP and :4317 gRPC"
+    ] },
+    { "dot": "emerald", "title": "Retrieval & Continuity", "items": [
+      "MCP stdio tools and /v2/context serve approved project memory",
+      "Source-freshness hashing withholds stale or unverified records",
+      "Task/session continuity stays advisory and read-only over HTTP/MCP"
+    ] },
+    { "dot": "violet", "title": "Governance & Growth", "items": [
+      "CLI proposals, approvals, and audit trails persist in SQLite with CAS revisions",
+      "anyjev and rrsi run as a bounded JSON-stdio Python subprocess",
+      "Opt-in Vector packs export metadata only; credentials stay external"
+    ] }
+  ]
+}

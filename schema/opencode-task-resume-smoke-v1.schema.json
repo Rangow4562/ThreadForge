@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/opencode-task-resume-smoke-v1.schema.json",
+  "title": "Threadforge installed OpenCode task-resume smoke result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "host_cli_version", "provider", "tool", "tool_call_count",
+    "tool_result_observed", "completion_requests", "auxiliary_completion_requests",
+    "task_context_content_retained_in_report", "result_advisory_markers_verified",
+    "requirements_not_finalized_warning_verified", "action_ready", "guidance_only",
+    "execution_authorized", "plugin_event_delivery", "real_model_invocations"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.opencode-task-resume-smoke.v1" },
+    "status": { "const": "verified" },
+    "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "provider": { "const": "deterministic-loopback-fixture" },
+    "tool": { "const": "threadforge_task_resume_context" },
+    "tool_call_count": { "const": 1 },
+    "tool_result_observed": { "const": true },
+    "completion_requests": { "type": "integer", "minimum": 2, "maximum": 10 },
+    "auxiliary_completion_requests": { "type": "integer", "minimum": 0, "maximum": 8 },
+    "task_context_content_retained_in_report": { "const": false },
+    "result_advisory_markers_verified": { "const": true },
+    "requirements_not_finalized_warning_verified": { "const": true },
+    "action_ready": { "const": false },
+    "guidance_only": { "const": true },
+    "execution_authorized": { "const": false },
+    "plugin_event_delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "event_count", "actions", "provider", "prompt_text_retained", "execution_authorized"],
+      "properties": {
+        "status": { "const": "verified" },
+        "event_count": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "actions": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "maxLength": 64 } },
+        "provider": { "const": "loopback-only" },
+        "prompt_text_retained": { "const": false },
+        "execution_authorized": { "const": false }
+      }
+    },
+    "real_model_invocations": { "const": 0 }
+  }
+}

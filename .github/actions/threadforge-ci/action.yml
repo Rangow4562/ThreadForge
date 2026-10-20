@@ -1,0 +1,64 @@
+name: Threadforge CI capture
+description: Start or finish a local Threadforge CI telemetry session.
+inputs:
+  mode:
+    description: Use start before agent work and finish in an always() step afterward.
+    required: true
+    default: start
+  harness:
+    description: Harness to capture (claude-code or codex-cli).
+    required: false
+    default: claude-code
+  min-events:
+    description: Required matching events; inherit keeps the start-time value on finish.
+    required: false
+    default: inherit
+  require-telemetry:
+    description: true or false; inherit keeps the start-time value on finish.
+    required: false
+    default: inherit
+  security-fail-on:
+    description: Optional local threat scan threshold for the captured log; applies to finish only.
+    required: false
+    default: ''
+  output-dir:
+    description: Existing local artifact base directory. Applies to start only.
+    required: false
+    default: ''
+  state-path:
+    description: Optional session-state path. GITHUB_ENV carries the default into later steps.
+    required: false
+    default: ''
+  upload-summary:
+    description: Upload only the sanitized aggregate CI receipt after finish; never uploads logs or session state.
+    required: false
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Set up the Threadforge Go toolchain
+      if: inputs.mode == 'start'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      with:
+        go-version-file: ${{ github.action_path }}/../../../go.mod
+        cache: false
+    - name: Run Threadforge CI session command
+      shell: bash
+      env:
+        THREADFORGE_ACTION_PATH: ${{ github.action_path }}
+        THREADFORGE_ACTION_MODE: ${{ inputs.mode }}
+        THREADFORGE_ACTION_HARNESS: ${{ inputs.harness }}
+        THREADFORGE_ACTION_MIN_EVENTS: ${{ inputs.min-events }}
+        THREADFORGE_ACTION_REQUIRE_TELEMETRY: ${{ inputs.require-telemetry }}
+        THREADFORGE_ACTION_SECURITY_FAIL_ON: ${{ inputs.security-fail-on }}
+        THREADFORGE_ACTION_OUTPUT_DIR: ${{ inputs.output-dir }}
+        THREADFORGE_ACTION_STATE_PATH: ${{ inputs.state-path }}
+      run: bash "$THREADFORGE_ACTION_PATH/run.sh"
+    - name: Upload sanitized Threadforge CI summary
+      if: ${{ success() && inputs.mode == 'finish' && inputs.upload-summary == 'true' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: threadforge-ci-summary-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.harness }}
+        path: ${{ env.THREADFORGE_CI_ARTIFACT_DIR }}/threadforge-ci-public-summary.json
+        if-no-files-found: error
+        retention-days: '3'

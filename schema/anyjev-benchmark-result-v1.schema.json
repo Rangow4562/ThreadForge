@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/anyjev-benchmark-result-v1.schema.json",
+  "title": "Sanitized historical AnyJev benchmark result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "model_sha256", "backend", "prior", "combine",
+    "test_examples", "calibration_examples", "seed", "tasks", "omitted_fields",
+    "human_review_required", "execution_verified", "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.anyjev-benchmark-result.v1" },
+    "model_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "backend": { "const": "hf" },
+    "prior": { "enum": ["batch", "content_free", "none"] },
+    "combine": { "enum": ["logmean", "mean"] },
+    "test_examples": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+    "calibration_examples": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+    "seed": { "type": "integer", "minimum": -1000000000, "maximum": 1000000000 },
+    "adaptive": { "type": "boolean" },
+    "adaptive_margin": { "type": "number", "minimum": 0, "maximum": 1000000 },
+    "max_permutations": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+    "prior_strength": { "type": "number", "minimum": 0, "maximum": 1000000 },
+    "tasks": {
+      "type": "array", "minItems": 1, "maxItems": 10000,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["task_key_sha256", "question_key_sha256", "k", "test_examples", "calibration_examples", "levels"],
+        "properties": {
+          "task_key_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "question_key_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "k": { "type": "integer", "minimum": 2, "maximum": 26 },
+          "test_examples": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+          "calibration_examples": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+          "levels": {
+            "type": "array", "minItems": 1, "maxItems": 16,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["name", "metrics"],
+              "properties": {
+                "name": { "enum": ["raw", "L0", "L0-bc", "L0-cf", "L0-perm", "L0-perm+bc", "L0-perm+cf", "L1"] },
+                "metrics": {
+                  "type": "object", "minProperties": 1, "maxProperties": 32,
+                  "additionalProperties": false,
+                  "properties": {
+                    "acc": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "aurc": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "brier": { "type": "number", "minimum": 0, "maximum": 2 },
+                    "cov@5%": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "cyclic_flip_l0": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "cyclic_flip_raw": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "ece": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "flip": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "macro_f1": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "mean_shifts": { "type": "number", "minimum": 0, "maximum": 1000000 },
+                    "n": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+                    "nll": { "type": "number", "minimum": 0, "maximum": 1000000 },
+                    "prior_strength": { "type": "number", "minimum": 0, "maximum": 1000000 },
+                    "temperature": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000000 },
+                    "temperature_reversed": { "type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 1000000 }
+                  },
+                  "required": ["n"]
+                },
+                "method_sha256": {
+                  "type": "object", "maxProperties": 1,
+                  "propertyNames": { "enum": ["prior_method"] },
+                  "additionalProperties": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+                },
+                "flags": {
+                  "type": "object", "maxProperties": 1,
+                  "propertyNames": { "enum": ["adaptive"] },
+                  "additionalProperties": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "omitted_fields": {
+      "type": "array", "minItems": 8, "maxItems": 8, "uniqueItems": true,
+      "items": { "enum": ["model_label", "environment_details", "task_labels", "question_labels", "artifacts", "answer_mass", "raw_item_distributions", "timing_metrics"] }
+    },
+    "human_review_required": { "const": true },
+    "execution_verified": { "const": false },
+    "cutover_evidence_eligible": { "const": false }
+  }
+}

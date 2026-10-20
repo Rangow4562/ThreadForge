@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.invalid/schema/project-instructions-plan-v1.schema.json",
+  "title": "Threadforge Project Instructions Bootstrap Plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "project_root_sha256", "targets", "mutates_files", "host_trust_changed", "permissions_changed", "execution_authorized", "limitations"],
+  "properties": {
+    "schema_version": { "const": "threadforge.project-instructions-plan.v1" },
+    "status": { "const": "planned" },
+    "project_root_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["hosts", "path", "action"],
+        "properties": {
+          "hosts": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "enum": ["claude-code", "command-code", "cursor", "antigravity", "gemini-cli", "codex-cli", "chatgpt-desktop-codex", "codex-ide", "opencode", "qwen-code", "github-copilot", "zcode", "kimi-code", "qoder", "deepseek-harness", "goose"] } },
+          "path": { "enum": ["AGENTS.md", "CLAUDE.md", "GEMINI.md", "QWEN.md", ".github/copilot-instructions.md", ".goosehints"] },
+          "action": { "const": "append_or_match" }
+        }
+      }
+    },
+    "mutates_files": { "const": false },
+    "host_trust_changed": { "const": false },
+    "permissions_changed": { "const": false },
+    "execution_authorized": { "const": false },
+    "limitations": { "type": "array", "minItems": 3, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+  }
+}

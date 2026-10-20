@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-distillation-fit-request-v1.schema.json",
+  "title": "Threadforge AnyJev distillation fit request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "cache_root", "teacher_model", "questions"],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-distillation-fit-request.v1"},
+    "cache_root": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "teacher_model": {"type": "string", "minLength": 1, "maxLength": 512},
+    "calibration_examples": {"type": "integer", "minimum": 8, "maximum": 5000, "default": 300},
+    "budgets": {
+      "type": "array", "minItems": 1, "maxItems": 16,
+      "items": {"type": "integer", "minimum": 1, "maximum": 5000},
+      "uniqueItems": true
+    },
+    "bootstrap_resamples": {"type": "integer", "minimum": 100, "maximum": 10000},
+    "questions": {
+      "type": "array", "minItems": 1, "maxItems": 256,
+      "items": {"$ref": "#/$defs/question"}
+    }
+  },
+  "$defs": {
+    "relativeNpz": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*[\\\\:]).+\\.npz$"},
+    "student": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model", "block", "n_layers", "gold_train_path", "gold_test_path", "synth_features_path"],
+      "properties": {
+        "model": {"type": "string", "minLength": 1, "maxLength": 512},
+        "block": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "n_layers": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "gold_train_path": {"$ref": "#/$defs/relativeNpz"},
+        "gold_test_path": {"$ref": "#/$defs/relativeNpz"},
+        "synth_features_path": {"$ref": "#/$defs/relativeNpz"}
+      }
+    },
+    "question": {
+      "type": "object", "additionalProperties": false,
+      "required": ["question_id", "teacher_synth_path", "teacher_test_path", "students"],
+      "properties": {
+        "question_id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "teacher_synth_path": {"$ref": "#/$defs/relativeNpz"},
+        "teacher_test_path": {"$ref": "#/$defs/relativeNpz"},
+        "students": {
+          "type": "array", "minItems": 1, "maxItems": 8,
+          "items": {"$ref": "#/$defs/student"}
+        }
+      }
+    }
+  }
+}

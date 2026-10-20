@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-serving-pipeline-result-v1.schema.json",
+  "title": "Threadforge local AnyJev serving pipeline result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "source_model_sha256", "case_set_sha256", "total_blocks", "parameters", "rows",
+    "model_inference_verified", "remote_inference_used", "independent_holdout_verified", "execution_verified",
+    "human_review_required", "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {"const": "threadforge.anyjev-serving-pipeline-result.v1"},
+    "source_model_sha256": {"$ref": "#/$defs/sha256"},
+    "case_set_sha256": {"$ref": "#/$defs/sha256"},
+    "total_blocks": {"type": "integer", "minimum": 1, "maximum": 4096},
+    "parameters": {"$ref": "#/$defs/parameters"},
+    "rows": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/depthRow"}},
+    "model_inference_verified": {"const": true},
+    "remote_inference_used": {"const": false},
+    "independent_holdout_verified": {"const": false},
+    "execution_verified": {"const": false},
+    "human_review_required": {"const": true},
+    "cutover_evidence_eligible": {"const": false}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "parameters": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repeats", "prefix_caching", "gpu_memory_utilization", "multi_question_states", "port", "startup_timeout_seconds", "quantization"],
+      "properties": {
+        "repeats": {"type": "integer", "minimum": 2, "maximum": 10},
+        "prefix_caching": {"type": "boolean"},
+        "gpu_memory_utilization": {"type": "number", "exclusiveMinimum": 0.05, "maximum": 0.95},
+        "multi_question_states": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "port": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "startup_timeout_seconds": {"type": "integer", "minimum": 10, "maximum": 900},
+        "quantization": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_-]{1,32}$"}
+      }
+    },
+    "questionRow": {
+      "type": "object", "additionalProperties": false,
+      "required": ["question_id_sha256", "question_sha256", "train_examples", "test_examples", "accuracy", "ece", "fit_ms", "single_ms", "single_spread", "head_method"],
+      "properties": {
+        "question_id_sha256": {"$ref": "#/$defs/sha256"},
+        "question_sha256": {"$ref": "#/$defs/sha256"},
+        "train_examples": {"type": "integer", "minimum": 8, "maximum": 5000},
+        "test_examples": {"type": "integer", "minimum": 2, "maximum": 5000},
+        "accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "ece": {"type": "number", "minimum": 0, "maximum": 1},
+        "fit_ms": {"type": "number", "minimum": 0, "maximum": 1000000000},
+        "single_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000000},
+        "single_spread": {"type": "number", "minimum": 0, "maximum": 1000000},
+        "head_method": {"enum": ["head:lda", "head:ridge"]}
+      }
+    },
+    "multiQuestion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["question_count", "sampled_states", "median_ms_per_decision", "spread"],
+      "properties": {
+        "question_count": {"type": "integer", "minimum": 1, "maximum": 32},
+        "sampled_states": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "median_ms_per_decision": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000000},
+        "spread": {"type": "number", "minimum": 0, "maximum": 1000000}
+      }
+    },
+    "depthRow": {
+      "type": "object", "additionalProperties": false,
+      "required": ["blocks", "total_blocks", "checkpoint_sha256", "questions", "multi_question"],
+      "properties": {
+        "blocks": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "total_blocks": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "checkpoint_sha256": {"$ref": "#/$defs/sha256"},
+        "questions": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/questionRow"}},
+        "multi_question": {"$ref": "#/$defs/multiQuestion"}
+      }
+    }
+  }
+}

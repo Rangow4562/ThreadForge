@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-domain-validation-request-v1.schema.json",
+  "title": "Threadforge RRSI domain result validation request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "params"],
+  "properties": {
+    "schema_version": { "const": "threadforge.evolution-domain-validation-request.v1" },
+    "params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "splits"],
+      "properties": {
+        "domain": { "enum": ["rrsi-coding", "rrsi-agentic-workspace", "rrsi-engineering-design"] },
+        "splits": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["split_id"],
+            "properties": {
+              "split_id": {
+                "enum": [
+                  "terminal-bench/terminal-bench-2-1", "swe-bench/swe-bench-verified",
+                  "harvey-lab/evolve", "harvey-lab/held-out", "jobbench", "gdpval", "apex-agents",
+                  "engdesign-open", "engdesign-v1", "frontier-eng"
+                ]
+              },
+              "roles": { "type": "array", "uniqueItems": true, "items": { "enum": ["evolve", "held_out", "ood"] } },
+              "dataset_sha256": { "$ref": "#/$defs/sha256" },
+              "task_count": { "type": "integer", "minimum": 1 },
+              "evaluator": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                  "version": { "type": "string", "minLength": 1, "maxLength": 128 },
+                  "sha256": { "$ref": "#/$defs/sha256" }
+                }
+              },
+              "baseline_runs": { "$ref": "#/$defs/runs" },
+              "candidate_runs": { "$ref": "#/$defs/runs" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "runs": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "run_id": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$" },
+          "evidence_sha256": { "$ref": "#/$defs/sha256" },
+          "metrics": { "oneOf": [{ "$ref": "#/$defs/coding_metrics" }, { "$ref": "#/$defs/workspace_metrics" }, { "$ref": "#/$defs/engineering_metrics" }] }
+        }
+      }
+    },
+    "coding_metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["total_passes", "n_trials", "pass_rate"],
+      "properties": {
+        "total_passes": { "type": "integer", "minimum": 0 },
+        "n_trials": { "type": "integer", "minimum": 1 },
+        "pass_rate": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "workspace_metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["criteria_passed", "criteria_total", "all_pass_tasks", "criterion_rate", "all_pass_rate"],
+      "properties": {
+        "criteria_passed": { "type": "integer", "minimum": 0 },
+        "criteria_total": { "type": "integer", "minimum": 1 },
+        "all_pass_tasks": { "type": "integer", "minimum": 0 },
+        "criterion_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "all_pass_rate": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "engineering_metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["total_passes", "n_trials", "pass_rate", "mean_combined_score", "valid_rate", "no_payload_rate"],
+      "properties": {
+        "total_passes": { "type": "integer", "minimum": 0 },
+        "n_trials": { "type": "integer", "minimum": 1 },
+        "pass_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "mean_combined_score": { "type": "number", "minimum": 0 },
+        "valid_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "no_payload_rate": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}

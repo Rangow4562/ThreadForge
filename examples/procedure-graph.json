@@ -1,0 +1,40 @@
+{
+  "schema_version": "threadforge.procedure-graph.v1",
+  "id": "verify-build-before-handoff",
+  "project_id": "example-project",
+  "title": "Verify a build before handoff",
+  "revision": 2,
+  "status": "approved",
+  "applicability": { "modules": ["backend"], "paths": ["src/**"] },
+  "nodes": [
+    { "id": "inspect-failure", "kind": "trigger", "instruction": "Read the failing command and identify the affected package." },
+    { "id": "run-targeted-tests", "kind": "action", "instruction": "Run the narrowest relevant test suite before broad tests." },
+    { "id": "verify-handoff", "kind": "check", "instruction": "Confirm the targeted tests pass and report any broader checks not run." }
+  ],
+  "edges": [
+    { "from": "inspect-failure", "to": "run-targeted-tests", "relation": "leads_to" },
+    { "from": "run-targeted-tests", "to": "verify-handoff", "relation": "validates", "condition": "The targeted test command completed." }
+  ],
+  "evidence": [
+    { "origin": "trace", "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "harness": "codex", "observed_at": "2026-09-24T10:00:00Z", "redacted": true }
+  ],
+  "validation": {
+    "dataset_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "held_out": true,
+    "baseline_runs": 3,
+    "baseline_score": 0.80,
+    "candidate_score": 0.82,
+    "noise_floor": 0.03,
+    "cost_unit": "tokens",
+    "baseline_cost": 1000,
+    "candidate_cost": 1050,
+    "max_cost_increase": 100,
+    "status": "passed"
+  },
+  "approval": {
+    "approved_by": "example-reviewer",
+    "approved_at": "2026-09-24T10:05:00Z",
+    "reason": "Held-out no-regression gate passed.",
+    "privacy_reviewed": true
+  }
+}

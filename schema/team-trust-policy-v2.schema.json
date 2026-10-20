@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/team-trust-policy-v2.schema.json",
+  "title": "Threadforge team trust policy v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "organization_id", "members"],
+  "properties": {
+    "schema_version": { "const": "threadforge.team-trust-policy.v2" },
+    "organization_id": { "$ref": "#/$defs/name" },
+    "members": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1000,
+      "items": { "$ref": "#/$defs/member" }
+    }
+  },
+  "$defs": {
+    "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$" },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject", "key_id", "public_key", "projects", "roles"],
+      "properties": {
+        "subject": { "$ref": "#/$defs/name" },
+        "key_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "public_key": { "type": "string", "contentEncoding": "base64", "minLength": 44, "maxLength": 44 },
+        "projects": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/name" }
+        },
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "procedure.approve",
+              "procedure.publish",
+              "procedure.privacy-review",
+              "procedure.supersede",
+              "continuity.write",
+              "continuity.review",
+              "continuity.requirements.finalize",
+              "continuity.plan.confirm"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

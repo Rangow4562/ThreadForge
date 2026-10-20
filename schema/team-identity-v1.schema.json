@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/team-identity-v1.schema.json",
+  "title": "Threadforge private team identity v1",
+  "description": "Sensitive local file. Never commit, share, or include this file in project trust policies.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "key_id", "private_key"],
+  "properties": {
+    "schema_version": { "const": "threadforge.team-identity.v1" },
+    "key_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "private_key": { "type": "string", "contentEncoding": "base64", "minLength": 88, "maxLength": 88 }
+  }
+}

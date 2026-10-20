@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/qoder-project-command-v1.schema.json",
+  "title": "Threadforge Qoder project command result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "host",
+    "action",
+    "command_name",
+    "path",
+    "source_sha256",
+    "command_sha256"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.qoder-project-command.v1" },
+    "host": { "const": "qoder-cli" },
+    "action": { "enum": ["installed", "unchanged", "removed", "absent"] },
+    "command_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^threadforge-[a-z0-9]+(?:-[a-z0-9]+)*-r[0-9]+$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^\\.qoder/commands/threadforge-[a-z0-9]+(?:-[a-z0-9]+)*-r[0-9]+\\.md$"
+    },
+    "source_sha256": { "$ref": "#/$defs/sha256" },
+    "command_sha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

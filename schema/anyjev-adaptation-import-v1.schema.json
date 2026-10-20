@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/anyjev-adaptation-import-v1.schema.json",
+  "title": "Local-review AnyJev adaptation statistics import",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "model", "question_key", "statistics"],
+  "properties": {
+    "schema_version": { "const": "threadforge.anyjev-adaptation-import.v1" },
+    "model": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "question_key": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "statistics": {
+      "type": "object",
+      "required": ["sum", "sumsq", "n"],
+      "properties": { "sum": {}, "sumsq": {}, "n": { "type": "integer", "minimum": 1 } }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+module_id,input_min_v,input_max_v,output_v,continuous_a,max_case_c,efficiency_typical_pct
+PWR-17,18,30,12,3.0,150,94
+PWR-22,22,32,12,4.0,125,96
+PWR-31,18,28,12,2.0,145,93

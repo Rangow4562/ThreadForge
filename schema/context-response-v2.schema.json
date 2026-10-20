@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.invalid/schema/context-response-v2.schema.json",
+  "title": "Threadforge Unified Context Response v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "action_ready", "procedures", "gaps"],
+  "properties": {
+    "schema_version": { "const": "threadforge.context-response.v2" },
+    "status": { "enum": ["complete", "incomplete", "stale", "conflicting", "privacy_blocked", "unavailable"] },
+    "action_ready": { "const": false },
+    "procedures": {
+      "type": "array", "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "revision", "title", "freshness", "guidance"],
+        "properties": {
+          "id": { "type": "string" },
+          "revision": { "type": "integer", "minimum": 1 },
+          "title": { "type": "string" },
+          "freshness": { "enum": ["verified", "unverified"] },
+          "guidance": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "memory": {
+      "type": "array", "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "kind", "revision", "title", "content", "evidence"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "enum": ["fact", "decision", "policy"] },
+          "revision": { "type": "integer", "minimum": 1 },
+          "title": { "type": "string" },
+          "content": { "type": "object" },
+          "evidence": { "type": "array", "items": { "type": "object" } }
+        }
+      }
+    },
+    "gaps": { "type": "array", "items": { "type": "string" } }
+  }
+}

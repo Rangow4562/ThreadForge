@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Threadforge local dashboard</title>
+    <link rel="stylesheet" href="/dashboard/style.css">
+    <script src="/dashboard/app.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">LOCAL AGENT MEMORY</p>
+        <h1>Threadforge</h1>
+        <p class="muted">A private view of observed local activity, task progress, and procedure review state.</p>
+      </header>
+
+      <form id="project-form">
+        <label for="project-id">Project ID <span>(optional)</span></label>
+        <div class="form-row">
+          <input id="project-id" name="project_id" maxlength="256" autocomplete="off" placeholder="e.g. repo:my-project">
+          <button type="submit">Refresh</button>
+        </div>
+      </form>
+
+      <p id="status" role="status" aria-live="polite">Loading local status…</p>
+      <section class="grid" aria-label="Local status">
+        <article class="card"><h2>Captured events</h2><p id="event-count" class="metric">—</p><p id="event-window" class="muted"></p></article>
+        <article class="card"><h2>Observed runtimes</h2><p class="muted">Event counts and last-seen times from the bounded local log; this is not configuration discovery.</p><ul id="runtimes"></ul></article>
+        <article class="card"><h2>Configured runtimes</h2><p class="muted">Explicit local scan. Per-runtime and scope counts are shown; configuration paths, hashes, server names, and values stay private.</p><button id="scan-inventory" type="button">Scan configuration metadata</button><p id="inventory-status" class="muted">No configured-runtime scan run.</p><ul id="inventory-summary"></ul></article>
+        <article class="card metric-series-card"><h2>Metric time series</h2><p class="muted">Read local OTLP metrics. Attribute dimensions are omitted; only bounded numeric samples and safe metric labels are shown.</p><button id="load-metrics" type="button">Load metric catalog</button><label for="metric-select">Metric</label><select id="metric-select" disabled><option value="">Load the catalog first</option></select><label for="metric-window">Time window</label><select id="metric-window"><option value="1">Last hour</option><option value="24" selected>Last 24 hours</option><option value="168">Last 7 days</option><option value="720">Last 30 days</option></select><label for="metric-measure">Value</label><select id="metric-measure"><option value="value">Point value</option><option value="sum">Sum</option><option value="count">Count</option><option value="min">Minimum</option><option value="max">Maximum</option></select><button id="query-metrics" type="button" disabled>Query series</button><p id="metric-status" class="muted" role="status">Metric queries run only when requested.</p><div class="metric-chart-wrap"><svg id="metric-chart" viewBox="0 0 720 260" role="img" aria-label="No metric time series loaded"></svg></div></article>
+        <article class="card"><h2>Recent actions</h2><ul id="actions"></ul></article>
+        <article class="card"><h2>Procedure review</h2><ul id="procedures"><li>Enter a project ID to view.</li></ul></article>
+        <article class="card"><h2>Task continuity</h2><ul id="tasks"><li>Enter a project ID to view.</li></ul><h3>Recent tasks</h3><ul id="recent-tasks"><li>Enter a project ID to view.</li></ul></article>
+        <article class="card"><h2>Threat scan</h2><label for="security-min-severity">Minimum severity</label><select id="security-min-severity"><option value="info">Info and above</option><option value="low">Low and above</option><option value="medium">Medium and above</option><option value="high">High and above</option><option value="critical">Critical only</option></select><label for="security-session-filter">Session ID contains <span>(optional)</span></label><input id="security-session-filter" maxlength="256" autocomplete="off" placeholder="Filter this local scan by session"><button id="scan-security" type="button">Run local scan</button><label class="option-row"><input id="include-security-findings" type="checkbox">Show finding details for this scan</label><p class="muted">Session filters are used only for the local scan and are never returned or stored. Filtered scans do not update global review state. Detail output is optional and limited to sanitized rule and event metadata; review state stores only finding digests and rule summaries.</p><p id="security-status" class="muted">Scan starts only when requested. Only a complete unfiltered scan reconciles persistent review state.</p><ul id="security-findings"></ul><div id="security-finding-details"></div><h3>Persistent review state</h3><button id="show-security-reviews" type="button">Load review history</button><p id="security-review-status" class="muted">Review history loads only when requested.</p><div class="security-review-pagination"><button id="security-reviews-previous" type="button" disabled>Previous</button><button id="security-reviews-next" type="button" disabled>Next</button></div><div id="security-review-history"></div></article>
+        <article class="card"><h2>Migration state</h2><ul id="migrations"></ul></article>
+      </section>
+      <section class="card recent-card">
+        <h2>Recent activity</h2>
+        <p class="muted">Message bodies, raw attributes, identities, and repository paths are intentionally omitted.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Harness</th><th>Action</th><th>Severity</th></tr></thead>
+            <tbody id="recent"><tr><td colspan="4">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+      <footer>Local-only dashboard. Context is advisory; it never authorizes execution.</footer>
+    </main>
+  </body>
+</html>

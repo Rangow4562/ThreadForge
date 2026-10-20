@@ -1,0 +1,154 @@
+name: Threadforge test gates
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: threadforge-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Required suites (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      GOTOOLCHAIN: local
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Check out Threadforge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.19.0'
+          cache: npm
+          cache-dependency-path: adapters/package-lock.json
+
+      - name: Run Threadforge Go tests and vet
+        shell: bash
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Run vendored Beacon contract tests
+        shell: bash
+        working-directory: third_party/agent-beacon/pkg/asymptoteobserve
+        run: go test ./...
+
+      - name: Install Python test and workspace runtime dependencies
+        shell: bash
+        working-directory: python
+        run: python -m pip install -e '.[test,decisions,workspace]'
+
+      - name: Run Python tests, compile check, and lint
+        shell: bash
+        working-directory: python
+        env:
+          THREADFORGE_REQUIRE_ENGINEERING_GATEWAY_HTTP: "1"
+        run: |
+          python -m pytest -q
+          python -m compileall -q .
+          ruff check threadforge_py tests
+
+      - name: Build, inspect, and install Python distributions
+        shell: bash
+        working-directory: python
+        run: python scripts/verify_distribution.py
+
+      - name: Install TypeScript adapter dependencies
+        shell: bash
+        working-directory: adapters
+        run: npm ci
+
+      - name: Run TypeScript adapter typecheck and tests
+        shell: bash
+        working-directory: adapters
+        run: |
+          npm run check
+          npm test
+
+      - name: Verify TypeScript adapter package contents
+        shell: bash
+        working-directory: adapters
+        run: npm run test:package
+
+      - name: Install browser extension dependencies
+        shell: bash
+        working-directory: adapters/browser-extension
+        run: npm ci
+
+      - name: Install Playwright Chromium and Linux dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: adapters/browser-extension
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright Chromium
+        if: runner.os != 'Linux'
+        shell: bash
+        working-directory: adapters/browser-extension
+        run: npx playwright install chromium
+
+      - name: Check, build, and run browser extension replay tests
+        shell: bash
+        working-directory: adapters/browser-extension
+        run: |
+          npm run check
+          npm run test:unit
+          npm run build
+          npx playwright test --reporter=line --output "$RUNNER_TEMP/threadforge-browser-playwright"
+
+      - name: Lint and package browser extension builds
+        shell: bash
+        working-directory: adapters/browser-extension
+        run: |
+          npm run lint:firefox
+          npm run package:chromium
+          npm run package:firefox
+
+  elasticsearch-local-stack:
+    name: Elasticsearch synthetic ingestion (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Check out Threadforge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build Threadforge CLI
+        shell: bash
+        run: go build -o "$RUNNER_TEMP/threadforge" ./cmd/threadforge
+
+      - name: Start ephemeral stack and verify synthetic ingestion
+        shell: bash
+        run: bash scripts/test-elasticsearch-stack.sh "$RUNNER_TEMP/threadforge" "$RUNNER_TEMP/threadforge-elasticsearch-pack"

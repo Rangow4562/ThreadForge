@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-request-v1.schema.json",
+  "title": "Threadforge typed decision request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "state"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-request.v1" },
+    "question": { "$ref": "#/$defs/question" },
+    "questions": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/question" } },
+    "state": {},
+    "backend": { "type": "object" },
+    "level": { "enum": ["raw", "L0", "L1", "L2", "auto"] },
+    "require_level": { "enum": ["raw", "L0", "L1", "L2"] }
+  },
+  "oneOf": [
+    { "required": ["question"], "not": { "required": ["questions"] } },
+    { "required": ["questions"], "not": { "required": ["question"] } }
+  ],
+  "$defs": {
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "text"],
+      "properties": {
+        "kind": { "enum": ["choice", "score", "noul"] },
+        "text": { "type": "string", "minLength": 1, "maxLength": 10000 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "options": { "type": "array", "minItems": 2, "maxItems": 26, "items": { "type": "string" } },
+        "scale": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } },
+        "bins": { "type": "integer", "minimum": 2, "maximum": 10 },
+        "levels": { "type": "array", "minItems": 2, "maxItems": 10, "items": { "type": "string" } }
+      }
+    }
+  }
+}

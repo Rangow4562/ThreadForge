@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-workflow-aggregate-v1.schema.json",
+  "title": "Threadforge inert Mancode V3 workflow aggregate v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "validation_profile",
+    "status",
+    "issues",
+    "task_ref",
+    "task_revision",
+    "ownership_epoch",
+    "workflow_status",
+    "workflow_mode",
+    "requirements_status",
+    "requirements_revision",
+    "requirements_digest",
+    "review_status",
+    "review_revision",
+    "review_digest",
+    "verification_status",
+    "verification_schema_version",
+    "verification_revision",
+    "verification_digest",
+    "metadata_digest",
+    "plan_version",
+    "plan_digest",
+    "latest_checkpoint_id",
+    "latest_checkpoint_digest",
+    "parent_snapshot_digest",
+    "aggregate_digest",
+    "sources",
+    "authority",
+    "activation_allowed"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-workflow-aggregate.v1" },
+    "validation_profile": { "const": "mancode-v3-aggregate-integrity.v1" },
+    "status": { "enum": ["complete", "incomplete", "conflicting"] },
+    "issues": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+    },
+    "task_ref": {
+      "type": "object",
+      "required": ["namespace", "task_id"],
+      "properties": {
+        "namespace": { "enum": ["local", "shared"] },
+        "task_id": { "type": "string", "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$" }
+      },
+      "additionalProperties": false
+    },
+    "task_revision": { "$ref": "#/$defs/positiveOrNull" },
+    "ownership_epoch": { "$ref": "#/$defs/nonNegativeOrNull" },
+    "workflow_status": { "type": ["string", "null"], "maxLength": 64 },
+    "workflow_mode": { "type": ["string", "null"], "maxLength": 32 },
+    "requirements_status": { "type": ["string", "null"], "maxLength": 64 },
+    "requirements_revision": { "$ref": "#/$defs/positiveOrNull" },
+    "requirements_digest": { "$ref": "#/$defs/digestOrNull" },
+    "review_status": { "type": ["string", "null"], "maxLength": 64 },
+    "review_revision": { "$ref": "#/$defs/positiveOrNull" },
+    "review_digest": { "$ref": "#/$defs/digestOrNull" },
+    "verification_status": { "type": ["string", "null"], "maxLength": 64 },
+    "verification_schema_version": { "$ref": "#/$defs/positiveOrNull" },
+    "verification_revision": { "$ref": "#/$defs/positiveOrNull" },
+    "verification_digest": { "$ref": "#/$defs/digestOrNull" },
+    "metadata_digest": { "$ref": "#/$defs/digestOrNull" },
+    "plan_version": { "$ref": "#/$defs/positiveOrNull" },
+    "plan_digest": { "$ref": "#/$defs/digestOrNull" },
+    "latest_checkpoint_id": {
+      "type": ["string", "null"],
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    },
+    "latest_checkpoint_digest": { "$ref": "#/$defs/digestOrNull" },
+    "parent_snapshot_digest": { "$ref": "#/$defs/digestOrNull" },
+    "aggregate_digest": { "$ref": "#/$defs/digestOrNull" },
+    "sources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/source" }
+    },
+    "authority": { "const": "local_pending_review" },
+    "activation_allowed": { "const": false }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "complete" } } },
+      "then": {
+        "properties": {
+          "issues": { "maxItems": 0 },
+          "task_revision": { "$ref": "#/$defs/positive" },
+          "ownership_epoch": { "$ref": "#/$defs/nonNegative" },
+          "requirements_revision": { "$ref": "#/$defs/positive" },
+          "requirements_digest": { "$ref": "#/$defs/digest" },
+          "review_revision": { "$ref": "#/$defs/positive" },
+          "review_digest": { "$ref": "#/$defs/digest" },
+          "verification_revision": { "$ref": "#/$defs/positive" },
+          "verification_digest": { "$ref": "#/$defs/digest" },
+          "metadata_digest": { "$ref": "#/$defs/digest" },
+          "plan_version": { "$ref": "#/$defs/positive" },
+          "aggregate_digest": { "$ref": "#/$defs/digest" },
+          "sources": { "minItems": 4 }
+        }
+      },
+      "else": {
+        "properties": {
+          "issues": { "minItems": 1 },
+          "aggregate_digest": { "type": "null" }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "digestOrNull": {
+      "oneOf": [
+        { "$ref": "#/$defs/digest" },
+        { "type": "null" }
+      ]
+    },
+    "positive": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "positiveOrNull": {
+      "oneOf": [
+        { "$ref": "#/$defs/positive" },
+        { "type": "null" }
+      ]
+    },
+    "nonNegative": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "nonNegativeOrNull": {
+      "oneOf": [
+        { "$ref": "#/$defs/nonNegative" },
+        { "type": "null" }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "required": ["role", "path", "source_sha256"],
+      "properties": {
+        "role": {
+          "enum": ["metadata", "requirements", "review", "verification", "plan", "latest_checkpoint"]
+        },
+        "path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "source_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

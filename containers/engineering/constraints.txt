@@ -1,0 +1,4 @@
+# Preserve the FastMCP 2.x and LiteLLM 1.x APIs used by the current runner.
+fastmcp<3
+litellm<2
+datadog-api-client==2.61.0

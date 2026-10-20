@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-inventory-coverage-v1.schema.json",
+  "title": "Threadforge RRSI source-inventory coverage v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "domains"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.rrsi-inventory-coverage.v1"
+    },
+    "domains": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/domain"
+      }
+    }
+  },
+  "$defs": {
+    "domainId": {
+      "enum": [
+        "rrsi-coding",
+        "rrsi-agentic-workspace",
+        "rrsi-engineering-design"
+      ]
+    },
+    "sourceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "unanchoredSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "reason_code"
+      ],
+      "properties": {
+        "source_id": {
+          "$ref": "#/$defs/sourceId"
+        },
+        "reason_code": {
+          "enum": [
+            "external_runner_revision_unpinned",
+            "source_split_unreconciled",
+            "trust_anchor_not_reviewed"
+          ]
+        }
+      }
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "domain",
+        "domain_rules_complete",
+        "required_sources",
+        "anchored_sources",
+        "unanchored_sources"
+      ],
+      "properties": {
+        "domain": {
+          "$ref": "#/$defs/domainId"
+        },
+        "domain_rules_complete": {
+          "type": "boolean"
+        },
+        "required_sources": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/sourceId"
+          }
+        },
+        "anchored_sources": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/sourceId"
+          }
+        },
+        "unanchored_sources": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/unanchoredSource"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "contains": {
+        "properties": {
+          "domain": {
+            "const": "rrsi-coding"
+          }
+        },
+        "required": ["domain"]
+      },
+      "minContains": 1,
+      "maxContains": 1
+    },
+    {
+      "contains": {
+        "properties": {
+          "domain": {
+            "const": "rrsi-agentic-workspace"
+          }
+        },
+        "required": ["domain"]
+      },
+      "minContains": 1,
+      "maxContains": 1
+    },
+    {
+      "contains": {
+        "properties": {
+          "domain": {
+            "const": "rrsi-engineering-design"
+          }
+        },
+        "required": ["domain"]
+      },
+      "minContains": 1,
+      "maxContains": 1
+    }
+  ]
+}

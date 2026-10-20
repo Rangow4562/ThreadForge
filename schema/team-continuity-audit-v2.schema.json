@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/team-continuity-audit-v2.schema.json",
+  "title": "Threadforge team continuity and scope lifecycle audit verification report v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "team_projects",
+    "task_revisions_checked",
+    "session_revisions_checked",
+    "entries_checked",
+    "scope_lifecycle_events_checked",
+    "verified_authorizations",
+    "unauthenticated_before_scope",
+    "invalid_records",
+    "findings",
+    "findings_truncated"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.team-continuity-audit.v2" },
+    "status": { "enum": ["passed", "failed", "review_required", "no_team_projects"] },
+    "team_projects": { "type": "integer", "minimum": 0 },
+    "task_revisions_checked": { "type": "integer", "minimum": 0 },
+    "session_revisions_checked": { "type": "integer", "minimum": 0 },
+    "entries_checked": { "type": "integer", "minimum": 0 },
+    "scope_lifecycle_events_checked": { "type": "integer", "minimum": 0 },
+    "verified_authorizations": { "type": "integer", "minimum": 0 },
+    "unauthenticated_before_scope": { "type": "integer", "minimum": 0 },
+    "invalid_records": { "type": "integer", "minimum": 0 },
+    "findings": {
+      "type": "array",
+      "maxItems": 200,
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "findings_truncated": { "type": "boolean" }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "entity"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+        "entity": { "enum": ["project", "policy", "task", "session", "entry"] },
+        "resource_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "action": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,127}$" },
+        "revision": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

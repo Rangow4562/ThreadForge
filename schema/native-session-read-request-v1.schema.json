@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/native-session-read-request-v1.schema.json",
+  "title": "Threadforge Native Session Read Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "harness", "session_id"],
+  "properties": {
+    "schema_version": {"const": "threadforge.native-session-read-request.v1"},
+    "harness": {
+      "enum": ["claude_code", "codex_cli", "opencode", "cline", "pi", "prime", "factory", "copilot_cli", "hermes", "deepseek_harness", "fx", "grok", "openclaw_gateway", "cursor"]
+    },
+    "session_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "store_dirs": {
+      "type": "object",
+      "propertyNames": {
+        "enum": ["claude_code", "codex_cli", "opencode", "cline", "pi", "prime", "factory", "copilot_cli", "hermes", "deepseek_harness", "fx", "grok", "openclaw_gateway", "cursor"]
+      },
+      "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 4096}
+    }
+  }
+}

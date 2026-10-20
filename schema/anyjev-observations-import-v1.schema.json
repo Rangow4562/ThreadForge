@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/anyjev-observations-import-v1.schema.json",
+  "title": "Local-review AnyJev labeled observation import",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "model", "question_key", "observation"],
+  "properties": {
+    "schema_version": { "const": "threadforge.anyjev-observations-import.v1" },
+    "model": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "question_key": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "observation": {
+      "type": "object",
+      "required": ["question_id", "kind", "text", "options", "states", "labels"],
+      "properties": {
+        "question_id": { "type": "string", "minLength": 1, "maxLength": 10000 },
+        "kind": { "enum": ["choice", "score", "noul"] },
+        "text": { "type": "string", "minLength": 1, "maxLength": 10000 },
+        "options": { "type": "array", "minItems": 2, "maxItems": 26, "items": { "type": "string" } },
+        "states": { "type": "array", "maxItems": 100000 },
+        "labels": { "type": "array", "maxItems": 100000, "items": { "type": "integer", "minimum": 0 } },
+        "fits": { "type": "integer", "minimum": 0 },
+        "next_fit": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

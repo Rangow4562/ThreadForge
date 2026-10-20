@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-bundle-batch-result-v1.schema.json",
+  "title": "Threadforge advisory batch decision produced from an approved AnyJev bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "bundle_id", "bundle_revision", "bundle_status", "bundle_content_sha256", "model", "backend", "remote_opt_in", "question_id", "question_key", "count", "level", "decisions", "backend_stats", "human_review_required", "model_environment_verified", "execution_authorized", "cutover_evidence_eligible"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-bundle-batch-result.v1" },
+    "status": { "const": "decided" },
+    "bundle_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "bundle_revision": { "const": 2 },
+    "bundle_status": { "const": "active" },
+    "bundle_content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "model": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "model_checkpoint_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "backend": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "remote_opt_in": { "type": "boolean" },
+    "question_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "question_key": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "count": { "type": "integer", "minimum": 1, "maximum": 128 },
+    "level": { "enum": ["raw", "L0", "L1", "L2", "auto"] },
+    "decisions": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "$ref": "#/$defs/decision" } },
+    "backend_stats": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+    "human_review_required": { "const": true },
+    "model_environment_verified": { "type": "boolean" },
+    "execution_authorized": { "const": false },
+    "cutover_evidence_eligible": { "const": false }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "model_environment_verified": { "const": true } }, "required": ["model_environment_verified"] },
+      "then": { "required": ["model_checkpoint_sha256"] }
+    },
+    {
+      "if": { "properties": { "model_environment_verified": { "const": false } }, "required": ["model_environment_verified"] },
+      "then": { "not": { "required": ["model_checkpoint_sha256"] } }
+    }
+  ],
+  "$defs": {
+    "distribution": {
+      "type": "object", "minProperties": 2, "maxProperties": 26,
+      "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+    },
+    "decision": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "level", "answer", "confidence", "distribution"],
+          "properties": {
+            "kind": { "const": "choice" }, "level": { "enum": ["raw", "L0", "L1", "L2"] },
+            "answer": { "type": "string" }, "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "distribution": { "$ref": "#/$defs/distribution" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "level", "answer", "confidence", "value", "distribution"],
+          "properties": {
+            "kind": { "const": "score" }, "level": { "enum": ["raw", "L0", "L1", "L2"] },
+            "answer": { "type": "number" }, "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "value": { "type": "number" }, "distribution": { "$ref": "#/$defs/distribution" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "level", "answer", "confidence", "probability"],
+          "properties": {
+            "kind": { "const": "noul" }, "level": { "enum": ["raw", "L0", "L1", "L2"] },
+            "answer": { "type": "boolean" }, "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "probability": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        }
+      ]
+    }
+  }
+}

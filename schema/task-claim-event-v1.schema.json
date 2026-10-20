@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/task-claim-event-v1.schema.json",
+  "title": "Threadforge task claim journal event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "action", "expected_revision", "claim"],
+  "properties": {
+    "schema_version": { "const": "threadforge.task-claim-event.v1" },
+    "action": { "enum": ["acquired", "renewed", "revalidated", "released", "transferred"] },
+    "expected_revision": { "type": "integer", "minimum": 0 },
+    "claim": { "$ref": "task-claim-v1.schema.json" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "action": { "const": "acquired" } }, "required": ["action"] },
+      "then": {
+        "properties": { "expected_revision": { "const": 0 }, "claim": { "properties": { "revision": { "const": 1 }, "status": { "const": "active" } } } }
+      }
+    },
+    {
+      "if": { "properties": { "action": { "enum": ["renewed", "revalidated"] } }, "required": ["action"] },
+      "then": {
+        "properties": { "expected_revision": { "minimum": 1 }, "claim": { "properties": { "status": { "const": "active" } } } }
+      }
+    },
+    {
+      "if": { "properties": { "action": { "const": "released" } }, "required": ["action"] },
+      "then": {
+        "properties": { "expected_revision": { "minimum": 1 }, "claim": { "properties": { "status": { "const": "released" } }, "required": ["released_at"] } }
+      }
+    }
+  ]
+}

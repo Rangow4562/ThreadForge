@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-jobbench-inventory-request-v1.schema.json",
+  "title": "Threadforge local JobBench inventory derivation request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "params"],
+  "properties": {
+    "schema_version": { "const": "threadforge.evolution-jobbench-inventory-request.v1" },
+    "params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jobbench_source_root"],
+      "properties": {
+        "jobbench_source_root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Absolute local root of the pinned JobBench checkout. The path is never returned."
+        }
+      }
+    }
+  }
+}

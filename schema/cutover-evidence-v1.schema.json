@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/cutover-evidence-v1.schema.json",
+  "title": "Threadforge all-or-nothing cutover evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "candidate_commit", "features", "adapters", "migrations", "cross_harness_tests", "evaluations", "approvals"],
+  "properties": {
+    "schema_version": { "const": "threadforge.cutover-evidence.v1" },
+    "candidate_commit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+    "features": { "type": "array", "items": { "$ref": "#/$defs/feature" } },
+    "adapters": { "type": "array", "items": { "$ref": "#/$defs/adapter" } },
+    "migrations": { "type": "array", "items": { "$ref": "#/$defs/migration" } },
+    "cross_harness_tests": { "type": "array", "items": { "$ref": "#/$defs/cross_harness" } },
+    "evaluations": { "type": "array", "items": { "$ref": "#/$defs/evaluation" } },
+    "approvals": { "type": "array", "items": { "$ref": "#/$defs/approval" } }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "evidence_list": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evidence" } },
+    "feature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "evidence"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": { "enum": ["complete", "partial", "not_started"] },
+        "evidence": { "$ref": "#/$defs/evidence_list" }
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "host_version", "retrieval_mode", "tests"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "host_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "retrieval_mode": { "enum": ["automatic", "mcp", "portable"] },
+        "tests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["capture-contract", "install-update-uninstall", "configuration-preservation", "rollback", "retrieval"],
+          "properties": {
+            "capture-contract": { "$ref": "#/$defs/evidence_list" },
+            "install-update-uninstall": { "$ref": "#/$defs/evidence_list" },
+            "configuration-preservation": { "$ref": "#/$defs/evidence_list" },
+            "rollback": { "$ref": "#/$defs/evidence_list" },
+            "retrieval": { "$ref": "#/$defs/evidence_list" }
+          }
+        }
+      }
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product", "source_fingerprint", "snapshot_sha256", "source_records", "imported_records", "excluded_records", "unresolved_conflicts", "credential_records_migrated", "interruption_recovery_tested", "rollback_rehearsed", "evidence"],
+      "properties": {
+        "product": { "enum": ["beacon", "mancode", "anyjev", "rrsi"] },
+        "source_fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "snapshot_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "source_records": { "type": "integer", "minimum": 0 },
+        "imported_records": { "type": "integer", "minimum": 0 },
+        "excluded_records": { "type": "integer", "minimum": 0 },
+        "unresolved_conflicts": { "type": "integer", "minimum": 0 },
+        "credential_records_migrated": { "type": "integer", "minimum": 0 },
+        "interruption_recovery_tested": { "type": "boolean" },
+        "rollback_rehearsed": { "type": "boolean" },
+        "evidence": { "$ref": "#/$defs/evidence_list" }
+      }
+    },
+    "cross_harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "target_id", "retrieval_mode", "passed", "evidence"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "target_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "retrieval_mode": { "enum": ["automatic", "mcp", "portable"] },
+        "passed": { "type": "boolean" },
+        "evidence": { "$ref": "#/$defs/evidence_list" }
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "legacy_version", "legacy_commit", "dataset_sha256", "held_out", "task_count", "baseline_runs", "candidate_runs", "baseline_repeat_failure_rate", "candidate_repeat_failure_rate", "noise_floor", "baseline_task_success_rate", "candidate_task_success_rate", "baseline_cost_usd", "candidate_cost_usd", "max_cost_overhead_ratio", "baseline_tokens", "candidate_tokens", "max_token_overhead_ratio", "evidence"],
+      "properties": {
+        "domain": { "enum": ["beacon", "mancode", "anyjev", "rrsi-coding", "rrsi-agentic-workspace", "rrsi-engineering-design"] },
+        "legacy_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "legacy_commit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+        "dataset_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "held_out": { "type": "boolean" },
+        "task_count": { "type": "integer", "minimum": 1 },
+        "baseline_runs": { "type": "integer", "minimum": 2 },
+        "candidate_runs": { "type": "integer", "minimum": 2 },
+        "baseline_repeat_failure_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "candidate_repeat_failure_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "noise_floor": { "type": "number", "minimum": 0, "maximum": 1 },
+        "baseline_task_success_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "candidate_task_success_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "baseline_cost_usd": { "type": "number", "exclusiveMinimum": 0 },
+        "candidate_cost_usd": { "type": "number", "minimum": 0 },
+        "max_cost_overhead_ratio": { "type": "number", "minimum": 0, "maximum": 10 },
+        "baseline_tokens": { "type": "integer", "minimum": 1 },
+        "candidate_tokens": { "type": "integer", "minimum": 0 },
+        "max_token_overhead_ratio": { "type": "number", "minimum": 0, "maximum": 10 },
+        "evidence": { "$ref": "#/$defs/evidence_list" }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "reviewer", "approved", "reason", "approved_at", "evidence"],
+      "properties": {
+        "role": { "enum": ["release-manager", "security-reviewer", "license-reviewer"] },
+        "reviewer": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "approved": { "type": "boolean" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "approved_at": { "type": "string", "format": "date-time" },
+        "evidence": { "$ref": "#/$defs/evidence_list" }
+      }
+    }
+  }
+}

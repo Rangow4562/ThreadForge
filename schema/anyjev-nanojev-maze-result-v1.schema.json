@@ -1,0 +1,318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-nanojev-maze-result-v1.schema.json",
+  "title": "Threadforge AnyJev NanoJev maze result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_sha256",
+    "episodes_sha256",
+    "audit_inputs_sha256",
+    "engine",
+    "level",
+    "protocol",
+    "overall",
+    "by_split",
+    "omitted_fields",
+    "human_review_required",
+    "execution_verified",
+    "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.anyjev-nanojev-maze-result.v1"
+    },
+    "model_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "model_revision_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "nanojev_commit": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "episodes_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "audit_inputs_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "engine": {
+      "enum": ["anyjev", "nanojev_native"]
+    },
+    "level": {
+      "enum": ["raw", "L0", "native_AB_readout"]
+    },
+    "prior": {
+      "enum": ["batch", "content_free", "none"]
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "window_size",
+        "max_steps",
+        "threshold",
+        "temperature",
+        "full_map_bfs_used",
+        "oracle_used_for_policy"
+      ],
+      "properties": {
+        "window_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "max_steps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000000
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "temperature": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1000000
+        },
+        "full_map_bfs_used": {
+          "const": false
+        },
+        "oracle_used_for_policy": {
+          "const": false
+        }
+      }
+    },
+    "overall": {
+      "$ref": "#/$defs/overallSummary"
+    },
+    "by_split": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["split", "summary"],
+        "properties": {
+          "split": {
+            "enum": ["test", "ood"]
+          },
+          "summary": {
+            "$ref": "#/$defs/summary"
+          }
+        }
+      }
+    },
+    "omitted_fields": {
+      "const": [
+        "date",
+        "elapsed_seconds",
+        "model_label",
+        "model_revision_label",
+        "nanojev_directory",
+        "model_controls",
+        "model_role",
+        "question_templates",
+        "protocol_descriptions",
+        "execution_counters",
+        "episode_ids",
+        "initial_states",
+        "per_step_observations"
+      ]
+    },
+    "human_review_required": {
+      "const": true
+    },
+    "execution_verified": {
+      "const": false
+    },
+    "cutover_evidence_eligible": {
+      "const": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "engine": {
+            "const": "anyjev"
+          }
+        },
+        "required": ["engine"]
+      },
+      "then": {
+        "required": ["prior"],
+        "properties": {
+          "level": {
+            "enum": ["raw", "L0"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "engine": {
+            "const": "nanojev_native"
+          }
+        },
+        "required": ["engine"]
+      },
+      "then": {
+        "not": {
+          "required": ["prior"]
+        },
+        "properties": {
+          "level": {
+            "const": "native_AB_readout"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "episodes",
+        "goal_completed",
+        "goal_completion_rate",
+        "attempts",
+        "successful_moves",
+        "collisions",
+        "probe_count",
+        "fallback_count",
+        "verified_edge_reposition_count",
+        "visited_cells",
+        "revisited_cell_entries",
+        "prediction_sites",
+        "atomic_questions",
+        "atomic_accuracy",
+        "atomic_brier",
+        "atomic_nll",
+        "maze_sizes",
+        "horizon_min",
+        "horizon_max"
+      ],
+      "properties": {
+        "episodes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "goal_completed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "goal_completion_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "attempts": {
+          "$ref": "#/$defs/nonnegativeCount"
+        },
+        "successful_moves": {
+          "$ref": "#/$defs/nonnegativeCount"
+        },
+        "collisions": {
+          "$ref": "#/$defs/nonnegativeCount"
+        },
+        "probe_count": {
+          "$ref": "#/$defs/nonnegativeCount"
+        },
+        "fallback_count": {
+          "$ref": "#/$defs/nonnegativeCount"
+        },
+        "verified_edge_reposition_count": {
+          "$ref": "#/$defs/nonnegativeCount"
+        },
+        "visited_cells": {
+          "$ref": "#/$defs/nonnegativeCount"
+        },
+        "revisited_cell_entries": {
+          "$ref": "#/$defs/nonnegativeCount"
+        },
+        "prediction_sites": {
+          "$ref": "#/$defs/nonnegativeCount"
+        },
+        "atomic_questions": {
+          "$ref": "#/$defs/nonnegativeCount"
+        },
+        "atomic_accuracy": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "atomic_brier": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "atomic_nll": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "edge_majority": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "mean_p_true": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "maze_sizes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000
+          }
+        },
+        "horizon_min": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "horizon_max": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        }
+      }
+    },
+    "overallSummary": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/summary"
+        },
+        {
+          "required": ["edge_majority", "mean_p_true"]
+        }
+      ]
+    },
+    "nonnegativeCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000000000
+    }
+  }
+}

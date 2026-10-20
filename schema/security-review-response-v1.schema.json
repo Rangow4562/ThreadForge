@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schema/security-review-response-v1.schema.json",
+  "title": "Threadforge security finding review update response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review"],
+  "properties": {
+    "schema_version": { "const": "threadforge.security-review-response.v1" },
+    "review": { "$ref": "security-finding-review-v1.schema.json" }
+  }
+}

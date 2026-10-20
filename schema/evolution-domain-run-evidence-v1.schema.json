@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-domain-run-evidence-v1.schema.json",
+  "title": "Threadforge normalized RRSI domain run evidence v1",
+  "description": "A small normalized metric record whose bytes can be hashed locally; this record alone is not proof that a benchmark executed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "domain", "split_id", "role", "run_id", "metrics"],
+  "properties": {
+    "schema_version": { "const": "threadforge.rrsi-domain-run-evidence.v1" },
+    "domain": { "enum": ["rrsi-coding", "rrsi-agentic-workspace", "rrsi-engineering-design"] },
+    "split_id": {
+      "enum": [
+        "terminal-bench/terminal-bench-2-1", "swe-bench/swe-bench-verified",
+        "harvey-lab/evolve", "harvey-lab/held-out", "jobbench", "gdpval", "apex-agents",
+        "engdesign-open", "engdesign-v1", "frontier-eng"
+      ]
+    },
+    "role": { "enum": ["baseline", "candidate"] },
+    "run_id": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$" },
+    "metrics": {
+      "oneOf": [
+        { "$ref": "evolution-domain-validation-request-v1.schema.json#/$defs/coding_metrics" },
+        { "$ref": "evolution-domain-validation-request-v1.schema.json#/$defs/workspace_metrics" },
+        { "$ref": "evolution-domain-validation-request-v1.schema.json#/$defs/engineering_metrics" }
+      ]
+    }
+  }
+}

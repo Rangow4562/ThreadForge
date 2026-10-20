@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-bundle-list-v1.schema.json",
+  "title": "Threadforge local AnyJev bundle list",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "total", "bundles"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-bundle-list.v1" },
+    "total": { "type": "integer", "minimum": 0 },
+    "bundles": { "type": "array", "items": { "$ref": "decision-bundle-summary-v1.schema.json" } }
+  }
+}

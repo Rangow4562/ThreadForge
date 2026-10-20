@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "threadforge-python"
+version = "0.1.0"
+description = "Threadforge decision and offline evolution integrations"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = []
+
+[project.optional-dependencies]
+decisions = ["numpy>=1.24"]
+hf = ["numpy>=1.24", "torch>=2.3", "transformers>=4.53", "safetensors>=0.4"]
+serving = ["vllm>=0.7,<1", "transformers>=4.53"]
+typed-data = ["datasets>=2.20"]
+evolution = ["anthropic[vertex]>=0.40", "litellm>=1.50", "pydantic>=2.0"]
+workspace = [
+    "fastmcp>=2.3.2", "litellm>=1.50", "loguru>=0.7", "mcp>=1.0", "openai>=1.0",
+    "pydantic>=2.0", "pydantic-settings>=2.0", "httpx>=0.27", "tenacity>=8.0",
+    "pymupdf>=1.24", "uvicorn>=0.30", "datadog-api-client>=2.0,<3.0",
+]
+test = ["build>=1.2,<2", "pytest>=8", "ruff", "jsonschema>=4.22", "referencing>=0.35", "setuptools>=77", "wheel"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+extend-exclude = ["build", "build/**", "**/build/**", "dist", "dist/**", "*.egg-info", "**/*.egg-info/**"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["threadforge_py*", "anyjev*", "rrsi*", "threadforge_domains*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"threadforge_domains.coding" = ["*.json"]
+"threadforge_domains.workspace" = ["*.json"]
+"threadforge_domains.engineering" = ["*.json"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["**/__pycache__/*", "**/*.py[cod]"]

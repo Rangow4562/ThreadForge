@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-legacy-state-v1.schema.json",
+  "title": "Threadforge Mancode legacy state projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authority",
+    "human_review_required",
+    "execution_authorized",
+    "current_mode",
+    "last_mode",
+    "current_workflow_mode",
+    "task_present",
+    "skipped_step_count",
+    "active_solo_plan_present",
+    "team_mode_auto_detected",
+    "contributor_count",
+    "initialized_at"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-legacy-state.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "current_mode": { "enum": ["solo", "man", "mamba", "manteam", "manps"] },
+    "last_mode": { "enum": ["solo", "man", "mamba", "manteam", "manps"] },
+    "current_workflow_mode": { "enum": ["man", "mamba", "manteam", null] },
+    "task_present": { "type": "boolean" },
+    "skipped_step_count": { "type": "integer", "minimum": 0, "maximum": 128 },
+    "active_solo_plan_present": { "type": "boolean" },
+    "active_solo_plan_version": { "type": "integer", "minimum": 1 },
+    "team_mode_auto_detected": { "type": "boolean" },
+    "contributor_count": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+    "project_mode": { "enum": ["generic", "detected"] },
+    "initialized_at": { "type": "string", "format": "date-time" }
+  }
+}

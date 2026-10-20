@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/anyjev-exit-labels-result-v1.schema.json",
+  "title": "Threadforge AnyJev exit label-efficiency result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_sha256",
+    "blocks",
+    "label_budgets",
+    "seeds",
+    "rows",
+    "omitted_fields",
+    "human_review_required",
+    "execution_verified",
+    "cutover_evidence_eligible"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.anyjev-exit-labels-result.v1"
+    },
+    "model_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "blocks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10000
+      }
+    },
+    "label_budgets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000000
+      }
+    },
+    "seeds": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 1000000
+      }
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 513,
+      "items": {
+        "$ref": "#/$defs/row"
+      }
+    },
+    "omitted_fields": {
+      "const": ["model_label", "date", "environment_details", "method_labels"]
+    },
+    "human_review_required": {
+      "const": true
+    },
+    "execution_verified": {
+      "const": false
+    },
+    "cutover_evidence_eligible": {
+      "const": false
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "rate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "interval": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "number",
+        "minimum": -1,
+        "maximum": 1
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "accuracy", "accuracy_ci95", "ece", "nll"],
+      "properties": {
+        "method": {
+          "enum": ["raw", "l1", "head"]
+        },
+        "budget": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "accuracy": {
+          "$ref": "#/$defs/rate"
+        },
+        "accuracy_ci95": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/rate"
+          }
+        },
+        "ece": {
+          "$ref": "#/$defs/rate"
+        },
+        "nll": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "diff_vs_l1_ci95": {
+          "$ref": "#/$defs/interval"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "raw"
+              }
+            },
+            "required": ["method"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["budget"] },
+                { "required": ["diff_vs_l1_ci95"] }
+              ]
+            }
+          },
+          "else": {
+            "required": ["budget"],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "method": {
+                      "const": "head"
+                    }
+                  },
+                  "required": ["method"]
+                },
+                "then": {
+                  "required": ["diff_vs_l1_ci95"]
+                },
+                "else": {
+                  "not": {
+                    "required": ["diff_vs_l1_ci95"]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

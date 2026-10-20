@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/decision-bundle-import-v1.schema.json",
+  "title": "Threadforge AnyJev native bundle import request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "actor", "reason", "bundle"],
+  "properties": {
+    "schema_version": { "const": "threadforge.decision-bundle-import.v1" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "actor": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "artifacts", "heads"],
+      "properties": {
+        "model": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "artifacts": { "type": "object", "maxProperties": 256 },
+        "heads": { "type": "object", "maxProperties": 256 },
+        "adaptation": { "type": "object", "maxProperties": 256 },
+        "observations": { "type": "object", "maxProperties": 256 }
+      }
+    }
+  }
+}

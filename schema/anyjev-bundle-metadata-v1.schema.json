@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/anyjev-bundle-metadata-v1.schema.json",
+  "title": "Sanitized local-review AnyJev bundle metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "model_sha256", "anyjev_version", "n_blocks", "hidden_size",
+    "candidate_layers", "artifact_count", "head_count", "adaptation_count",
+    "observation_count", "question_bindings", "validation", "omitted_fields"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.anyjev-bundle-metadata.v1" },
+    "model_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "anyjev_version": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "n_blocks": { "type": "integer", "minimum": 1, "maximum": 4096 },
+    "hidden_size": { "type": "integer", "minimum": 1, "maximum": 65536 },
+    "candidate_layers": {
+      "type": "array", "minItems": 1, "maxItems": 4096,
+      "items": { "type": "integer", "minimum": 0, "maximum": 4096 },
+      "uniqueItems": true
+    },
+    "artifact_count": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "head_count": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "adaptation_count": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "observation_count": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "question_bindings": {
+      "type": "array", "maxItems": 100000,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["question_key", "question_id_sha256"],
+        "properties": {
+          "question_key": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+          "question_id_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "validation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["per_question", "summary"],
+      "properties": {
+        "per_question": {
+          "type": "array", "minItems": 1, "maxItems": 100000,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": [
+              "row_key_sha256", "k", "calibration_examples", "test_examples", "layer",
+              "relative_depth", "method", "oof_accuracy", "oof_nll", "temperature",
+              "accuracy", "ece", "nll", "fit_seconds", "milliseconds_per_decision"
+            ],
+            "properties": {
+              "row_key_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "k": { "type": "integer", "minimum": 2, "maximum": 26 },
+              "calibration_examples": { "type": "integer", "minimum": 2, "maximum": 10000000 },
+              "test_examples": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+              "layer": { "type": "integer", "minimum": 0, "maximum": 4096 },
+              "relative_depth": { "type": "number", "minimum": 0, "maximum": 1 },
+              "method": { "enum": ["head:diff_means", "head:lda", "head:ridge", "head:rrr"] },
+              "oof_accuracy": { "type": "number", "minimum": 0, "maximum": 1 },
+              "oof_nll": { "type": "number", "minimum": 0, "maximum": 1000000 },
+              "temperature": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000000 },
+              "accuracy": { "type": "number", "minimum": 0, "maximum": 1 },
+              "ece": { "type": "number", "minimum": 0, "maximum": 1 },
+              "nll": { "type": "number", "minimum": 0, "maximum": 1000000 },
+              "fit_seconds": { "type": "number", "minimum": 0, "maximum": 1000000000 },
+              "milliseconds_per_decision": { "type": "number", "minimum": 0, "maximum": 1000000000 },
+              "cache_mean_abs_dp": { "type": "number", "minimum": 0, "maximum": 1 },
+              "cache_argmax_disagreement": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "summary": {
+          "type": "object", "additionalProperties": false,
+          "required": ["typed_pooled", "all_pooled", "mean_blocks", "mean_milliseconds_per_decision", "cache_mean_abs_dp"],
+          "properties": {
+            "typed_pooled": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/pooled" }] },
+            "all_pooled": { "$ref": "#/$defs/pooled" },
+            "mean_blocks": { "type": "number", "minimum": 0, "maximum": 4096 },
+            "mean_milliseconds_per_decision": { "type": "number", "minimum": 0, "maximum": 1000000000 },
+            "cache_mean_abs_dp": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        }
+      }
+    },
+    "omitted_fields": {
+      "type": "array", "minItems": 5, "maxItems": 5,
+      "items": { "enum": ["model_label", "date", "env", "question_ids", "validation_row_keys"] },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "pooled": {
+      "type": "object", "additionalProperties": false,
+      "required": ["n", "accuracy", "ece", "nll"],
+      "properties": {
+        "n": { "type": "integer", "minimum": 1, "maximum": 100000000 },
+        "accuracy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "ece": { "type": "number", "minimum": 0, "maximum": 1 },
+        "nll": { "type": "number", "minimum": 0, "maximum": 1000000 }
+      }
+    }
+  }
+}

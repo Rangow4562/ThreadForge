@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 740" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090a10"/>
+      <stop offset="100%" stop-color="#121524"/>
+    </linearGradient>
+    <linearGradient id="cyanBlue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#276ef1"/>
+      <stop offset="100%" stop-color="#00d2ff"/>
+    </linearGradient>
+    <linearGradient id="emerald" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00b074"/>
+      <stop offset="100%" stop-color="#00e575"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#fbbf24"/>
+    </linearGradient>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#00d2ff"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#00e575"/>
+    </marker>
+    <marker id="arrowAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#fbbf24"/>
+    </marker>
+  </defs>
+
+  <rect width="1240" height="740" rx="14" fill="url(#bg)" stroke="#232842" stroke-width="2"/>
+
+  <!-- Header Bar -->
+  <rect x="36" y="26" width="136" height="34" rx="7" fill="url(#cyanBlue)"/>
+  <text x="104" y="48" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="900" font-size="14" text-anchor="middle" letter-spacing="1.2">THREADFORGE</text>
+  <text x="188" y="49" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="800" font-size="21">LOCAL-FIRST AGENT MEMORY &amp; CONTINUITY ARCHITECTURE</text>
+  <text x="955" y="48" fill="#00e575" font-family="monospace" font-weight="700" font-size="13">● LOOPBACK-ONLY · ZERO CLOUD LOCK-IN</text>
+
+  <!-- Column 1: Agent Harnesses & Adapters -->
+  <rect x="36" y="80" width="280" height="624" rx="10" fill="#101320" stroke="#252b45" stroke-width="1.5"/>
+  <text x="56" y="112" fill="#00d2ff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-weight="800" font-size="13" letter-spacing="1">1. HARNESSES &amp; ADAPTERS (TS)</text>
+
+  <g transform="translate(54, 130)">
+    <rect width="244" height="92" rx="8" fill="#171b2e" stroke="#2d3556"/>
+    <text x="14" y="24" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">CLI &amp; IDE Harnesses (25+)</text>
+    <text x="14" y="44" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">Claude Code · Codex · Cursor · Gemini</text>
+    <text x="14" y="62" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">OpenCode · Antigravity · Copilot · Cline</text>
+    <text x="14" y="80" fill="#00e575" font-family="monospace" font-size="10.5">Qwen · Kimi · Kiro · Devin · OpenHands</text>
+  </g>
+
+  <g transform="translate(54, 236)">
+    <rect width="244" height="86" rx="8" fill="#171b2e" stroke="#2d3556"/>
+    <text x="14" y="24" fill="#00d2ff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">Observational Hooks &amp; Pollers</text>
+    <text x="14" y="44" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">Digest-first mapping &amp; hashed cursors</text>
+    <text x="14" y="62" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">14 Beacon native session-store readers</text>
+    <text x="14" y="78" fill="#fbbf24" font-family="monospace" font-size="10.5">adapters/src/emit.ts → 127.0.0.1:4318</text>
+  </g>
+
+  <g transform="translate(54, 336)">
+    <rect width="244" height="86" rx="8" fill="#171b2e" stroke="#2d3556"/>
+    <text x="14" y="24" fill="#00d2ff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">Prompt-Time Memory &amp; Gates</text>
+    <text x="14" y="44" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">UserPromptSubmit / BeforeAgent hooks</text>
+    <text x="14" y="62" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">SessionStart / PreInvocation bootstrap</text>
+    <text x="14" y="78" fill="#ff7875" font-family="monospace" font-size="10.5">Opt-in deny-only PreToolUse plan guards</text>
+  </g>
+
+  <g transform="translate(54, 436)">
+    <rect width="244" height="78" rx="8" fill="#171b2e" stroke="#2d3556"/>
+    <text x="14" y="24" fill="#00d2ff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">MV3 Browser Extension &amp; CI</text>
+    <text x="14" y="44" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">Claude.ai &amp; ChatGPT Web (opt-in)</text>
+    <text x="14" y="62" fill="#00e575" font-family="monospace" font-size="10.5">threadforge ci exec|start|finish|gate</text>
+  </g>
+
+  <g transform="translate(54, 528)">
+    <rect width="244" height="156" rx="8" fill="#141a29" stroke="#276ef1"/>
+    <text x="14" y="24" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">Portable Artifact Installers</text>
+    <text x="14" y="46" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">• Digest-gated SKILL.md installers</text>
+    <text x="14" y="66" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">  (.claude, .agents, .cline, .dsh, .qoder)</text>
+    <text x="14" y="88" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">• Reversible MCP config managers</text>
+    <text x="14" y="110" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">• Advisory AGENTS.md / .goosehints</text>
+    <text x="14" y="136" fill="#00e575" font-family="monospace" font-size="10.5">Never mutates host trust or permissions</text>
+  </g>
+
+  <!-- Column 2: Go Core Runtime & Service -->
+  <rect x="348" y="80" width="494" height="624" rx="10" fill="#101320" stroke="#276ef1" stroke-width="2"/>
+  <text x="370" y="112" fill="#276ef1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-weight="800" font-size="13" letter-spacing="1">2. THREADFORGE GO CORE &amp; LOOPBACK SERVICE</text>
+
+  <!-- Intake & Endpoints -->
+  <g transform="translate(368, 130)">
+    <rect width="454" height="100" rx="8" fill="#171c30" stroke="#343d66"/>
+    <text x="16" y="25" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="14">Loopback HTTP / gRPC / MCP Server</text>
+    <text x="16" y="47" fill="#00d2ff" font-family="monospace" font-size="11.5">OTLP/HTTP (127.0.0.1:4318) · OTLP/gRPC (127.0.0.1:4317) · Stdio MCP</text>
+    <text x="16" y="67" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="12">• Canonical Beacon JSONL intake with credential &amp; PII redaction</text>
+    <text x="16" y="85" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="12">• Read-only /dashboard/, /v2/context, /v1/tasks, /v1/security/scan</text>
+  </g>
+
+  <!-- Procedure Graph & Memory v2 -->
+  <g transform="translate(368, 244)">
+    <rect width="454" height="118" rx="8" fill="#152030" stroke="#00b4d8"/>
+    <text x="16" y="25" fill="#00d2ff" font-family="-apple-system, sans-serif" font-weight="700" font-size="14">Procedure Graph v1 &amp; Source-Bound Memory v2</text>
+    <text x="16" y="47" fill="#ffffff" font-family="-apple-system, sans-serif" font-size="12">• Directed typed graphs (triggers, states, actions, checks, outputs)</text>
+    <text x="16" y="67" fill="#ffffff" font-family="-apple-system, sans-serif" font-size="12">• SHA-256 source-file fingerprinting: withholds stale/conflicting records</text>
+    <text x="16" y="87" fill="#ffffff" font-family="-apple-system, sans-serif" font-size="12">• Ed25519 reviewer signatures + out-of-band pinned team trust policy</text>
+    <text x="16" y="106" fill="#00e575" font-family="monospace" font-size="11">threadforge procedure validate|propose|publish|supersede|export-skill</text>
+  </g>
+
+  <!-- Task & Session Continuity -->
+  <g transform="translate(368, 376)">
+    <rect width="454" height="112" rx="8" fill="#171c30" stroke="#343d66"/>
+    <text x="16" y="25" fill="#00e575" font-family="-apple-system, sans-serif" font-weight="700" font-size="14">Mancode Task &amp; Session Continuity Engine</text>
+    <text x="16" y="47" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="12">• CAS revision-checked tasks, sessions, checkpoints, reviews &amp; handoffs</text>
+    <text x="16" y="67" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="12">• Append-only requirements Q&amp;A → human finalization → confirmed plans</text>
+    <text x="16" y="85" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="12">• Native session store discovery, redacted brief export &amp; safe resume</text>
+    <text x="16" y="102" fill="#00d2ff" font-family="monospace" font-size="11">threadforge task|session|handoff · team sync|scope|audit</text>
+  </g>
+
+  <!-- Security, Migration & Cutover -->
+  <g transform="translate(368, 502)">
+    <rect width="454" height="182" rx="8" fill="#171c30" stroke="#343d66"/>
+    <text x="16" y="25" fill="#fbbf24" font-family="-apple-system, sans-serif" font-weight="700" font-size="14">Security Threat Engine, SIEM Packs &amp; Cutover Gate</text>
+    <text x="16" y="47" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="12">• Vendored Beacon CEL threat-rule scanner + digest-keyed review ledger</text>
+    <text x="16" y="67" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="12">• 11 inert metadata-only forwarding packs (S3, GCS, CloudWatch, Splunk,</text>
+    <text x="16" y="85" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="12">  Falcon, Elastic, Datadog, Sumo, Rapid7, Wazuh, Microsoft Sentinel)</text>
+    <text x="16" y="107" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="12">• Staged local-pending-review migration snapshots &amp; rollback</text>
+    <text x="16" y="127" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="12">• All-or-nothing cutover assessor verifying evaluator-signed evidence</text>
+    <text x="16" y="152" fill="#fbbf24" font-family="monospace" font-size="11">threadforge security scan · endpoint &lt;dest&gt; · migrate · cutover assess</text>
+    <text x="16" y="170" fill="#ff7875" font-family="monospace" font-size="10.5">Advisory &amp; read-only by default — never executes commands on hosts</text>
+  </g>
+
+  <!-- Column 3: Python Stdio Engines & Storage -->
+  <rect x="874" y="80" width="330" height="624" rx="10" fill="#101320" stroke="#252b45" stroke-width="1.5"/>
+  <text x="894" y="112" fill="#00e575" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-weight="800" font-size="13" letter-spacing="1">3. PYTHON ENGINES &amp; STORAGE</text>
+
+  <!-- AnyJev Engine -->
+  <g transform="translate(892, 130)">
+    <rect width="294" height="165" rx="8" fill="#171b2e" stroke="#2d3556"/>
+    <text x="14" y="25" fill="#00d2ff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13.5">AnyJev Typed Decisions (Python)</text>
+    <text x="14" y="46" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">• L0 cyclic-shift prior debiasing</text>
+    <text x="14" y="64" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">• L1 temperature scaling calibration</text>
+    <text x="14" y="82" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">• L2 closed-form hidden-state heads</text>
+    <text x="14" y="100" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">• Model block truncation &amp; distillation</text>
+    <text x="14" y="118" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">• Fingerprint-pinned vLLM L2 inference</text>
+    <text x="14" y="144" fill="#00e575" font-family="monospace" font-size="10.5">JSON-over-stdio (threadforge.python.v1)</text>
+  </g>
+
+  <!-- RRSI Engine -->
+  <g transform="translate(892, 310)">
+    <rect width="294" height="175" rx="8" fill="#171b2e" stroke="#2d3556"/>
+    <text x="14" y="25" fill="#fbbf24" font-family="-apple-system, sans-serif" font-weight="700" font-size="13.5">RRSI Harness Evolution (Python)</text>
+    <text x="14" y="46" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">• Leakage critic screen v3 &amp; local repair</text>
+    <text x="14" y="64" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">• Score / noise-band / token-cost selector</text>
+    <text x="14" y="82" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">• Pinned task-set commitments (SWE-bench,</text>
+    <text x="14" y="100" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">  Terminal-Bench, Harvey LAB, EngDesign)</text>
+    <text x="14" y="118" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">• Paired bootstrap evaluation v1/v2</text>
+    <text x="14" y="136" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">• Isolated Docker/MCP EngDesign runner</text>
+    <text x="14" y="158" fill="#fbbf24" font-family="monospace" font-size="10.5">Candidates stay pending_human_review</text>
+  </g>
+
+  <!-- Local & Versioned Storage -->
+  <g transform="translate(892, 500)">
+    <rect width="294" height="184" rx="8" fill="#141f24" stroke="#00e575"/>
+    <text x="14" y="25" fill="#00e575" font-family="-apple-system, sans-serif" font-weight="700" font-size="13.5">Dual Storage Boundary</text>
+    <text x="14" y="48" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="600" font-size="12">Private Local State (Never Shared):</text>
+    <text x="14" y="66" fill="#9ba3c7" font-family="monospace" font-size="11">• SQLite (CAS revisions + audit log)</text>
+    <text x="14" y="84" fill="#9ba3c7" font-family="monospace" font-size="11">• Sanitized runtime.jsonl traces</text>
+    <text x="14" y="110" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="600" font-size="12">Versioned Project Files (Git-Tracked):</text>
+    <text x="14" y="128" fill="#00d2ff" font-family="monospace" font-size="11">• .threadforge/memory/records/</text>
+    <text x="14" y="146" fill="#00d2ff" font-family="monospace" font-size="11">• .threadforge/procedures/ (Ed25519)</text>
+    <text x="14" y="164" fill="#00d2ff" font-family="monospace" font-size="11">• .threadforge/skills/ (SKILL.md)</text>
+  </g>
+
+  <!-- Connectors -->
+  <line x1="316" y1="180" x2="348" y2="180" stroke="#00d2ff" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <line x1="316" y1="280" x2="348" y2="280" stroke="#00d2ff" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <line x1="348" y1="380" x2="316" y2="380" stroke="#00e575" stroke-width="2" marker-end="url(#arrowGreen)"/>
+  <line x1="348" y1="590" x2="316" y2="590" stroke="#00e575" stroke-width="2" marker-end="url(#arrowGreen)"/>
+
+  <line x1="842" y1="210" x2="874" y2="210" stroke="#00d2ff" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <line x1="842" y1="395" x2="874" y2="395" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrowAmber)"/>
+  <line x1="842" y1="590" x2="874" y2="590" stroke="#00e575" stroke-width="2" marker-end="url(#arrowGreen)"/>
+</svg>
+

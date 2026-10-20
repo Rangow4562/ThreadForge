@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 430" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgLife" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090b12"/>
+      <stop offset="100%" stop-color="#131728"/>
+    </linearGradient>
+    <marker id="arrowCyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#00d2ff"/>
+    </marker>
+    <marker id="arrowEmerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#00e575"/>
+    </marker>
+  </defs>
+
+  <rect width="1240" height="430" rx="14" fill="url(#bgLife)" stroke="#232842" stroke-width="2"/>
+
+  <!-- Title -->
+  <text x="36" y="42" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-weight="800" font-size="19">GOVERNED PROCEDURE, MEMORY &amp; CONTINUITY LIFECYCLE</text>
+  <text x="640" y="42" fill="#00d2ff" font-family="monospace" font-weight="600" font-size="12.5">Explicit Learning · Held-Out Validation · Ed25519 Attestation · Source-Freshness Gate</text>
+
+  <!-- Row 1: Procedure & Memory Governance -->
+  <text x="36" y="78" fill="#00e575" font-family="-apple-system, sans-serif" font-weight="700" font-size="12.5" letter-spacing="1">A. PROCEDURE GRAPH &amp; PROJECT MEMORY PIPELINE</text>
+
+  <!-- Step 1 -->
+  <g transform="translate(36, 92)">
+    <rect width="178" height="118" rx="8" fill="#15192b" stroke="#2d3556" stroke-width="1.5"/>
+    <text x="14" y="24" fill="#00d2ff" font-family="monospace" font-weight="700" font-size="12">01 · EVIDENCE</text>
+    <text x="14" y="46" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">Sanitized Traces</text>
+    <text x="14" y="66" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11">Local JSONL &amp; OTLP</text>
+    <text x="14" y="84" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11">Credential redaction</text>
+    <text x="14" y="104" fill="#00e575" font-family="monospace" font-size="10">SHA-256 file digests</text>
+  </g>
+  <line x1="214" y1="151" x2="234" y2="151" stroke="#00d2ff" stroke-width="2" marker-end="url(#arrowCyan)"/>
+
+  <!-- Step 2 -->
+  <g transform="translate(236, 92)">
+    <rect width="178" height="118" rx="8" fill="#15192b" stroke="#2d3556" stroke-width="1.5"/>
+    <text x="14" y="24" fill="#00d2ff" font-family="monospace" font-weight="700" font-size="12">02 · DRAFT</text>
+    <text x="14" y="46" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">Learn or Propose</text>
+    <text x="14" y="66" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11">Offline HF model draft</text>
+    <text x="14" y="84" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11">or human-authored graph</text>
+    <text x="14" y="104" fill="#fbbf24" font-family="monospace" font-size="10">memory learn / propose</text>
+  </g>
+  <line x1="414" y1="151" x2="434" y2="151" stroke="#00d2ff" stroke-width="2" marker-end="url(#arrowCyan)"/>
+
+  <!-- Step 3 -->
+  <g transform="translate(436, 92)">
+    <rect width="178" height="118" rx="8" fill="#15192b" stroke="#2d3556" stroke-width="1.5"/>
+    <text x="14" y="24" fill="#00d2ff" font-family="monospace" font-weight="700" font-size="12">03 · VALIDATE</text>
+    <text x="14" y="46" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">Graph &amp; Held-Out</text>
+    <text x="14" y="66" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11">Schema &amp; cycle bounds</text>
+    <text x="14" y="84" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11">Held-out eval report</text>
+    <text x="14" y="104" fill="#fbbf24" font-family="monospace" font-size="10">procedure validate</text>
+  </g>
+  <line x1="614" y1="151" x2="634" y2="151" stroke="#00d2ff" stroke-width="2" marker-end="url(#arrowCyan)"/>
+
+  <!-- Step 4 -->
+  <g transform="translate(636, 92)">
+    <rect width="184" height="118" rx="8" fill="#15192b" stroke="#00e575" stroke-width="1.5"/>
+    <text x="14" y="24" fill="#00e575" font-family="monospace" font-weight="700" font-size="12">04 · APPROVE &amp; SIGN</text>
+    <text x="14" y="46" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">Human Gate + Ed25519</text>
+    <text x="14" y="66" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11">CAS revision + reason</text>
+    <text x="14" y="84" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11">Pinned team trust policy</text>
+    <text x="14" y="104" fill="#00e575" font-family="monospace" font-size="10">--privacy-reviewed</text>
+  </g>
+  <line x1="820" y1="151" x2="840" y2="151" stroke="#00e575" stroke-width="2" marker-end="url(#arrowEmerald)"/>
+
+  <!-- Step 5 -->
+  <g transform="translate(842, 92)">
+    <rect width="178" height="118" rx="8" fill="#15192b" stroke="#00e575" stroke-width="1.5"/>
+    <text x="14" y="24" fill="#00e575" font-family="monospace" font-weight="700" font-size="12">05 · RETRIEVE</text>
+    <text x="14" y="46" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">Freshness-Checked</text>
+    <text x="14" y="66" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11">Re-hashes source_files</text>
+    <text x="14" y="84" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11">Withholds stale/conflict</text>
+    <text x="14" y="104" fill="#00d2ff" font-family="monospace" font-size="10">/v2/context &amp; MCP</text>
+  </g>
+  <line x1="1020" y1="151" x2="1040" y2="151" stroke="#00e575" stroke-width="2" marker-end="url(#arrowEmerald)"/>
+
+  <!-- Step 6 -->
+  <g transform="translate(1042, 92)">
+    <rect width="162" height="118" rx="8" fill="#15192b" stroke="#276ef1" stroke-width="1.5"/>
+    <text x="14" y="24" fill="#00d2ff" font-family="monospace" font-weight="700" font-size="12">06 · DISTRIBUTE</text>
+    <text x="14" y="46" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">Sync &amp; Export</text>
+    <text x="14" y="66" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11">Git-ref team sync</text>
+    <text x="14" y="84" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11">Immutable SKILL.md</text>
+    <text x="14" y="104" fill="#ff7875" font-family="monospace" font-size="10">Explicit supersede</text>
+  </g>
+
+  <!-- Row 2: Task Continuity & Governed Execution Lifecycle -->
+  <text x="36" y="252" fill="#fbbf24" font-family="-apple-system, sans-serif" font-weight="700" font-size="12.5" letter-spacing="1">B. TASK REQUIREMENTS, SCOPED PLANNING &amp; CROSS-HARNESS HANDOFF</text>
+
+  <g transform="translate(36, 268)">
+    <rect width="218" height="126" rx="8" fill="#161929" stroke="#343d66"/>
+    <text x="14" y="24" fill="#fbbf24" font-family="monospace" font-weight="700" font-size="12">1. DRAFT REQUIREMENTS</text>
+    <text x="14" y="46" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">Ask · Answer · Finalize</text>
+    <text x="14" y="68" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">Append-only Q&amp;A clarifications</text>
+    <text x="14" y="86" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">Zero unanswered questions gate</text>
+    <text x="14" y="108" fill="#00d2ff" font-family="monospace" font-size="10.5">task requirements finalize</text>
+  </g>
+  <line x1="254" y1="331" x2="278" y2="331" stroke="#00d2ff" stroke-width="2" marker-end="url(#arrowCyan)"/>
+
+  <g transform="translate(280, 268)">
+    <rect width="224" height="126" rx="8" fill="#161929" stroke="#343d66"/>
+    <text x="14" y="24" fill="#fbbf24" font-family="monospace" font-weight="700" font-size="12">2. SCOPED TASK PLAN</text>
+    <text x="14" y="46" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">Revise &amp; Confirm Scope</text>
+    <text x="14" y="68" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">Repo-relative include/exclude</text>
+    <text x="14" y="86" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">plan_only | governed_execution</text>
+    <text x="14" y="108" fill="#00d2ff" font-family="monospace" font-size="10.5">task plan revise / confirm</text>
+  </g>
+  <line x1="504" y1="331" x2="528" y2="331" stroke="#00d2ff" stroke-width="2" marker-end="url(#arrowCyan)"/>
+
+  <g transform="translate(530, 268)">
+    <rect width="224" height="126" rx="8" fill="#161929" stroke="#343d66"/>
+    <text x="14" y="24" fill="#fbbf24" font-family="monospace" font-weight="700" font-size="12">3. SESSION EXECUTION</text>
+    <text x="14" y="46" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">CAS Progress &amp; Guards</text>
+    <text x="14" y="68" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">Optional deny-only write hooks</text>
+    <text x="14" y="86" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">Checkpoints, reviews &amp; digests</text>
+    <text x="14" y="108" fill="#00d2ff" font-family="monospace" font-size="10.5">session start / task record</text>
+  </g>
+  <line x1="754" y1="331" x2="778" y2="331" stroke="#00e575" stroke-width="2" marker-end="url(#arrowEmerald)"/>
+
+  <g transform="translate(780, 268)">
+    <rect width="214" height="126" rx="8" fill="#161929" stroke="#00e575"/>
+    <text x="14" y="24" fill="#00e575" font-family="monospace" font-weight="700" font-size="12">4. REDACTED HANDOFF</text>
+    <text x="14" y="46" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">Cross-Harness Brief</text>
+    <text x="14" y="68" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">Reads 14 native session stores</text>
+    <text x="14" y="86" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">Confirm-before-launch resume</text>
+    <text x="14" y="108" fill="#00e575" font-family="monospace" font-size="10.5">handoff list|export|resume</text>
+  </g>
+  <line x1="994" y1="331" x2="1018" y2="331" stroke="#00e575" stroke-width="2" marker-end="url(#arrowEmerald)"/>
+
+  <g transform="translate(1020, 268)">
+    <rect width="184" height="126" rx="8" fill="#161929" stroke="#276ef1"/>
+    <text x="14" y="24" fill="#00d2ff" font-family="monospace" font-weight="700" font-size="12">5. CUTOVER GATE</text>
+    <text x="14" y="46" fill="#ffffff" font-family="-apple-system, sans-serif" font-weight="700" font-size="13">All-or-Nothing Audit</text>
+    <text x="14" y="68" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">Parity + migration ledger</text>
+    <text x="14" y="86" fill="#9ba3c7" font-family="-apple-system, sans-serif" font-size="11.5">Signed held-out trials</text>
+    <text x="14" y="108" fill="#fbbf24" font-family="monospace" font-size="10.5">cutover assess (v4)</text>
+  </g>
+</svg>
+

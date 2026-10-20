@@ -1,12 +1,56 @@
+<div align="center">
+
+<img src="assets/threadforge-banner.png" alt="Threadforge — Local-First Memory, Task Continuity, Calibrated Decisions & Harness Evolution for AI Coding Agents" width="100%" />
+
 # Threadforge
 
-Local-first memory, task continuity, and procedural learning for AI coding agents—with the goal of reducing repeated failures across harnesses.
+**Local-first memory, task continuity, calibrated typed decisions, and procedural learning for AI coding agents—with the goal of reducing repeated failures across harnesses.**
+
+[![License](https://img.shields.io/badge/License-Apache--2.0-2f855a?style=flat-square)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=flat-square&logo=go&logoColor=white)](go.mod)
+[![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white)](python/pyproject.toml)
+[![Node](https://img.shields.io/badge/Node.js-22.19%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](adapters/package.json)
+[![Posture](https://img.shields.io/badge/Runtime-Loopback--Only%20%7C%20Local--First-00b4d8?style=flat-square)](docs/architecture.md)
+
+[Architecture](docs/architecture.md) ·
+[Feature Parity Ledger](docs/feature-parity.md) ·
+[Host Source Matrix](docs/source-matrix.md) ·
+[MCP Setup](docs/mcp.md) ·
+[Contributing (`contributor.md`)](contributor.md) ·
+[Commit Guide (`commit.md`)](commit.md)
+
+</div>
+
+---
+
+## Overview
+
+**Threadforge** is the planned local-first successor to **Beacon**, **Mancode**, **AnyJev**, and **RRSI**. The target is full documented feature parity before any legacy cutover. This repository is an early implementation, not a feature-complete replacement.
+
+| Pillar | Legacy Origin | Threadforge Capability | Primary CLI / Surface |
+| :--- | :--- | :--- | :--- |
+| **Telemetry, Security & Memory** | **Beacon** | Loopback OTLP/HTTP & gRPC intake, 25+ host adapter/poller slices, CEL threat-rule scanner, 11 metadata-only SIEM packs, and SHA-256 source-freshness-checked project memory & procedure graphs | `threadforge serve`, `procedure`, `memory`, `security`, `endpoint`, `inventory`, `ci` |
+| **Task & Session Continuity** | **Mancode** | CAS revision-checked tasks, append-only requirements Q&A, repository-scoped task plans, 14 native session-store handoff readers, and Ed25519-signed team procedure sync | `threadforge task`, `session`, `handoff`, `team`, `bootstrap` |
+| **Calibrated Typed Decisions** | **AnyJev** | L0 cyclic-shift debiasing, L1 temperature scaling, L2 closed-form hidden-state heads, model block truncation, distillation pipeline, and fingerprint-pinned vLLM inference | `threadforge decision calibrate`, `artifact`, `bundle`, `run`, `batch`, `model`, `distill`, `benchmark` |
+| **Harness Self-Improvement** | **RRSI** | Leakage critic screening (v3), bounded local repair, score/noise/token-cost candidate selection, pinned benchmark task-set derivation, and paired bootstrap evaluation (v1/v2) | `threadforge evolution screen`, `critic`, `repair`, `select`, `inventory`, `domain-verify`, `evaluate` |
 
 Devin CLI, Devin Desktop, and standalone Senpi have partial observation-only adapters. Run `npm run adapter -- devin ...`, `npm run adapter -- devin-desktop ...`, or `npm run adapter -- senpi ...` from `adapters/`; Senpi installs a self-contained extension, while Devin manages user/project hook configuration. Devin Cloud Agents support reviewed project skills plus local-only `threadforge cloud devin pull|status` telemetry. GCS/raw-trace upload, live host verification, packaging, and cross-harness acceptance remain unverified; see [Devin CLI](docs/devin-cli.md), [Devin Desktop](docs/devin-desktop.md), [Devin Cloud Agents](docs/devin-cloud-agents.md), [Senpi](docs/senpi.md), and the [source matrix](docs/source-matrix.md).
 
 On Windows PowerShell, use `npm.cmd` for adapter examples that forward `--` options (as shown in PowerShell code blocks); the `npm.ps1` shim can consume those flags. POSIX shell examples continue to use `npm`.
 
-Threadforge is the planned local-first successor to Beacon, Mancode, AnyJev, and RRSI. The target is full documented feature parity before any legacy cutover. This repository is an early implementation, not a feature-complete replacement.
+---
+
+## System Architecture & Governance Lifecycle
+
+<p align="center">
+  <img src="assets/architecture.svg" alt="Threadforge Local-First System Architecture" width="100%" />
+</p>
+
+<p align="center">
+  <img src="assets/lifecycle.svg" alt="Threadforge Governed Procedure, Memory & Continuity Lifecycle" width="100%" />
+</p>
+
+---
 
 ## Current implementation
 
@@ -40,6 +84,16 @@ Threadforge is the planned local-first successor to Beacon, Mancode, AnyJev, and
 - Reuse/license inventory and a feature-parity ledger; remaining product capabilities are explicitly marked incomplete.
 - Optional Claude Code, Qwen Code, and GitHub Copilot CLI task-plan hooks can deny selected direct file writes outside a confirmed task scope; they never emit an allow decision, do not sandbox shell/MCP operations, and remain defense-in-depth only. Copilot hook timeouts may fail open. See [Copilot CLI task-plan gate](docs/copilot-cli-plan-gate.md), [Claude Code plan gate](docs/claude-code-plan-gate.md), and [Qwen Code plan gate](docs/qwen-code.md#best-effort-deny-only-task-plan-gate).
 - Gemini CLI has a project-only `BeforeTool` deny-only task-plan gate for direct `write_file` and `replace` tools. It is locally tested but not yet verified in an installed Gemini denial smoke; hook failures may fail open, and shell/MCP effects are outside its scope. See [Gemini CLI plan gate](docs/gemini-cli.md#project-task-plan-gate).
+
+---
+
+## Local Dashboard & Loopback Service
+
+<p align="center">
+  <img src="assets/dashboard-preview.svg" alt="Threadforge Local Loopback Dashboard Preview" width="100%" />
+</p>
+
+---
 
 ## Local development
 
@@ -90,6 +144,8 @@ Claude Code local transcript polling is available through `claude sessions statu
 GitHub Copilot CLI local session polling is available through `copilot sessions status|sync`; it reads only bounded session `events.jsonl` files, keeps hashed cursors outside Copilot's directory, and omits transcript content by default. Approved procedures can also be installed with `copilot skills install|uninstall` under `.github/skills/`. The observed event format, live CLI compatibility, installed skill discovery, MDM telemetry setup, and cross-harness acceptance remain incomplete. See [Copilot CLI history](docs/copilot-cli-history.md) and [Copilot project skills](docs/copilot-skills.md).
 
 Cursor local history polling is available through `cursor sessions status|sync` for both `agent-transcripts` files and the read-only global Composer database, with hashed cursors and digest-first mapping. Its project hooks also emit digest-only assistant-response and reasoning events without installing prompt-submission gates or retaining raw text. The Composer schema and transcript formats remain version-sensitive; cloud sessions, live compatibility, and cross-harness acceptance remain incomplete. See [Cursor history](docs/cursor-history.md).
+
+Cursor additionally has a separate opt-in `cursor plan-gate` installer for a fail-closed, direct-`Write`-only task scope check. It does not authorize writes or cover shell/MCP tools, and an installed-host enforcement smoke remains outstanding. See [Cursor task plan gate](docs/cursor-plan-gate.md).
 
 Claude.ai and ChatGPT Web have a partial opt-in browser extension under `adapters/browser-extension`. Capture and both site toggles default off, retention defaults to metadata, and the receiver must be local loopback. The Chromium replay/privacy suite passes, but private vendor API drift, live-site compatibility, signed distribution, Firefox runtime validation, and cross-harness acceptance remain open. See [browser extension setup and limits](docs/browser-extension.md).
 
@@ -182,6 +238,8 @@ AnyJev decisions are available through `threadforge decision calibrate`, `decisi
 
 `threadforge evolution inventory jobbench --file <jobbench-inventory-request.json>` derives the pinned 65-task JobBench main split from committed Git and README metadata only. It never reads dataset task contents or accesses the network; real-checkout verification remains outstanding. See [JobBench derivation](docs/evolution.md#local-jobbench-inventory-derivation).
 
+---
+
 ## Privacy and safety defaults
 
 - Learning is an explicit operation; no host hook calls a model or promotes memory.
@@ -190,4 +248,4 @@ AnyJev decisions are available through `threadforge decision calibrate`, `decisi
 - Team-share projections omit local trace references and require a privacy-reviewed approval.
 - Legacy repositories are not modified by this project.
 
-See [architecture](docs/architecture.md), [reuse inventory](docs/reuse-inventory.md), and [feature parity](docs/feature-parity.md).
+See [architecture](docs/architecture.md), [reuse inventory](docs/reuse-inventory.md), [feature parity](docs/feature-parity.md), [contributing guide (`contributor.md`)](contributor.md), and [commit conventions (`commit.md`)](commit.md).

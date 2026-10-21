@@ -165,7 +165,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       return 2;
     }
   }
-  if ((family === 'claude-code' || family === 'command-code' || family === 'cline' || family === 'cursor' || family === 'devin' || family === 'opencode' || family === 'codex' || family === 'gemini' || family === 'antigravity' || family === 'copilot' || family === 'openhands' || family === 'kimi' || family === 'zcode' || family === 'dsh' || family === 'qoder') && action === 'skills') {
+  if ((family === 'claude-code' || family === 'command-code' || family === 'cline' || family === 'cursor' || family === 'devin' || family === 'opencode' || family === 'codex' || family === 'gemini' || family === 'antigravity' || family === 'copilot' || family === 'openhands' || family === 'kimi' || family === 'zcode' || family === 'dsh' || family === 'qoder' || family === 'windsurf' || family === 'devin-desktop') && action === 'skills') {
     projectSkillSubsystem = 'skills';
     action = rest[0];
     rest = rest.slice(1);
@@ -600,7 +600,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       (family === 'opencode' && openCodeSubsystem === 'sessions' && action === 'status') ||
       (family === 'codex' && (action === 'sync' || action === 'status')) ||
       ((family === 'antigravity' && projectSkillSubsystem !== 'skills' && antigravityScope === 'user') || (family === 'devin' && projectSkillSubsystem !== 'skills' && devinScope === 'user') ||
-        (family === 'devin-desktop' && devinDesktopScope === 'user') || (family === 'senpi' && senpiScope === 'user') ||
+        (family === 'devin-desktop' && projectSkillSubsystem !== 'skills' && devinDesktopScope === 'user') || (family === 'senpi' && senpiScope === 'user') ||
         (family === 'qwen' && qwenScope === 'user') ||
         (family === 'kiro' && kiroScope === 'user') || (family === 'grok' && grokScope === 'user') || (family === 'muse' && museScope === 'user') ||
         (family === 'omp' && ompScope === 'user') || (family === 'kimi' && projectSkillSubsystem !== 'skills'))
@@ -741,7 +741,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
         ...(devinScope === 'project' ? { projectRoot } : {}),
       });
       warning = 'Restart Devin CLI to reload hook configuration';
-    } else if (family === 'devin-desktop' && (action === 'install' || action === 'update')) {
+    } else if (family === 'devin-desktop' && projectSkillSubsystem !== 'skills' && (action === 'install' || action === 'update')) {
       rejectUnexpected(options, ['scope', 'project-root', 'command-template']);
       if (devinDesktopScope !== 'user' && devinDesktopScope !== 'project') throw new Error('Devin Desktop hook scope must be user or project');
       if (devinDesktopScope === 'user' && options.values.has('project-root')) throw new Error('--project-root is only valid with --scope project');
@@ -751,7 +751,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
         ...(options.values.has('command-template') ? { commandTemplate: required(options, 'command-template') } : {}),
       });
       warning = 'Restart Devin Desktop to reload Cascade/Windsurf hooks; installed-host payload and response behavior remain unverified';
-    } else if (family === 'devin-desktop' && action === 'uninstall') {
+    } else if (family === 'devin-desktop' && projectSkillSubsystem !== 'skills' && action === 'uninstall') {
       rejectUnexpected(options, ['scope', 'project-root']);
       if (devinDesktopScope !== 'user' && devinDesktopScope !== 'project') throw new Error('Devin Desktop hook scope must be user or project');
       if (devinDesktopScope === 'user' && options.values.has('project-root')) throw new Error('--project-root is only valid with --scope project');
@@ -784,10 +784,10 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
             ? 'Restart Senpi to unload the extension.'
             : 'Restart Senpi to load the extension; installed-host API/version behavior remains unverified';
       }
-    } else if ((family === 'claude-code' || family === 'command-code' || family === 'cline' || family === 'cursor' || family === 'devin' || family === 'opencode' || family === 'codex' || family === 'gemini' || family === 'antigravity' || family === 'copilot' || family === 'openhands' || family === 'kimi' || family === 'zcode' || family === 'dsh' || family === 'qoder') && projectSkillSubsystem === 'skills' && (action === 'install' || action === 'uninstall')) {
+    } else if ((family === 'claude-code' || family === 'command-code' || family === 'cline' || family === 'cursor' || family === 'devin' || family === 'opencode' || family === 'codex' || family === 'gemini' || family === 'antigravity' || family === 'copilot' || family === 'openhands' || family === 'kimi' || family === 'zcode' || family === 'dsh' || family === 'qoder' || family === 'windsurf' || family === 'devin-desktop') && projectSkillSubsystem === 'skills' && (action === 'install' || action === 'uninstall')) {
       rejectUnexpected(options, ['project-root', 'skill-file', 'sha256']);
       const skillOptions = {
-        host: family === 'codex' ? 'codex-cli' : family === 'gemini' ? 'gemini-cli' : family === 'copilot' ? 'github-copilot' : family === 'kimi' ? 'kimi-code' : family === 'dsh' ? 'deepseek-harness' : family as ProjectSkillHost,
+        host: family === 'windsurf' || family === 'devin-desktop' ? 'windsurf' : family === 'codex' ? 'codex-cli' : family === 'gemini' ? 'gemini-cli' : family === 'copilot' ? 'github-copilot' : family === 'kimi' ? 'kimi-code' : family === 'dsh' ? 'deepseek-harness' : family as ProjectSkillHost,
         projectRoot,
         skillFile: required(options, 'skill-file'),
         sha256: required(options, 'sha256'),
@@ -1681,6 +1681,8 @@ function usage(): string {
     '  npm run adapter -- cursor plan-gate uninstall --project-root <absolute-path>',
     '  npm run adapter -- cursor skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- devin skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
+    '  npm run adapter -- windsurf skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
+    '  npm run adapter -- devin-desktop skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- opencode skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- codex skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- gemini skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',

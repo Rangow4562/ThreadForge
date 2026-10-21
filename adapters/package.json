@@ -68,6 +68,7 @@
     "./devin-hooks-config": "./src/devin-hooks-config.ts",
     "./devin-desktop-hook": "./src/devin-desktop-hook.ts",
     "./devin-desktop-hooks-config": "./src/devin-desktop-hooks-config.ts",
+    "./windsurf-skill-config": "./src/windsurf-skill-config.ts",
     "./senpi-extension": "./src/senpi-extension.ts",
     "./senpi-extension-config": "./src/senpi-extension-config.ts",
     "./grok-hook": "./src/grok-hook.ts",

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.invalid/schema/project-skill-v1.schema.json",
+  "title": "Threadforge Project Skill Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "host", "action", "skill_name", "path", "sha256"],
+  "properties": {
+    "schema_version": { "const": "threadforge.project-skill.v1" },
+    "host": {
+      "enum": ["claude-code", "command-code", "cline", "cursor", "devin", "opencode", "codex-cli", "gemini-cli", "antigravity", "github-copilot", "openhands", "kimi-code", "zcode", "deepseek-harness", "qoder", "windsurf"]
+    },
+    "action": { "enum": ["installed", "unchanged", "removed", "absent"] },
+    "skill_name": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "path": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

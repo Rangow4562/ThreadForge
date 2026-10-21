@@ -20,6 +20,7 @@ import { installKimiCodeProjectSkill, uninstallKimiCodeProjectSkill } from '../s
 import { installZCodeProjectSkill, uninstallZCodeProjectSkill } from '../src/zcode-skill-config.ts';
 import { installDeepSeekHarnessProjectSkill, uninstallDeepSeekHarnessProjectSkill } from '../src/deepseek-harness-skill-config.ts';
 import { installQoderProjectSkill, uninstallQoderProjectSkill } from '../src/qoder-skill-config.ts';
+import { installWindsurfProjectSkill, uninstallWindsurfProjectSkill } from '../src/windsurf-skill-config.ts';
 
 const approvalNotice = '> This portable procedure is approved guidance, not authorization to execute actions.';
 const omissionNotice = 'Evidence digests, trace references, validation datasets, reviewer identity, and approval rationale are intentionally omitted from this portable projection.';
@@ -221,6 +222,31 @@ test('installs and removes an approved procedure in OpenHands project Agent Skil
     const removed = await uninstallOpenHandsProjectSkill({ projectRoot: f.root, skillFile: f.file, sha256: f.sha256 });
     assert.equal(removed.action, 'removed');
     assert.equal(readFileSync(path.join(neighborDir, 'SKILL.md'), 'utf8'), 'user content\n');
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('installs and removes an approved procedure in Windsurf shared workspace Agent Skills', async () => {
+  const f = fixture();
+  const neighborDir = path.join(f.root, '.agents', 'skills', 'team-playbook');
+  mkdirSync(neighborDir, { recursive: true });
+  writeFileSync(path.join(neighborDir, 'SKILL.md'), 'team-owned skill\n');
+  try {
+    const installed = await installWindsurfProjectSkill({ projectRoot: f.root, skillFile: f.file, sha256: f.sha256 });
+    assert.equal(installed.host, 'windsurf');
+    assert.equal(installed.action, 'installed');
+    assert.equal(installed.path, '.agents/skills/threadforge-approved-procedure-a1b2c3d4-r2/SKILL.md');
+    assert.deepEqual(readFileSync(path.join(f.root, installed.path)), f.bytes);
+
+    const repeated = await installWindsurfProjectSkill({ projectRoot: f.root, skillFile: f.file, sha256: f.sha256 });
+    assert.equal(repeated.action, 'unchanged');
+    const owner = JSON.parse(readFileSync(path.join(path.dirname(path.join(f.root, installed.path)), '.threadforge-owner.json'), 'utf8')) as { host: string };
+    assert.equal(owner.host, 'agents-skills');
+
+    const removed = await uninstallWindsurfProjectSkill({ projectRoot: f.root, skillFile: f.file, sha256: f.sha256 });
+    assert.equal(removed.action, 'removed');
+    assert.equal(readFileSync(path.join(neighborDir, 'SKILL.md'), 'utf8'), 'team-owned skill\n');
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }
@@ -718,6 +744,30 @@ test('OpenHands CLI installs and removes a reviewed procedure in shared .agents/
     const removeOut = writableText();
     assert.equal(await runAdapterCLI(['open-hands', 'skills', 'uninstall', ...base], removeOut.stream, stderr.stream), 0, stderr.text());
     assert.equal((JSON.parse(removeOut.text()) as { result: { action: string } }).result.action, 'removed');
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('Windsurf and Devin Desktop CLI routes install and remove only an approved shared project skill', async () => {
+  const f = fixture();
+  const stdout = writableText();
+  const stderr = writableText();
+  const base = ['--project-root', f.root, '--skill-file', f.file, '--sha256', f.sha256];
+  try {
+    assert.equal(await runAdapterCLI(['windsurf', 'skills', 'install', ...base], stdout.stream, stderr.stream), 0, stderr.text());
+    const installed = JSON.parse(stdout.text()) as { family: string; action: string; result: { host: string; action: string; path: string } };
+    assert.equal(installed.family, 'windsurf');
+    assert.equal(installed.action, 'install');
+    assert.equal(installed.result.host, 'windsurf');
+    assert.equal(installed.result.path, '.agents/skills/threadforge-approved-procedure-a1b2c3d4-r2/SKILL.md');
+
+    const removeOut = writableText();
+    assert.equal(await runAdapterCLI(['devin-desktop', 'skills', 'uninstall', ...base], removeOut.stream, stderr.stream), 0, stderr.text());
+    const removed = JSON.parse(removeOut.text()) as { family: string; result: { host: string; action: string } };
+    assert.equal(removed.family, 'devin-desktop');
+    assert.equal(removed.result.host, 'windsurf');
+    assert.equal(removed.result.action, 'removed');
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

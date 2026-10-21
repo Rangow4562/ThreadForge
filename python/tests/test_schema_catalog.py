@@ -12,6 +12,26 @@ SCHEMA_DIRECTORY = Path(__file__).resolve().parents[2] / "schema"
 SCHEMA_PATHS = sorted(SCHEMA_DIRECTORY.glob("*.json"))
 
 
+def test_project_skill_result_schema_accepts_windsurf_and_rejects_unknown_hosts_or_paths():
+    schema = json.loads((SCHEMA_DIRECTORY / "project-skill-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.project-skill.v1",
+        "host": "windsurf",
+        "action": "installed",
+        "skill_name": "threadforge-approved-procedure-a1b2c3d4-r2",
+        "path": ".agents/skills/threadforge-approved-procedure-a1b2c3d4-r2/SKILL.md",
+        "sha256": "a" * 64,
+    }
+    validator.validate(result)
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "host": "unknown-agent"})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "path": "../outside/SKILL.md"})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "private_prompt": "not part of this result contract"})
+
+
 def test_qoder_project_command_result_schema_is_bounded_and_content_free():
     schema = json.loads((SCHEMA_DIRECTORY / "qoder-project-command-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

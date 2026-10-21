@@ -16,3 +16,7 @@ The five configured hook events are `pre_user_prompt`, `post_write_code`, `post_
 The default installed command points at the local TypeScript CLI and requires Node.js 22.6 or later with type stripping; it is a development launcher, not a portable release installer. `--command-template` can supply a deployment-specific command and must contain exactly one `{event}` placeholder and the ownership marker `--threadforge-devin-desktop-hook=v1`.
 
 This integration does not configure cloud agents, credentials, host trust, or permission behavior. Installed-host validation, package distribution, full migration parity, and cross-harness retrieval acceptance remain open; see the [source matrix](source-matrix.md) and [cutover criteria](cutover.md).
+
+## Approved project procedures
+
+Windsurf/Cascade can also receive reviewed Threadforge procedures as workspace Agent Skills under the shared `.agents/skills/` path. Install and uninstall are digest-gated and preserve neighboring skills; they do not modify Windsurf configuration or trust. Live skill discovery and invocation remain unverified. See [Windsurf/Cascade approved project skills](windsurf-skills.md).

@@ -103,6 +103,11 @@ func BuildFormatCoverage(manifest Manifest) (migrationcoverage.Report, error) {
 	report.RejectedRecords = manifest.Summary.RecordsRejected
 	report.JoinedFiles = manifest.Summary.FilesJoined
 	report.UnsupportedFiles = manifest.Summary.FilesUnsupported
+	crossFileChecks := manifest.CrossFileChecks
+	if manifest.Product == Mancode && len(crossFileChecks) == 0 {
+		crossFileChecks = legacyMancodePrivacyBindingChecks(manifest.Files)
+	}
+	report.CrossFileChecks = append([]migrationcoverage.CrossFileCheck(nil), crossFileChecks...)
 	for _, file := range manifest.Files {
 		if file.SnapshotPath != "" {
 			report.SnapshotFiles++
@@ -174,6 +179,12 @@ func migrationFormatID(product Product, sourceRoot, relative string) string {
 			return "beacon.endpoint-generic"
 		}
 	case Mancode:
+		if isMancodePrivacyPolicyPath(relative) {
+			return "mancode.privacy-policy"
+		}
+		if isMancodePrivacyExclusionsPath(relative) {
+			return "mancode.privacy-exclusions"
+		}
 		if isMancodeProgressHTMLPath(relative) {
 			return "mancode.progress-projection"
 		}

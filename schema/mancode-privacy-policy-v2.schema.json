@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-privacy-policy-v2.schema.json",
+  "title": "Threadforge Mancode privacy-policy migration projection v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "policy_kind", "authority", "human_review_required", "execution_authorized",
+    "source_enabled", "revision", "ruleset_version", "enabled_rule_ids", "targets", "exclusions_revision",
+    "exclusions_digest", "exclusions_binding_verified", "exclusions_binding_status", "exclusions_binding_issues", "updated_at"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-privacy-policy.v2" },
+    "policy_kind": { "const": "privacy" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "source_enabled": { "type": "boolean" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "ruleset_version": { "const": "mancode-sensitive-text:1" },
+    "enabled_rule_ids": {
+      "type": "array", "maxItems": 15, "uniqueItems": true,
+      "items": { "enum": [
+        "pem-private-key", "authorization-header", "cookie-header", "named-secret",
+        "absolute-local-path", "email-address", "vendor-api-key", "cloud-access-key",
+        "connection-password", "bearer-token", "jwt-token", "cn-mobile-phone",
+        "cn-identity-card-18", "cn-identity-card-15", "payment-card"
+      ] }
+    },
+    "targets": { "const": ["shared_write", "context_output"] },
+    "exclusions_revision": { "type": "integer", "minimum": 1 },
+    "exclusions_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "exclusions_binding_verified": { "type": "boolean" },
+    "exclusions_binding_status": { "enum": ["verified", "incomplete", "conflicting"] },
+    "exclusions_binding_issues": {
+      "type": "array", "maxItems": 9, "uniqueItems": true,
+      "items": { "enum": [
+        "policy_missing", "exclusions_missing", "policy_invalid", "exclusions_invalid",
+        "policy_ambiguous", "exclusions_ambiguous", "workspace_mismatch", "revision_mismatch", "digest_mismatch"
+      ] }
+    },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "source_enabled": { "const": true } } },
+      "then": { "properties": { "enabled_rule_ids": { "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "exclusions_binding_status": { "const": "verified" } } },
+      "then": {
+        "properties": {
+          "exclusions_binding_verified": { "const": true },
+          "exclusions_binding_issues": { "maxItems": 0 }
+        }
+      },
+      "else": {
+        "properties": {
+          "exclusions_binding_verified": { "const": false },
+          "exclusions_binding_issues": { "minItems": 1 }
+        }
+      }
+    }
+  ]
+}

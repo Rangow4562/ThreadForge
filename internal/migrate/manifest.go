@@ -20,6 +20,7 @@ import (
 
 	beacon "github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/threadforge-ai/threadforge/pkg/migrationcoverage"
 	"github.com/threadforge-ai/threadforge/pkg/privacy"
 	"gopkg.in/yaml.v3"
 )
@@ -36,14 +37,15 @@ const (
 )
 
 type Manifest struct {
-	SchemaVersion     string      `json:"schema_version"`
-	ID                string      `json:"id"`
-	Product           Product     `json:"product"`
-	SourceRoot        string      `json:"source_root"`
-	SourceFingerprint string      `json:"source_fingerprint"`
-	CreatedAt         string      `json:"created_at"`
-	Files             []FileEntry `json:"files"`
-	Summary           Summary     `json:"summary"`
+	SchemaVersion     string                             `json:"schema_version"`
+	ID                string                             `json:"id"`
+	Product           Product                            `json:"product"`
+	SourceRoot        string                             `json:"source_root"`
+	SourceFingerprint string                             `json:"source_fingerprint"`
+	CreatedAt         string                             `json:"created_at"`
+	Files             []FileEntry                        `json:"files"`
+	CrossFileChecks   []migrationcoverage.CrossFileCheck `json:"cross_file_checks,omitempty"`
+	Summary           Summary                            `json:"summary"`
 }
 
 type FileEntry struct {
@@ -89,6 +91,8 @@ type scannedFile struct {
 	records           []Record
 	joinedCompanion   *FileEntry
 	metadataReadBytes int64
+	privacyPolicy     *mancodePrivacyPolicyBindingSource
+	privacyExclusions *mancodePrivacyExclusionsBindingSource
 }
 
 const (
@@ -300,13 +304,14 @@ func inspect(product Product, sourceRoot string, scannedSink *[]scannedFile) (Ma
 		if manifest.Summary.RecordsFound > maxRecords {
 			return Manifest{}, errors.New("migration source exceeds 100000-record limit")
 		}
+		manifest.CrossFileChecks = bindMancodePrivacyPolicyExclusions(&scanned)
 	}
 	sort.Slice(scanned, func(i, j int) bool { return scanned[i].entry.Path < scanned[j].entry.Path })
 	manifest.Files = make([]FileEntry, len(scanned))
 	for i := range scanned {
 		manifest.Files[i] = scanned[i].entry
 	}
-	manifest.SourceFingerprint = sourceFingerprint(manifest.Files)
+	manifest.SourceFingerprint = sourceFingerprint(manifest.Files, manifest.CrossFileChecks)
 	manifest.ID = string(product) + "-" + manifest.SourceFingerprint[:20]
 	if scannedSink != nil {
 		*scannedSink = append([]scannedFile(nil), scanned...)
@@ -424,6 +429,13 @@ func CreateSnapshot(product Product, sourceRoot, dataRoot string) (Manifest, err
 			privateArtifacts = append(privateArtifacts, artifact)
 		}
 		records := append(append([]Record(nil), parsed.records...), derived...)
+		if product == Mancode && isMancodePrivacyPolicyPath(entry.Path) {
+			bound := inspectedByPath[entry.Path].records
+			if len(bound) != len(parsed.records) {
+				return Manifest{}, fmt.Errorf("privacy binding changed during snapshot: %s", entry.Path)
+			}
+			records = append([]Record(nil), bound...)
+		}
 		encoded, err := encodeRecordLines(records)
 		if err != nil {
 			return Manifest{}, err
@@ -776,7 +788,10 @@ func VerifyManifest(manifest Manifest) error {
 	if _, err := ParseProduct(string(manifest.Product)); err != nil {
 		return err
 	}
-	if !validDigest(manifest.SourceFingerprint) || len(manifest.Files) > maxFiles || manifest.SourceFingerprint != sourceFingerprint(manifest.Files) {
+	if !validDigest(manifest.SourceFingerprint) || len(manifest.Files) > maxFiles ||
+		migrationcoverage.ValidateCrossFileChecks(string(manifest.Product), manifest.CrossFileChecks) != nil ||
+		validateMancodePrivacyManifestChecks(manifest) != nil ||
+		manifest.SourceFingerprint != sourceFingerprint(manifest.Files, manifest.CrossFileChecks) {
 		return errors.New("migration source fingerprint is invalid")
 	}
 	if manifest.ID != string(manifest.Product)+"-"+manifest.SourceFingerprint[:20] {
@@ -999,6 +1014,18 @@ func scanFile(product Product, sourceRoot, relative, fullPath string, data []byt
 			continue
 		}
 		for _, item := range normalized {
+			if item.privacyPolicy != nil {
+				if file.privacyPolicy != nil {
+					return scannedFile{}, expandedBytes, errors.New("Mancode privacy policy source has multiple policy objects")
+				}
+				file.privacyPolicy = item.privacyPolicy
+			}
+			if item.privacyExclusions != nil {
+				if file.privacyExclusions != nil {
+					return scannedFile{}, expandedBytes, errors.New("Mancode privacy exclusions source has multiple exclusion objects")
+				}
+				file.privacyExclusions = item.privacyExclusions
+			}
 			file.entry.RecordCount++
 			recordIndex++
 			if privacy.ContainsCredential(item.Payload) {
@@ -1038,8 +1065,10 @@ func finalizeScannedFile(file *scannedFile) {
 }
 
 type normalizedItem struct {
-	Type    string
-	Payload json.RawMessage
+	Type              string
+	Payload           json.RawMessage
+	privacyPolicy     *mancodePrivacyPolicyBindingSource
+	privacyExclusions *mancodePrivacyExclusionsBindingSource
 }
 
 func normalizeItems(product Product, sourceRoot, relative string, value any) ([]normalizedItem, error) {
@@ -1356,7 +1385,7 @@ func writePrivateFile(name string, data []byte) error {
 	return file.Close()
 }
 
-func sourceFingerprint(files []FileEntry) string {
+func sourceFingerprint(files []FileEntry, checks []migrationcoverage.CrossFileCheck) string {
 	var digestInput strings.Builder
 	for _, file := range files {
 		digestInput.WriteString(file.Path)
@@ -1364,6 +1393,12 @@ func sourceFingerprint(files []FileEntry) string {
 		digestInput.WriteString(file.SourceSHA256)
 		digestInput.WriteByte(0)
 		digestInput.WriteString(fmt.Sprintf("%d", file.SourceBytes))
+		digestInput.WriteByte('\n')
+	}
+	if len(checks) > 0 {
+		encoded, _ := json.Marshal(checks)
+		digestInput.WriteString("cross-file-checks-v1\x00")
+		digestInput.Write(encoded)
 		digestInput.WriteByte('\n')
 	}
 	return digest([]byte(digestInput.String()))

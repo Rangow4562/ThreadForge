@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/threadforge-ai/threadforge/pkg/migrationcoverage"
 )
 
 func mancodePrivacyPolicyFixture() map[string]any {
@@ -73,7 +75,7 @@ func TestMancodePrivacyPolicyIsHistoricalAndNeverEffective(t *testing.T) {
 		if err := json.Unmarshal(record.Payload, &candidate); err != nil {
 			t.Fatal(err)
 		}
-		if candidate["schema_version"] == mancodePrivacyPolicyImportSchema {
+		if candidate["schema_version"] == mancodePrivacyPolicyImportSchemaV2 {
 			projection = candidate
 		}
 	}
@@ -86,18 +88,203 @@ func TestMancodePrivacyPolicyIsHistoricalAndNeverEffective(t *testing.T) {
 	}
 	exclusionHash := sha256.Sum256(canonicalExclusions)
 	expectedExclusionDigest := "sha256:" + hex.EncodeToString(exclusionHash[:])
-	if projection["schema_version"] != mancodePrivacyPolicyImportSchema || projection["policy_kind"] != "privacy" ||
+	issues, issuesOK := projection["exclusions_binding_issues"].([]any)
+	if projection["schema_version"] != mancodePrivacyPolicyImportSchemaV2 || projection["policy_kind"] != "privacy" ||
 		projection["authority"] != "local_pending_review" || projection["human_review_required"] != true ||
 		projection["execution_authorized"] != false || projection["source_enabled"] != true ||
-		projection["exclusions_binding_verified"] != false || projection["ruleset_version"] != "mancode-sensitive-text:1" ||
+		projection["exclusions_binding_verified"] != true || projection["exclusions_binding_status"] != "verified" ||
+		!issuesOK || len(issues) != 0 || projection["ruleset_version"] != "mancode-sensitive-text:1" ||
 		projection["exclusions_digest"] != expectedExclusionDigest {
-		t.Fatalf("privacy policy was activated or lost its unverified historical reference: %s", records[0].Payload)
+		projectionBytes, _ := json.Marshal(projection)
+		t.Fatalf("privacy policy pair binding was not verified as inert review data: %s", projectionBytes)
+	}
+	if len(snapshot.CrossFileChecks) != 1 || snapshot.CrossFileChecks[0].Status != "verified" ||
+		snapshot.CrossFileChecks[0].PolicyFileCount != 1 || snapshot.CrossFileChecks[0].ExclusionsFileCount != 1 ||
+		!snapshot.CrossFileChecks[0].WorkspaceBindingVerified || !snapshot.CrossFileChecks[0].RevisionBindingVerified ||
+		!snapshot.CrossFileChecks[0].DigestBindingVerified || snapshot.CrossFileChecks[0].ExecutionAuthorized {
+		t.Fatalf("matching privacy policy/exclusions pair was not recorded as inert binding evidence: %#v", snapshot.CrossFileChecks)
+	}
+	coverage, err := BuildFormatCoverage(snapshot)
+	if err != nil || len(coverage.CrossFileChecks) != 1 || coverage.CrossFileChecks[0].Status != "verified" {
+		t.Fatalf("Mancode privacy binding did not reach format coverage: checks=%#v err=%v", coverage.CrossFileChecks, err)
+	}
+	tampered := snapshot
+	tampered.CrossFileChecks = append([]migrationcoverage.CrossFileCheck(nil), snapshot.CrossFileChecks...)
+	tampered.CrossFileChecks[0].PolicySourceSetSHA256 = strings.Repeat("f", 64)
+	tampered.SourceFingerprint = sourceFingerprint(tampered.Files, tampered.CrossFileChecks)
+	tampered.ID = string(tampered.Product) + "-" + tampered.SourceFingerprint[:20]
+	if err := VerifyManifest(tampered); err == nil {
+		t.Fatal("privacy binding check detached from its source-file commitment was accepted")
+	}
+	tampered = snapshot
+	tampered.CrossFileChecks = append([]migrationcoverage.CrossFileCheck(nil), snapshot.CrossFileChecks...)
+	tampered.CrossFileChecks[0].PolicyFileCount++
+	tampered.SourceFingerprint = sourceFingerprint(tampered.Files, tampered.CrossFileChecks)
+	tampered.ID = string(tampered.Product) + "-" + tampered.SourceFingerprint[:20]
+	if err := VerifyManifest(tampered); err == nil {
+		t.Fatal("privacy source file count detached from manifest inventory was accepted")
 	}
 	for _, private := range []string{mancodeDecisionTestID("1"), mancodeDecisionTestID("2"), "workspaceId", "lastOperationId"} {
 		if strings.Contains(string(records[0].Payload), private) {
 			t.Fatalf("privacy policy projection retained source identity %q: %s", private, records[0].Payload)
 		}
 	}
+}
+
+func TestMancodePrivacyPolicyExclusionsBindingReportsMismatchMissingAndMalformedPairs(t *testing.T) {
+	t.Run("revision and digest mismatch", func(t *testing.T) {
+		policy := mancodePrivacyPolicyFixture()
+		exclusions := mancodePrivacyExclusionsFixture()
+		exclusions["revision"] = int64(3)
+		manifest, records := readMancodePrivacyPairSnapshot(t, policy, exclusions, true, true)
+		check := onlyMancodePrivacyBindingCheck(t, manifest)
+		if check.Status != "conflicting" || check.RevisionBindingVerified || check.DigestBindingVerified ||
+			!containsMancodePrivacyIssue(check.Issues, "revision_mismatch") || !containsMancodePrivacyIssue(check.Issues, "digest_mismatch") {
+			t.Fatalf("mismatched privacy pair was not surfaced: %#v", check)
+		}
+		assertMancodePrivacyPolicyBindingProjection(t, records, "conflicting", false, "revision_mismatch", "digest_mismatch")
+		encoded, err := json.Marshal(check)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, private := range []string{mancodeDecisionTestID("1"), "workspaceId", "relativePath", "privacy-policy.json", "privacy-exclusions.json"} {
+			if strings.Contains(string(encoded), private) {
+				t.Fatalf("binding check leaked private source identity/path %q: %s", private, encoded)
+			}
+		}
+	})
+
+	t.Run("missing exclusions", func(t *testing.T) {
+		manifest, records := readMancodePrivacyPairSnapshot(t, mancodePrivacyPolicyFixture(), nil, true, false)
+		check := onlyMancodePrivacyBindingCheck(t, manifest)
+		if check.Status != "incomplete" || check.ExclusionsPresent || !containsMancodePrivacyIssue(check.Issues, "exclusions_missing") {
+			t.Fatalf("missing exclusions partner was not surfaced: %#v", check)
+		}
+		assertMancodePrivacyPolicyBindingProjection(t, records, "incomplete", false, "exclusions_missing")
+	})
+
+	t.Run("malformed exclusions", func(t *testing.T) {
+		exclusions := mancodePrivacyExclusionsFixture()
+		exclusions["unknown"] = "must be rejected"
+		manifest, records := readMancodePrivacyPairSnapshot(t, mancodePrivacyPolicyFixture(), exclusions, true, true)
+		check := onlyMancodePrivacyBindingCheck(t, manifest)
+		if check.Status != "incomplete" || !check.ExclusionsPresent || check.ExclusionsValid ||
+			!containsMancodePrivacyIssue(check.Issues, "exclusions_invalid") {
+			t.Fatalf("malformed exclusions partner was not surfaced: %#v", check)
+		}
+		assertMancodePrivacyPolicyBindingProjection(t, records, "incomplete", false, "exclusions_invalid")
+	})
+
+	t.Run("workspace mismatch", func(t *testing.T) {
+		policy := mancodePrivacyPolicyFixture()
+		exclusions := mancodePrivacyExclusionsFixture()
+		exclusions["workspaceId"] = mancodeDecisionTestID("6")
+		manifest, records := readMancodePrivacyPairSnapshot(t, policy, exclusions, true, true)
+		check := onlyMancodePrivacyBindingCheck(t, manifest)
+		if check.Status != "conflicting" || check.WorkspaceBindingVerified ||
+			!containsMancodePrivacyIssue(check.Issues, "workspace_mismatch") {
+			t.Fatalf("workspace mismatch was not surfaced: %#v", check)
+		}
+		assertMancodePrivacyPolicyBindingProjection(t, records, "conflicting", false, "digest_mismatch", "workspace_mismatch")
+	})
+}
+
+func TestMancodeFormatCoverageMarksLegacyPrivacySnapshotUnverified(t *testing.T) {
+	snapshot, _ := readMancodePrivacyPairSnapshot(t, mancodePrivacyPolicyFixture(), mancodePrivacyExclusionsFixture(), true, true)
+	legacy := snapshot
+	legacy.CrossFileChecks = nil
+	legacy.SourceFingerprint = sourceFingerprint(legacy.Files, nil)
+	legacy.ID = string(legacy.Product) + "-" + legacy.SourceFingerprint[:20]
+	coverage, err := BuildFormatCoverage(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := onlyCoverageMancodePrivacyBindingCheck(t, coverage.CrossFileChecks)
+	if check.Status != "incomplete" || len(check.Issues) != 1 || check.Issues[0] != "legacy_unverified" {
+		t.Fatalf("legacy snapshot was treated as pair-verified: %#v", check)
+	}
+}
+
+func readMancodePrivacyPairSnapshot(t *testing.T, policy, exclusions map[string]any, includePolicy, includeExclusions bool) (Manifest, []Record) {
+	t.Helper()
+	root := t.TempDir()
+	if includePolicy {
+		writeMancodeJSONFixture(t, root, ".mancode/shared/context/privacy-policy.json", policy)
+	}
+	if includeExclusions {
+		writeMancodeJSONFixture(t, root, ".mancode/shared/context/privacy-exclusions.json", exclusions)
+	}
+	dataRoot := t.TempDir()
+	snapshot, err := CreateSnapshot(Mancode, root, dataRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dataRoot, "migrations", "snapshots", string(Mancode), snapshot.SourceFingerprint, "manifest.json")
+	records, err := ReadSnapshotRecords(manifestPath, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot, records
+}
+
+func onlyCoverageMancodePrivacyBindingCheck(t *testing.T, checks []migrationcoverage.CrossFileCheck) migrationcoverage.CrossFileCheck {
+	t.Helper()
+	if len(checks) != 1 {
+		t.Fatalf("got %d coverage privacy binding checks, want 1: %#v", len(checks), checks)
+	}
+	return checks[0]
+}
+
+func onlyMancodePrivacyBindingCheck(t *testing.T, manifest Manifest) migrationcoverage.CrossFileCheck {
+	t.Helper()
+	if len(manifest.CrossFileChecks) != 1 {
+		t.Fatalf("got %d privacy binding checks, want 1: %#v", len(manifest.CrossFileChecks), manifest.CrossFileChecks)
+	}
+	return manifest.CrossFileChecks[0]
+}
+
+func assertMancodePrivacyPolicyBindingProjection(t *testing.T, records []Record, status string, verified bool, issues ...string) {
+	t.Helper()
+	for _, record := range records {
+		if record.Type != "project_policy" {
+			continue
+		}
+		var projection map[string]any
+		if json.Unmarshal(record.Payload, &projection) != nil || projection["schema_version"] != mancodePrivacyPolicyImportSchemaV2 {
+			continue
+		}
+		actualIssues, ok := projection["exclusions_binding_issues"].([]any)
+		if !ok || projection["exclusions_binding_status"] != status || projection["exclusions_binding_verified"] != verified ||
+			projection["authority"] != "local_pending_review" || projection["human_review_required"] != true ||
+			projection["execution_authorized"] != false || len(actualIssues) != len(issues) {
+			t.Fatalf("privacy policy projection has the wrong inert binding status: %s", record.Payload)
+		}
+		for _, issue := range issues {
+			if !containsMancodePrivacyIssueValues(actualIssues, issue) {
+				t.Fatalf("privacy policy projection missing issue %q: %s", issue, record.Payload)
+			}
+		}
+		return
+	}
+	t.Fatalf("versioned privacy policy binding projection not found: %#v", records)
+}
+
+func containsMancodePrivacyIssue(issues []string, wanted string) bool {
+	for _, issue := range issues {
+		if issue == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func containsMancodePrivacyIssueValues(issues []any, wanted string) bool {
+	for _, issue := range issues {
+		if issue == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func TestMancodePrivacyExclusionsBecomePathFreeReconciliationSummary(t *testing.T) {

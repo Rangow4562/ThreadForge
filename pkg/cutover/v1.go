@@ -413,6 +413,11 @@ func validateMigrationFormatCoverage(assessment *Assessment, verifier *artifactV
 	if coverage.RejectedRecords != 0 {
 		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" contains rejected source records")
 	}
+	for _, check := range coverage.CrossFileChecks {
+		if check.Status != "verified" {
+			assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" has an incomplete or conflicting cross-file privacy binding")
+		}
+	}
 }
 
 func verifyEvidence(assessment *Assessment, verifier *artifactVerifier, label string, evidence []Evidence) {

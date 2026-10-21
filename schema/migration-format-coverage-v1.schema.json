@@ -25,6 +25,7 @@
     "unsupported_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
     "unconverted_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
     "unclassified_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "cross_file_checks": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/cross_file_check" } },
     "formats": { "type": "array", "items": { "$ref": "#/$defs/format" }, "minItems": 1, "maxItems": 64 }
   },
   "$defs": {
@@ -51,6 +52,81 @@
         "unconverted_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
         "file_set_sha256": { "$ref": "#/$defs/sha256" }
       }
+    },
+    "cross_file_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "relationship", "pair_id_sha256", "policy_file_count", "policy_present", "policy_valid",
+        "exclusions_file_count", "exclusions_present", "exclusions_valid", "policy_revision", "expected_exclusions_revision",
+        "actual_exclusions_revision", "workspace_binding_verified", "revision_binding_verified",
+        "digest_binding_verified", "status", "issues", "authority", "human_review_required", "execution_authorized"
+      ],
+      "properties": {
+        "schema_version": { "const": "threadforge.mancode-privacy-binding-check.v1" },
+        "relationship": { "const": "mancode_privacy_policy_exclusions" },
+        "pair_id_sha256": { "$ref": "#/$defs/sha256" },
+        "policy_file_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "policy_present": { "type": "boolean" },
+        "policy_valid": { "type": "boolean" },
+        "policy_source_set_sha256": { "$ref": "#/$defs/sha256" },
+        "exclusions_file_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "exclusions_present": { "type": "boolean" },
+        "exclusions_valid": { "type": "boolean" },
+        "exclusions_source_set_sha256": { "$ref": "#/$defs/sha256" },
+        "policy_revision": { "type": "integer", "minimum": 0 },
+        "expected_exclusions_revision": { "type": "integer", "minimum": 0 },
+        "actual_exclusions_revision": { "type": "integer", "minimum": 0 },
+        "workspace_binding_verified": { "type": "boolean" },
+        "revision_binding_verified": { "type": "boolean" },
+        "digest_binding_verified": { "type": "boolean" },
+        "status": { "enum": ["verified", "incomplete", "conflicting"] },
+        "issues": {
+          "type": "array", "maxItems": 9, "uniqueItems": true,
+          "items": { "enum": [
+            "policy_missing", "exclusions_missing", "policy_invalid", "exclusions_invalid",
+            "policy_ambiguous", "exclusions_ambiguous", "workspace_mismatch", "revision_mismatch", "digest_mismatch",
+            "legacy_unverified"
+          ] }
+        },
+        "authority": { "const": "local_pending_review" },
+        "human_review_required": { "const": true },
+        "execution_authorized": { "const": false }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "policy_file_count": { "minimum": 1 } } },
+          "then": { "properties": { "policy_present": { "const": true } } },
+          "else": { "properties": { "policy_present": { "const": false } } }
+        },
+        {
+          "if": { "properties": { "exclusions_file_count": { "minimum": 1 } } },
+          "then": { "properties": { "exclusions_present": { "const": true } } },
+          "else": { "properties": { "exclusions_present": { "const": false } } }
+        },
+        {
+          "if": { "properties": { "policy_present": { "const": true } } },
+          "then": { "required": ["policy_source_set_sha256"] },
+          "else": { "not": { "required": ["policy_source_set_sha256"] } }
+        },
+        {
+          "if": { "properties": { "exclusions_present": { "const": true } } },
+          "then": { "required": ["exclusions_source_set_sha256"] },
+          "else": { "not": { "required": ["exclusions_source_set_sha256"] } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "verified" } } },
+          "then": {
+            "properties": {
+              "policy_present": { "const": true }, "policy_valid": { "const": true },
+              "exclusions_present": { "const": true }, "exclusions_valid": { "const": true },
+              "workspace_binding_verified": { "const": true }, "revision_binding_verified": { "const": true },
+              "digest_binding_verified": { "const": true }, "issues": { "maxItems": 0 }
+            }
+          },
+          "else": { "properties": { "issues": { "minItems": 1 } } }
+        }
+      ]
     }
   }
 }

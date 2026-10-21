@@ -47,6 +47,96 @@ func TestValidateRetainsUnclassifiedFilesAsBlockingEvidence(t *testing.T) {
 	}
 }
 
+func TestValidateCrossFilePrivacyBindingKeepsMismatchesVisible(t *testing.T) {
+	report := validCoverageFixture("mancode")
+	setMancodePrivacyFileCounts(&report, 1, 1)
+	check := CrossFileCheck{
+		SchemaVersion: MancodePrivacyBindingSchemaVersion, Relationship: "mancode_privacy_policy_exclusions",
+		PairIDSHA256: strings.Repeat("d", 64), PolicyFileCount: 1, PolicyPresent: true, PolicyValid: true,
+		PolicySourceSetSHA256: strings.Repeat("e", 64), ExclusionsPresent: true, ExclusionsValid: true,
+		ExclusionsFileCount:       1,
+		ExclusionsSourceSetSHA256: strings.Repeat("f", 64), PolicyRevision: 3,
+		ExpectedExclusionsRevision: 2, ActualExclusionsRevision: 2,
+		WorkspaceBindingVerified: true, RevisionBindingVerified: true, DigestBindingVerified: true,
+		Status: "verified", Issues: []string{}, Authority: "local_pending_review",
+		HumanReviewRequired: true, ExecutionAuthorized: false,
+	}
+	report.CrossFileChecks = []CrossFileCheck{check}
+	if err := Validate(report); err != nil {
+		t.Fatalf("verified privacy binding rejected: %v", err)
+	}
+
+	conflict := report
+	conflict.CrossFileChecks = append([]CrossFileCheck(nil), report.CrossFileChecks...)
+	conflict.CrossFileChecks[0].RevisionBindingVerified = false
+	conflict.CrossFileChecks[0].ActualExclusionsRevision = 4
+	conflict.CrossFileChecks[0].Status = "conflicting"
+	conflict.CrossFileChecks[0].Issues = []string{"revision_mismatch"}
+	if err := Validate(conflict); err != nil {
+		t.Fatalf("explicitly conflicting privacy binding should remain reportable: %v", err)
+	}
+
+	contradictory := conflict
+	contradictory.CrossFileChecks = append([]CrossFileCheck(nil), conflict.CrossFileChecks...)
+	contradictory.CrossFileChecks[0].RevisionBindingVerified = true
+	if err := Validate(contradictory); err == nil {
+		t.Fatal("privacy binding with contradictory verified flag and mismatch issue was accepted")
+	}
+
+	wrongProduct := validCoverageFixture("beacon")
+	wrongProduct.CrossFileChecks = []CrossFileCheck{check}
+	if err := Validate(wrongProduct); err == nil {
+		t.Fatal("Mancode privacy binding was accepted for another migration product")
+	}
+}
+
+func TestValidateRequiresMancodePrivacyChecksToCoverClassifiedFiles(t *testing.T) {
+	report := validCoverageFixture("mancode")
+	setMancodePrivacyFileCounts(&report, 1, 0)
+	if err := Validate(report); err == nil {
+		t.Fatal("Mancode privacy-policy file without a cross-file check was accepted")
+	}
+
+	check := CrossFileCheck{
+		SchemaVersion: MancodePrivacyBindingSchemaVersion, Relationship: "mancode_privacy_policy_exclusions",
+		PairIDSHA256: strings.Repeat("d", 64), PolicyFileCount: 1, PolicyPresent: true,
+		PolicySourceSetSHA256: strings.Repeat("e", 64), ExclusionsFileCount: 0,
+		Authority: "local_pending_review", HumanReviewRequired: true,
+		Status: "incomplete", Issues: []string{"exclusions_missing"},
+	}
+	report.CrossFileChecks = []CrossFileCheck{check}
+	if err := Validate(report); err != nil {
+		t.Fatalf("explicitly incomplete privacy-pair check should cover its source files: %v", err)
+	}
+
+	missingCount := report
+	missingCount.CrossFileChecks = append([]CrossFileCheck(nil), report.CrossFileChecks...)
+	missingCount.CrossFileChecks[0].PolicyFileCount = 0
+	if err := Validate(missingCount); err == nil {
+		t.Fatal("cross-file check omitting its policy source count was accepted")
+	}
+}
+
+func setMancodePrivacyFileCounts(report *Report, policy, exclusions int) {
+	for index := range report.Formats {
+		row := &report.Formats[index]
+		row.Files, row.SourceBytes, row.RecordsFound, row.RecordsImported = 0, 0, 0, 0
+		row.CredentialExcludedRecords, row.RejectedRecords = 0, 0
+		row.SnapshotFiles, row.JoinedFiles, row.UnsupportedFiles, row.UnconvertedFiles = 0, 0, 0, 0
+		switch row.ID {
+		case "mancode.privacy-policy":
+			row.Files = policy
+		case "mancode.privacy-exclusions":
+			row.Files = exclusions
+		}
+	}
+	report.FilesScanned = policy + exclusions
+	report.SourceBytes, report.RecordsFound, report.RecordsImported = 0, 0, 0
+	report.CredentialExcludedRecords, report.RejectedRecords = 0, 0
+	report.SnapshotFiles, report.JoinedFiles, report.UnsupportedFiles = 0, 0, 0
+	report.UnconvertedFiles, report.UnclassifiedFiles = 0, 0
+}
+
 func validCoverageFixture(product string) Report {
 	report := Report{
 		SchemaVersion: SchemaVersion, Product: product, SourceFingerprint: strings.Repeat("a", 64),

@@ -102,6 +102,94 @@ func TestAssessRequiresAndValidatesMigrationFormatCoverage(t *testing.T) {
 	}
 }
 
+func TestAssessBlocksIncompleteMancodePrivacyBindingCoverage(t *testing.T) {
+	root := t.TempDir()
+	report, _, trust := completeFixture(t, root)
+	var mancodeMigration *MigrationEvidence
+	for index := range report.Migrations {
+		if report.Migrations[index].Product == "mancode" {
+			mancodeMigration = &report.Migrations[index]
+			break
+		}
+	}
+	if mancodeMigration == nil {
+		t.Fatal("Mancode migration fixture is missing")
+	}
+	coveragePath := filepath.Join(root, mancodeMigration.FormatCoverage.Path)
+	content, err := os.ReadFile(coveragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var coverage migrationcoverage.Report
+	if err := json.Unmarshal(content, &coverage); err != nil {
+		t.Fatal(err)
+	}
+	verified := migrationcoverage.CrossFileCheck{
+		SchemaVersion: migrationcoverage.MancodePrivacyBindingSchemaVersion,
+		Relationship:  "mancode_privacy_policy_exclusions", PairIDSHA256: strings.Repeat("1", 64),
+		PolicyFileCount: 1, PolicyPresent: true, PolicyValid: true, PolicySourceSetSHA256: strings.Repeat("2", 64),
+		ExclusionsFileCount: 1, ExclusionsPresent: true, ExclusionsValid: true, ExclusionsSourceSetSHA256: strings.Repeat("3", 64),
+		PolicyRevision: 3, ExpectedExclusionsRevision: 2, ActualExclusionsRevision: 2,
+		WorkspaceBindingVerified: true, RevisionBindingVerified: true, DigestBindingVerified: true,
+		Status: "verified", Issues: []string{}, Authority: "local_pending_review",
+		HumanReviewRequired: true, ExecutionAuthorized: false,
+	}
+	for index := range coverage.Formats {
+		switch coverage.Formats[index].ID {
+		case "mancode.privacy-policy":
+			coverage.Formats[index].Files = 1
+		case "mancode.privacy-exclusions":
+			coverage.Formats[index].Files = 1
+		}
+	}
+	coverage.FilesScanned += 2
+	coverage.CrossFileChecks = []migrationcoverage.CrossFileCheck{verified}
+	writeCoverage := func() {
+		t.Helper()
+		if err := migrationcoverage.Validate(coverage); err != nil {
+			t.Fatalf("invalid fixture coverage: %v", err)
+		}
+		updated, err := json.Marshal(coverage)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(coveragePath, updated, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(updated)
+		mancodeMigration.FormatCoverage.SHA256 = hex.EncodeToString(digest[:])
+	}
+	writeCoverage()
+	assessment, err := AssessWithTrust(report, root, trust)
+	if err != nil || !assessment.Ready {
+		t.Fatalf("verified Mancode privacy binding blocked a complete report: %#v, %v", assessment, err)
+	}
+
+	incomplete := verified
+	incomplete.ExclusionsFileCount = 0
+	incomplete.ExclusionsPresent = false
+	incomplete.ExclusionsValid = false
+	incomplete.ExclusionsSourceSetSHA256 = ""
+	incomplete.ActualExclusionsRevision = 0
+	incomplete.WorkspaceBindingVerified = false
+	incomplete.RevisionBindingVerified = false
+	incomplete.DigestBindingVerified = false
+	incomplete.Status = "incomplete"
+	incomplete.Issues = []string{"exclusions_missing"}
+	for index := range coverage.Formats {
+		if coverage.Formats[index].ID == "mancode.privacy-exclusions" {
+			coverage.Formats[index].Files = 0
+		}
+	}
+	coverage.FilesScanned--
+	coverage.CrossFileChecks = []migrationcoverage.CrossFileCheck{incomplete}
+	writeCoverage()
+	assessment, err = AssessWithTrust(report, root, trust)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "cross-file privacy binding") {
+		t.Fatalf("incomplete Mancode privacy binding was not blocked: %#v, %v", assessment, err)
+	}
+}
+
 func TestAssessBlocksUnclassifiedMigrationSourceFiles(t *testing.T) {
 	root := t.TempDir()
 	report, _, trust := completeFixture(t, root)

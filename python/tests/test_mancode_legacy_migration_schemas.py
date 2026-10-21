@@ -144,6 +144,27 @@ SCHEMA_DIRECTORY = Path(__file__).resolve().parents[2] / "schema"
             },
         ),
         (
+            "mancode-privacy-policy-v2.schema.json",
+            {
+                "schema_version": "threadforge.mancode-privacy-policy.v2",
+                "policy_kind": "privacy",
+                "authority": "local_pending_review",
+                "human_review_required": True,
+                "execution_authorized": False,
+                "source_enabled": True,
+                "revision": 3,
+                "ruleset_version": "mancode-sensitive-text:1",
+                "enabled_rule_ids": ["email-address", "pem-private-key"],
+                "targets": ["shared_write", "context_output"],
+                "exclusions_revision": 2,
+                "exclusions_digest": "sha256:" + "a" * 64,
+                "exclusions_binding_verified": True,
+                "exclusions_binding_status": "verified",
+                "exclusions_binding_issues": [],
+                "updated_at": "2026-10-08T12:00:00Z",
+            },
+        ),
+        (
             "mancode-privacy-exclusions-summary-v1.schema.json",
             {
                 "schema_version": "threadforge.mancode-privacy-exclusions-summary.v1",

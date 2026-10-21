@@ -72,6 +72,8 @@ func TestMigrationFormatIDUsesDocumentedSourceSelectors(t *testing.T) {
 		{Beacon, "C:/home", ".beacon/runtime.jsonl", "beacon.runtime-events"},
 		{Beacon, "C:/home", ".claude/settings.json", "beacon.endpoint-claude"},
 		{Mancode, "C:/project", ".mancode/shared/memory/decisions/decision.json", "mancode.decision-record"},
+		{Mancode, "C:/project", ".mancode/shared/context/privacy-policy.json", "mancode.privacy-policy"},
+		{Mancode, "C:/project", ".mancode/shared/context/privacy-exclusions.json", "mancode.privacy-exclusions"},
 		{Mancode, "C:/project", "项目进度.html", "mancode.progress-projection"},
 		{AnyJev, "C:/AnyJev", "bench/results_exit/model.depth.json", "anyjev.exit-depth"},
 		{RRSI, "C:/RRSI", "runs/coding/jobs/job-1/t1/result.json", "rrsi.coding-trial-result"},
@@ -126,7 +128,7 @@ func coverageTestManifest(product Product, files []FileEntry) Manifest {
 			manifest.Summary.FilesJoined++
 		}
 	}
-	manifest.SourceFingerprint = sourceFingerprint(manifest.Files)
+	manifest.SourceFingerprint = sourceFingerprint(manifest.Files, manifest.CrossFileChecks)
 	manifest.ID = string(product) + "-" + manifest.SourceFingerprint[:20]
 	return manifest
 }

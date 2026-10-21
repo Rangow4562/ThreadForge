@@ -6,7 +6,7 @@ import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
 import { resolveCursorGlobalDatabase, scanCursorComposers, type CursorComposerSnapshot } from './cursor-composer.ts';
-import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { areSameRealPathsWithoutLinks, isSameRealPathWithoutLinks, isWithinRealPaths } from './path-safety.ts';
 
 const stateVersion = 1;
 const stateFileName = 'cursor-transcripts.v1.json';
@@ -119,11 +119,11 @@ export async function syncCursorHistory(options: CursorHistoryOptions = {}): Pro
   validateOptions(options);
   const projectsDir = await resolveProjectsDir(options.projectsDir);
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(projectsDir, statePath)) throw new Error('Cursor transcript cursor must be stored outside Cursor projects');
+  if (await isWithinRealPaths(projectsDir, statePath) !== false) throw new Error('Cursor transcript cursor must be stored outside Cursor projects');
   const databasePath = resolveCursorGlobalDatabase(options.globalDbPath);
-  const statePathKey = process.platform === 'win32' ? path.resolve(statePath).toLowerCase() : path.resolve(statePath);
-  const databasePathKey = process.platform === 'win32' ? path.resolve(databasePath).toLowerCase() : path.resolve(databasePath);
-  if (statePathKey === databasePathKey) throw new Error('Cursor history cursor cannot overwrite the global Composer database');
+  if (await areSameRealPathsWithoutLinks(statePath, databasePath) !== false) {
+    throw new Error('Cursor history cursor cannot overwrite the global Composer database');
+  }
   const listed = await listTranscriptFiles(projectsDir, options.maxFiles ?? 1_000);
   const composerScan = await scanCursorComposers({ globalDbPath: options.globalDbPath, maxComposers: options.maxComposers });
   const result = emptyResult(options.includeContent ?? false);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1823,6 +1823,7 @@ test('VS Code OTLP CLI prints local settings guidance and validates JSONC-backed
 
 test('project MCP bootstrap plans without writes, installs eleven host IDs across shared MCP/Codex configs, and uninstalls only owned entries', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-bootstrap-mcp-'));
+  const canonicalRoot = await realpath(root);
   const hostList = 'claude-code,command-code,github-copilot,cursor,antigravity,gemini-cli,qwen-code,codex-cli,chatgpt-desktop-codex,codex-ide,opencode';
   const args = ['--project-root', root, '--hosts', hostList, '--command', 'threadforge.exe',
     '--arg', 'mcp', '--arg', 'serve', '--arg', '--project-root', '--arg', root];
@@ -1861,17 +1862,17 @@ test('project MCP bootstrap plans without writes, installs eleven host IDs acros
     const gemini = JSON.parse(await readFile(path.join(root, '.gemini', 'settings.json'), 'utf8'));
     assert.equal(gemini.mcpServers.threadforge.trust, false);
     const cursor = JSON.parse(await readFile(path.join(root, '.cursor', 'mcp.json'), 'utf8'));
-    assert.deepEqual(cursor.mcpServers.threadforge.args, ['mcp', 'serve', '--project-root', root, '--threadforge-managed-mcp=v1']);
+    assert.deepEqual(cursor.mcpServers.threadforge.args, ['mcp', 'serve', '--project-root', canonicalRoot, '--threadforge-managed-mcp=v1']);
     const qwen = JSON.parse(await readFile(qwenSettingsPath, 'utf8'));
     assert.deepEqual(qwen.hooks, qwenSettings.hooks);
     assert.deepEqual(qwen.mcpServers.analytics, qwenSettings.mcpServers.analytics);
     assert.deepEqual(qwen.mcpServers.threadforge, {
-      command: 'threadforge.exe', args: ['mcp', 'serve', '--project-root', root, '--threadforge-managed-mcp=v1'],
+      command: 'threadforge.exe', args: ['mcp', 'serve', '--project-root', canonicalRoot, '--threadforge-managed-mcp=v1'],
     });
     assert.equal(Object.hasOwn(qwen.mcpServers.threadforge, 'trust'), false);
     const claudeAndCommandCode = JSON.parse(await readFile(path.join(root, '.mcp.json'), 'utf8'));
     assert.deepEqual(claudeAndCommandCode.mcpServers.threadforge.args,
-      ['mcp', 'serve', '--project-root', root, '--threadforge-managed-mcp=v1']);
+      ['mcp', 'serve', '--project-root', canonicalRoot, '--threadforge-managed-mcp=v1']);
 
     const repeated = await invoke(['bootstrap', 'mcp', 'install', ...args]);
     assert.equal(repeated.code, 0, repeated.stderr);

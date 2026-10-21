@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -107,7 +107,7 @@ test('preview maps visible history to digests and never persists raw identifiers
     assert.equal(commands[1]?.args[2], '--sanitize');
     assert.equal(commands[0]?.args.at(-1), '--pure');
     assert.equal(commands[1]?.args.at(-1), '--pure');
-    assert.equal(commands[0]?.cwd, projectRoot);
+    assert.equal(commands[0]?.cwd, await realpath(projectRoot));
     const encoded = JSON.stringify(result.events);
     for (const value of ['ses_private-id', 'msg_user', 'part_user', 'private-call-id', 'private prompt body', 'private assistant answer', 'private chain of thought', 'API_TOKEN=private', 'private/repo', 'private title']) {
       assert.equal(encoded.includes(value), false);

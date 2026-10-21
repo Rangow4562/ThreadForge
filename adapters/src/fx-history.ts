@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
-import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { isSameRealPathWithoutLinks, isWithinRealPaths } from './path-safety.ts';
 
 const cursorVersion = 1;
 const cursorName = 'fx-session-cursor.v1.json';
@@ -131,7 +131,7 @@ export async function getFxHistoryStatus(
   const maximum = boundedInteger(options.maxSessions ?? defaultMaxSessions, 1, maxSessions, '--max-sessions');
   const sessionsDir = await resolveSessionsDir(options.sessionsDir);
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(sessionsDir, statePath)) throw new Error('fx history cursor must be stored outside fx sessions');
+  if (await isWithinRealPaths(sessionsDir, statePath) !== false) throw new Error('fx history cursor must be stored outside fx sessions');
   const listed = await listSessions(sessionsDir, maximum);
   const state = await readState(statePath);
   let checkpointed = 0;
@@ -159,7 +159,7 @@ export async function syncFxHistory(options: FxHistoryOptions = {}): Promise<FxH
   validateOptions(options);
   const sessionsDir = await resolveSessionsDir(options.sessionsDir);
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(sessionsDir, statePath)) throw new Error('fx history cursor must be stored outside fx sessions');
+  if (await isWithinRealPaths(sessionsDir, statePath) !== false) throw new Error('fx history cursor must be stored outside fx sessions');
   const listed = await listSessions(sessionsDir, options.maxSessions ?? defaultMaxSessions);
   const result = emptyResult(options.includeContent ?? false);
   result.sessions = listed.files.length;

@@ -3,7 +3,7 @@ import { constants, type Stats } from 'node:fs';
 import { lstat, mkdir, open, readdir, realpath, rename, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { isSameRealPathWithoutLinks, isWithinRealPaths } from './path-safety.ts';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
 
 const stateVersion = 2;
@@ -110,7 +110,7 @@ export async function getGrokHistoryStatus(
   const maximum = boundedInteger(options.maxSessions ?? defaultSessions, 1, maxSessions, '--max-sessions');
   const sessionsDir = await resolveSessionsDir(options.sessionsDir);
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(sessionsDir, statePath)) throw new Error('Grok history cursor must be stored outside Grok sessions');
+  if (await isWithinRealPaths(sessionsDir, statePath) !== false) throw new Error('Grok history cursor must be stored outside Grok sessions');
   const listed = await listSessions(sessionsDir, maximum);
   const state = await readState(statePath);
   const checkpointed = listed.sessions.filter((session) => {
@@ -132,7 +132,7 @@ export async function syncGrokHistory(options: GrokHistoryOptions = {}): Promise
   validateOptions(options);
   const sessionsDir = await resolveSessionsDir(options.sessionsDir);
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(sessionsDir, statePath)) throw new Error('Grok history cursor must be stored outside Grok sessions');
+  if (await isWithinRealPaths(sessionsDir, statePath) !== false) throw new Error('Grok history cursor must be stored outside Grok sessions');
   const listed = await listSessions(sessionsDir, options.maxSessions ?? defaultSessions);
   const result = emptyResult(options.includeContent ?? false);
   if (options.preview) result.events = [];

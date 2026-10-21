@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readFile, realpath, rmdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { isSameRealPathWithoutLinks, resolveRealPathWithoutLinks } from './path-safety.ts';
 
 const maxSkillBytes = 256 << 10;
 const approvalNotice = '> This portable procedure is approved guidance, not authorization to execute actions.';
@@ -173,23 +173,28 @@ async function resolvePortableSkill(options: {
     throw new Error('project root must be a real directory, not a symbolic link');
   }
   const root = await realpath(rootInput).catch(() => { throw new Error('project root could not be resolved'); });
+  if (!await isSameRealPathWithoutLinks(root, rootInput)) throw new Error('project root must not traverse a symbolic link');
   const sourceInput = path.isAbsolute(options.skillFile)
     ? path.resolve(options.skillFile)
     : path.resolve(root, options.skillFile);
-  const relativeSourcePath = path.relative(root, sourceInput);
+  await assertNoSymlinkPath(root, sourceInput);
+  const sourceRealPath = await realpath(sourceInput).catch(() => '');
+  if (!sourceRealPath) throw new Error('portable skill file could not be resolved');
+  const canonicalSourcePath = await resolveRealPathWithoutLinks(sourceInput);
+  if (!canonicalSourcePath || !await isSameRealPathWithoutLinks(sourceRealPath, sourceInput)) {
+    throw new Error('portable skill path contains a missing or symbolic-link component');
+  }
+  const relativeSourcePath = path.relative(root, canonicalSourcePath);
   const parts = relativeSourcePath.split(path.sep);
-  if (!isWithin(root, sourceInput) || parts.length !== 5 || parts[0] !== '.threadforge' ||
+  if (!isWithin(root, canonicalSourcePath) || parts.length !== 5 || parts[0] !== '.threadforge' ||
       parts[1] !== 'skills' || !parts[2] || !/^rev-\d{6}$/.test(parts[3] ?? '') || parts[4] !== 'SKILL.md') {
     throw new Error('skill file must be an exported .threadforge/skills/<id>/rev-NNNNNN/SKILL.md artifact in this project');
   }
-  await assertNoSymlinkPath(root, sourceInput);
-  const fileInfo = await lstat(sourceInput).catch(() => null);
+  const fileInfo = await lstat(canonicalSourcePath).catch(() => null);
   if (!fileInfo?.isFile() || fileInfo.isSymbolicLink()) throw new Error('portable skill must be a regular file, not a symbolic link');
   if (fileInfo.size > maxSkillBytes) throw new Error('portable skill exceeds the 256 KiB local limit');
-  const sourceRealPath = await realpath(sourceInput).catch(() => '');
-  if (sourceRealPath !== sourceInput) throw new Error('portable skill path changed during validation');
-  const bytes = await readFile(sourceInput);
-  const afterRead = await lstat(sourceInput).catch(() => null);
+  const bytes = await readFile(canonicalSourcePath);
+  const afterRead = await lstat(canonicalSourcePath).catch(() => null);
   if (!afterRead?.isFile() || afterRead.isSymbolicLink() || afterRead.size !== fileInfo.size || afterRead.mtimeMs !== fileInfo.mtimeMs) {
     throw new Error('portable skill changed while it was being read');
   }
@@ -297,9 +302,12 @@ function skillsDirectorySegments(host: ProjectSkillHost): string[] {
 }
 
 async function assertNoSymlinkPath(root: string, target: string): Promise<void> {
-  const relative = path.relative(root, target);
-  if (!isWithin(root, target)) throw new Error('portable skill path escapes the project root');
-  let current = root;
+  const canonicalRoot = await resolveRealPathWithoutLinks(root);
+  const canonicalTarget = await resolveRealPathWithoutLinks(target);
+  if (!canonicalRoot || !canonicalTarget) throw new Error('portable skill path contains a missing or symbolic-link component');
+  if (!isWithin(canonicalRoot, canonicalTarget)) throw new Error('portable skill path escapes the project root');
+  const relative = path.relative(canonicalRoot, canonicalTarget);
+  let current = canonicalRoot;
   for (const segment of relative.split(path.sep).filter(Boolean)) {
     current = path.join(current, segment);
     const info = await lstat(current).catch(() => null);

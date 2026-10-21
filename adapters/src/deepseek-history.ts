@@ -3,7 +3,7 @@ import { constants, type Stats } from 'node:fs';
 import { lstat, mkdir, open, readdir, realpath, rename, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { isSameRealPathWithoutLinks, isWithinRealPaths } from './path-safety.ts';
 import { constants as zstdConstants, createZstdDecompress } from 'node:zlib';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
 
@@ -88,7 +88,7 @@ export async function getDeepSeekHistoryStatus(
   validateOptions(options);
   const root = await resolveSessionsDir(options);
   const statePath = resolveStatePath(options.statePath);
-  assertCursorOutsideSource(options, root, statePath);
+  await assertCursorOutsideSource(options, root, statePath);
   const listed = await listSessionFiles(root, options.maxSessions ?? defaultMaxSessions);
   const state = await readState(statePath);
   const errors: DeepSeekHistoryStatus['errors'] = [];
@@ -139,7 +139,7 @@ export async function syncDeepSeekHistory(options: DeepSeekHistoryOptions = {}):
   validateOptions(options);
   const root = await resolveSessionsDir(options);
   const statePath = resolveStatePath(options.statePath);
-  assertCursorOutsideSource(options, root, statePath);
+  await assertCursorOutsideSource(options, root, statePath);
   const listed = await listSessionFiles(root, options.maxSessions ?? defaultMaxSessions);
   const result = emptyResult(options.includeContent ?? false);
   if (options.preview) result.events = [];
@@ -463,11 +463,11 @@ function resolveStatePath(value?: string): string {
   return path.resolve(value ?? path.join(os.homedir(), '.threadforge', 'state', stateFileName));
 }
 
-function assertCursorOutsideSource(options: Pick<DeepSeekHistoryOptions, 'dshHome' | 'sessionsDir'>, sessionsDir: string, statePath: string): void {
-  if (isWithin(sessionsDir, statePath)) throw new Error('DeepSeek history cursor must be stored outside the native sessions directory');
+async function assertCursorOutsideSource(options: Pick<DeepSeekHistoryOptions, 'dshHome' | 'sessionsDir'>, sessionsDir: string, statePath: string): Promise<void> {
+  if (await isWithinRealPaths(sessionsDir, statePath) !== false) throw new Error('DeepSeek history cursor must be stored outside the native sessions directory');
   if (options.sessionsDir === undefined) {
     const dshHome = path.resolve(options.dshHome ?? process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh'));
-    if (isWithin(dshHome, statePath)) throw new Error('DeepSeek history cursor must be stored outside the DSH_HOME source tree');
+    if (await isWithinRealPaths(dshHome, statePath) !== false) throw new Error('DeepSeek history cursor must be stored outside the DSH_HOME source tree');
   }
 }
 

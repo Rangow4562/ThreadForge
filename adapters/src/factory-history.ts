@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
-import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { isSameRealPathWithoutLinks, isWithinRealPaths } from './path-safety.ts';
 
 const stateVersion = 1;
 const stateFileName = 'factory-sessions.v1.json';
@@ -82,7 +82,7 @@ export async function getFactoryHistoryStatus(
   const maximum = boundedInteger(options.maxSessions ?? 1_000, 1, maxSessions, '--max-sessions');
   const sessionsDir = await resolveSessionsDir(options.sessionsDir);
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(sessionsDir, statePath)) throw new Error('Factory history cursor must be stored outside Factory sessions');
+  if (await isWithinRealPaths(sessionsDir, statePath) !== false) throw new Error('Factory history cursor must be stored outside Factory sessions');
   const listed = await listSessions(sessionsDir, maximum);
   const state = await readState(statePath);
   const checkpointed = listed.files.filter((file) => {
@@ -102,7 +102,7 @@ export async function syncFactoryHistory(options: FactoryHistoryOptions = {}): P
   validateOptions(options);
   const sessionsDir = await resolveSessionsDir(options.sessionsDir);
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(sessionsDir, statePath)) throw new Error('Factory history cursor must be stored outside Factory sessions');
+  if (await isWithinRealPaths(sessionsDir, statePath) !== false) throw new Error('Factory history cursor must be stored outside Factory sessions');
   const listed = await listSessions(sessionsDir, options.maxSessions ?? 1_000);
   const result = emptyResult(options.includeContent ?? false);
   result.sessions = listed.files.length;

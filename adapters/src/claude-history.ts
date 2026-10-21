@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
-import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { isSameRealPathWithoutLinks, isWithinRealPaths } from './path-safety.ts';
 
 const stateVersion = 1;
 const stateFileName = 'claude-sessions.v1.json';
@@ -100,7 +100,7 @@ export async function syncClaudeHistory(options: ClaudeHistoryOptions = {}): Pro
   const projectsDir = await resolveProjectsDir(options.projectsDir);
   const result = emptyResult(options.includeContent ?? false);
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(projectsDir, statePath)) throw new Error('Claude history cursor must be stored outside Claude projects');
+  if (await isWithinRealPaths(projectsDir, statePath) !== false) throw new Error('Claude history cursor must be stored outside Claude projects');
   const listed = await listSessionFiles(projectsDir, options.maxFiles ?? 1_000);
   result.sessions = listed.files.length;
   result.symlinks_skipped = listed.symlinksSkipped;

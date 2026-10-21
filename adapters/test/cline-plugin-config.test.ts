@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -24,7 +24,7 @@ test('Cline plugin install is idempotent, scope-isolated, and removes only its o
     const userOptions = { scope: 'user' as const, clineDir: userRoot };
     const first = await installClinePlugin(userOptions);
     assert.equal(first.result, 'installed');
-    assert.equal(first.plugin_path, clinePluginPath('user', userRoot));
+    assert.equal(await realpath(first.plugin_path!), await realpath(clinePluginPath('user', userRoot)));
     const wrapper = await readFile(first.plugin_path!, 'utf8');
     assert.match(wrapper, /^\/\/ threadforge-managed-cline-plugin:v1 sha256=[a-f0-9]{64}\n/);
     assert.match(wrapper, /import plugin from "file:/);
@@ -35,7 +35,7 @@ test('Cline plugin install is idempotent, scope-isolated, and removes only its o
     const projectOptions = { scope: 'project' as const, projectRoot };
     const project = await installClinePlugin(projectOptions);
     assert.equal(project.result, 'installed');
-    assert.equal(project.plugin_path, clinePluginPath('project', projectRoot));
+    assert.equal(await realpath(project.plugin_path!), await realpath(clinePluginPath('project', projectRoot)));
     assert.equal((await getClinePluginStatus(userOptions)).result, 'installed');
     assert.equal((await uninstallClinePlugin(projectOptions)).result, 'removed');
     assert.equal((await getClinePluginStatus(projectOptions)).result, 'absent');

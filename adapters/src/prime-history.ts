@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
-import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { isSameRealPathWithoutLinks, isWithinRealPaths } from './path-safety.ts';
 
 const cursorVersion = 1;
 const cursorName = 'prime-session-cursor.v1.json';
@@ -131,7 +131,9 @@ async function resolveOptions(options: Pick<PrimeHistoryOptions, 'sessionsDir' |
     throw new Error('Prime sessions and artifacts directories must not overlap');
   }
   const statePath = resolveStatePath(options.statePath);
-  for (const root of roots) if (isWithin(root.path, statePath)) throw new Error('Prime history cursor must be stored outside Prime data directories');
+  for (const root of roots) {
+    if (await isWithinRealPaths(root.path, statePath) !== false) throw new Error('Prime history cursor must be stored outside Prime data directories');
+  }
   return { roots, statePath };
 }
 

@@ -4,6 +4,7 @@ import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { isWithinRealPaths } from './path-safety.ts';
 import { TextDecoder } from 'node:util';
 import { emitEvents, type ThreadforgeEvent } from './emit.ts';
 
@@ -98,7 +99,7 @@ export async function syncOpenCodeHistory(options: OpenCodeHistoryOptions): Prom
   validateOptions(options);
   const root = await resolveProjectRoot(options.projectRoot);
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(root, statePath)) throw new Error('OpenCode history cursor must be stored outside the selected project root');
+  if (await isWithinRealPaths(root, statePath) !== false) throw new Error('OpenCode history cursor must be stored outside the selected project root');
   const projectHash = sha256(root);
   const result = emptyResult(projectHash, options.includeContent ?? false);
   const runner = options.commandRunner ?? runCommand;

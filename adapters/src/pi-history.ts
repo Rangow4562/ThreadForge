@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
-import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { isSameRealPathWithoutLinks, isWithinRealPaths } from './path-safety.ts';
 
 const cursorVersion = 1;
 const cursorName = 'pi-session-cursor.v1.json';
@@ -107,7 +107,7 @@ export async function getPiHistoryStatus(
   const maximum = boundedInteger(options.maxFiles ?? defaultMaxFiles, 1, maxFiles, '--max-files');
   const sessionsDir = await resolveSessionsDir(options.sessionsDir);
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(sessionsDir, statePath)) throw new Error('Pi history cursor must be stored outside Pi sessions');
+  if (await isWithinRealPaths(sessionsDir, statePath) !== false) throw new Error('Pi history cursor must be stored outside Pi sessions');
   const listed = await listFiles(sessionsDir, maximum);
   const state = await readState(statePath);
   const checkpointed = listed.files.filter((file) => {
@@ -127,7 +127,7 @@ export async function syncPiHistory(options: PiHistoryOptions = {}): Promise<PiH
   validateOptions(options);
   const sessionsDir = await resolveSessionsDir(options.sessionsDir);
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(sessionsDir, statePath)) throw new Error('Pi history cursor must be stored outside Pi sessions');
+  if (await isWithinRealPaths(sessionsDir, statePath) !== false) throw new Error('Pi history cursor must be stored outside Pi sessions');
   const listed = await listFiles(sessionsDir, options.maxFiles ?? defaultMaxFiles);
   const result = emptyResult(options.includeContent ?? false);
   result.files = listed.files.length;

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
-import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { isSameRealPathWithoutLinks, isWithinRealPaths } from './path-safety.ts';
 
 const stateVersion = 1;
 const stateFileName = 'copilot-sessions.v1.json';
@@ -99,7 +99,7 @@ export async function syncCopilotHistory(options: CopilotHistoryOptions = {}): P
   validateOptions(options);
   const copilotDir = await resolveCopilotDir(options.copilotDir);
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(copilotDir, statePath)) throw new Error('Copilot history cursor must be stored outside the Copilot directory');
+  if (await isWithinRealPaths(copilotDir, statePath) !== false) throw new Error('Copilot history cursor must be stored outside the Copilot directory');
   const listed = await listSessionFiles(copilotDir, options.maxSessions ?? 1_000);
   const result = emptyResult(options.includeContent ?? false);
   result.sessions = listed.files.length;

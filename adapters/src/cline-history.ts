@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readdir, realpath, rename, unlink, type FileHandle 
 import os from 'node:os';
 import path from 'node:path';
 import { assertLoopbackEndpoint, emitEvents, type ThreadforgeEvent } from './emit.ts';
-import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { isSameRealPathWithoutLinks, isWithinRealPaths } from './path-safety.ts';
 
 const stateSchema = 'threadforge.cline-history-cursor.v1';
 const defaultMaxSessions = 1_000;
@@ -95,7 +95,7 @@ export async function getClineHistoryStatus(
   validateOptions(options);
   const roots = await resolveRoots(options);
   const statePath = resolveStatePath(options.statePath);
-  assertStateOutsideSources(statePath, roots);
+  await assertStateOutsideSources(statePath, roots);
   const listed = await listSources(roots, options.maxSessions ?? defaultMaxSessions, false);
   const state = await readState(statePath);
   const errors = [...listed.errors];
@@ -145,7 +145,7 @@ export async function syncClineHistory(options: ClineHistoryOptions = {}): Promi
   validateOptions(options);
   const roots = await resolveRoots(options);
   const statePath = resolveStatePath(options.statePath);
-  assertStateOutsideSources(statePath, roots);
+  await assertStateOutsideSources(statePath, roots);
   const listed = await listSources(roots, options.maxSessions ?? defaultMaxSessions, options.includeContent ?? false);
   const result = emptyResult(options.includeContent ?? false);
   if (options.preview) result.events = [];
@@ -903,9 +903,11 @@ function resolveStatePath(value?: string): string {
   return path.resolve(candidate);
 }
 
-function assertStateOutsideSources(statePath: string, roots: { cline?: string; vscode?: string }): void {
-  for (const root of [roots.cline, roots.vscode]) if (root && isWithin(root, statePath)) {
-    throw new Error('Cline session cursor must be outside native Cline and VS Code source roots');
+async function assertStateOutsideSources(statePath: string, roots: { cline?: string; vscode?: string }): Promise<void> {
+  for (const root of [roots.cline, roots.vscode]) if (root) {
+    if (await isWithinRealPaths(root, statePath) !== false) {
+      throw new Error('Cline session cursor must be outside native Cline and VS Code source roots');
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-import { lstat, stat } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 /**
@@ -9,22 +9,62 @@ import path from 'node:path';
  * and rejecting every symlink/junction component instead of comparing paths.
  */
 export async function isSameRealPathWithoutLinks(canonical: string, requested: string): Promise<boolean> {
-  const absolute = path.resolve(requested);
-  if (process.platform !== 'win32') return canonical === absolute;
+  const [canonicalPath, requestedPath] = await Promise.all([
+    resolveRealPathWithoutLinks(canonical), resolveRealPathWithoutLinks(requested),
+  ]);
+  return canonicalPath !== undefined && requestedPath !== undefined && sameCanonicalPath(canonicalPath, requestedPath);
+}
 
+/** Resolves existing ancestors to filesystem spelling and appends any missing suffix safely. */
+export async function resolveRealPathWithoutLinks(input: string): Promise<string | undefined> {
+  const absolute = path.resolve(input);
   const parsed = path.parse(absolute);
-  let current = parsed.root;
-  try {
-    const rootInfo = await lstat(current);
-    if (rootInfo.isSymbolicLink()) return false;
-    for (const segment of absolute.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
-      current = path.join(current, segment);
-      const info = await lstat(current);
-      if (info.isSymbolicLink()) return false;
+  let lexical = parsed.root;
+  const rootInfo = await lstat(parsed.root).catch(() => undefined);
+  if (!rootInfo || rootInfo.isSymbolicLink()) return undefined;
+  let canonical = await realpath(parsed.root).catch(() => undefined);
+  if (!canonical) return undefined;
+
+  const segments = absolute.slice(parsed.root.length).split(path.sep).filter(Boolean);
+  for (let index = 0; index < segments.length; index++) {
+    lexical = path.join(lexical, segments[index]!);
+    let info;
+    try { info = await lstat(lexical); }
+    catch (error) {
+      if (isCode(error, 'ENOENT')) return path.join(canonical, ...segments.slice(index));
+      return undefined;
     }
-    const [canonicalInfo, requestedInfo] = await Promise.all([stat(canonical), stat(absolute)]);
-    return canonicalInfo.dev === requestedInfo.dev && canonicalInfo.ino === requestedInfo.ino && requestedInfo.ino !== 0;
-  } catch {
-    return false;
+    if (info.isSymbolicLink()) return undefined;
+    const resolved = await realpath(lexical).catch(() => undefined);
+    if (!resolved) return undefined;
+    canonical = resolved;
   }
+  return canonical;
+}
+
+/** Returns true/false for safe paths, or undefined if either path is unsafe or inaccessible. */
+export async function isWithinRealPaths(root: string, candidate: string): Promise<boolean | undefined> {
+  const [canonicalRoot, canonicalCandidate] = await Promise.all([
+    resolveRealPathWithoutLinks(root), resolveRealPathWithoutLinks(candidate),
+  ]);
+  if (canonicalRoot === undefined || canonicalCandidate === undefined) return undefined;
+  const relative = path.relative(canonicalRoot, canonicalCandidate);
+  return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+}
+
+/** Returns undefined when either path is inaccessible or traverses a link. */
+export async function areSameRealPathsWithoutLinks(left: string, right: string): Promise<boolean | undefined> {
+  const [canonicalLeft, canonicalRight] = await Promise.all([
+    resolveRealPathWithoutLinks(left), resolveRealPathWithoutLinks(right),
+  ]);
+  if (canonicalLeft === undefined || canonicalRight === undefined) return undefined;
+  return sameCanonicalPath(canonicalLeft, canonicalRight);
+}
+
+function sameCanonicalPath(left: string, right: string): boolean {
+  return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
+
+function isCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as NodeJS.ErrnoException).code === code;
 }

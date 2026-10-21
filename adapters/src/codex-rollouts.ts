@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { emitEvents, markPromptHandoff, type ThreadforgeEvent } from './emit.ts';
+import { isWithinRealPaths } from './path-safety.ts';
 
 const stateVersion = 1;
 const maxStateBytes = 8 << 20;
@@ -88,7 +89,7 @@ export async function getCodexRolloutStatus(options: Pick<CodexRolloutSyncOption
   if (!isWithin(codexHome, canonicalSessionsDir)) throw new Error('Codex sessions directory must remain inside CODEX_HOME');
   const listed = await listRolloutFiles(canonicalSessionsDir);
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(codexHome, await prospectiveRealPath(statePath))) {
+  if (await isWithinRealPaths(codexHome, statePath) !== false) {
     throw new Error('rollout cursor state must not be stored inside CODEX_HOME');
   }
   const state = await readState(statePath);
@@ -140,7 +141,7 @@ export async function syncCodexRollouts(options: CodexRolloutSyncOptions = {}): 
   result.oversized_files_skipped = listed.oversizedSkipped;
   result.content_mode = options.includeContent ? 'include-content' : 'metadata';
   const statePath = resolveStatePath(options.statePath);
-  if (isWithin(codexHome, await prospectiveRealPath(statePath))) {
+  if (await isWithinRealPaths(codexHome, statePath) !== false) {
     throw new Error('rollout cursor state must not be stored inside CODEX_HOME');
   }
   if (options.preview) {
@@ -315,26 +316,6 @@ function resolveStatePath(value?: string): string {
   }
   if (!path.isAbsolute(root)) throw new Error('THREADFORGE_HOME/cache root must be an absolute path');
   return path.join(root, 'state', stateFileName);
-}
-
-async function prospectiveRealPath(value: string): Promise<string> {
-  let parent = path.dirname(path.resolve(value));
-  const suffix = [path.basename(value)];
-  while (true) {
-    const info = await lstat(parent).catch((error: unknown) => {
-      if (isCode(error, 'ENOENT')) return null;
-      throw new Error('unable to inspect rollout cursor state path');
-    });
-    if (info) {
-      if (!info.isDirectory()) throw new Error('rollout cursor state parent must be a directory');
-      const canonical = await realpath(parent).catch(() => { throw new Error('rollout cursor state parent could not be resolved'); });
-      return path.join(canonical, ...suffix);
-    }
-    const next = path.dirname(parent);
-    if (next === parent) throw new Error('rollout cursor state path has no existing parent');
-    suffix.unshift(path.basename(parent));
-    parent = next;
-  }
 }
 
 async function withStateLock<T>(statePath: string, action: () => Promise<T>): Promise<T> {

@@ -20,6 +20,7 @@ import (
 	beacon "github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/threadforge-ai/threadforge/internal/appdata"
+	"github.com/threadforge-ai/threadforge/internal/mcp"
 	"github.com/threadforge-ai/threadforge/internal/procedurefiles"
 	"github.com/threadforge-ai/threadforge/internal/sourcefingerprint"
 	"github.com/threadforge-ai/threadforge/internal/store"
@@ -3675,6 +3676,182 @@ func TestProcedureLifecycleCommandsEnforceRevisionedApproval(t *testing.T) {
 	code = Run([]string{"procedure", "audit", "--id", draft.ID}, &out, &stderr)
 	if code != 0 || strings.Count(out.String(), `"action"`) != 3 {
 		t.Fatalf("audit code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+}
+
+func TestTraceCapturedProcedureCanBePublishedAndRetrievedAcrossHarnesses(t *testing.T) {
+	dataRoot := t.TempDir()
+	t.Setenv("THREADFORGE_HOME", dataRoot)
+	identityPath := configureTeamTrustForTest(t, dataRoot, "cross-harness-project")
+	databasePath := filepath.Join(dataRoot, "threadforge.sqlite")
+	projectRoot := t.TempDir()
+	sourcePath := filepath.Join(projectRoot, "src", "agent.go")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte("package agent // reviewed behavior source\n")
+	if err := os.WriteFile(sourcePath, source, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sourceDigest := sha256.Sum256(source)
+	draft := proceduregraph.Graph{
+		SchemaVersion: proceduregraph.SchemaVersion,
+		ID:            "codex-to-opencode-procedure",
+		ProjectID:     "cross-harness-project",
+		Title:         "Recover from a focused test failure",
+		Revision:      1,
+		Status:        proceduregraph.StatusDraft,
+		Applicability: proceduregraph.Applicability{Paths: []string{"src/**"}},
+		Nodes:         []proceduregraph.Node{{ID: "inspect", Kind: proceduregraph.NodeTrigger, Instruction: "Inspect the failing test, make the smallest relevant change, then rerun the focused test."}},
+		Edges:         []proceduregraph.Edge{},
+		Evidence:      []proceduregraph.Evidence{},
+		SourceFiles:   []proceduregraph.PathFingerprint{{Path: "src/agent.go", SHA256: hex.EncodeToString(sourceDigest[:])}},
+	}
+	draftBytes, err := json.Marshal(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draftPath := filepath.Join(t.TempDir(), "draft.json")
+	if err := os.WriteFile(draftPath, draftBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const privatePrompt = "TRACE_PROMPT_PRIVATE_CROSS_HARNESS_TEST"
+	traceEvent := beacon.NewEvent(beacon.NewEventOptions{
+		Action: "test.failed", Harness: beacon.HarnessInfo{Name: "codex"},
+		Message: "Focused test failed after the agent change.",
+	})
+	traceEvent.Prompt = &beacon.PromptInfo{Text: privatePrompt}
+	traceBytes, err := json.Marshal(traceEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracePath := filepath.Join(t.TempDir(), "codex-events.jsonl")
+	if err := os.WriteFile(tracePath, append(traceBytes, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"procedure", "propose", "--file", draftPath, "--trace-input", tracePath,
+		"--trace-ref", "session:codex:cross-harness-1", "--reason", "capture a reusable test-recovery procedure",
+		"--db", databasePath,
+	}, &stdout, &stderr)
+	var proposed proceduregraph.Graph
+	if code != 0 || json.Unmarshal(stdout.Bytes(), &proposed) != nil || proposed.Status != proceduregraph.StatusDraft ||
+		len(proposed.Evidence) != 1 || proposed.Evidence[0].Origin != "trace" || proposed.Evidence[0].Harness != "codex" ||
+		proposed.Evidence[0].LocalTraceRef != "session:codex:cross-harness-1" || !proposed.Evidence[0].Redacted {
+		t.Fatalf("Codex trace proposal code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stdout.String(), privatePrompt) || strings.Contains(stdout.String(), tracePath) {
+		t.Fatalf("captured procedure proposal exposed raw prompt or local trace path: %s", stdout.String())
+	}
+
+	// This fixture exercises lifecycle wiring only; its caller-supplied report is
+	// not an authentic benchmark or held-out efficacy result.
+	validation := proceduregraph.Validation{
+		DatasetFingerprint: strings.Repeat("a", 64), HeldOut: true, BaselineRuns: 4,
+		BaselineScore: 0.75, CandidateScore: 0.75, NoiseFloor: 0.01,
+		CostUnit: "tokens", BaselineCost: 100, CandidateCost: 100, MaxCostIncrease: 0, Status: "passed",
+	}
+	validationBytes, err := json.Marshal(validation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validationPath := filepath.Join(t.TempDir(), "validation.json")
+	if err := os.WriteFile(validationPath, validationBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"procedure", "record-validation", "--id", draft.ID,
+		"--expected-revision", "1", "--report", validationPath, "--db", databasePath}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), `"status": "validated"`) {
+		t.Fatalf("record validation code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"procedure", "approve", "--id", draft.ID, "--expected-revision", "2",
+		"--reviewer", "reviewer", "--reason", "reviewed the procedure and privacy projection", "--privacy-reviewed", "--db", databasePath}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), `"status": "approved"`) {
+		t.Fatalf("approve trace-backed procedure code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"procedure", "publish", "--project-root", projectRoot, "--id", draft.ID,
+		"--expected-revision", "0", "--identity-key", identityPath, "--privacy-reviewed", "--db", databasePath}, &stdout, &stderr)
+	var publishedGraph proceduregraph.Graph
+	if code != 0 || json.Unmarshal(stdout.Bytes(), &publishedGraph) != nil || publishedGraph.Status != proceduregraph.StatusApproved ||
+		len(publishedGraph.Evidence) != 1 || publishedGraph.Evidence[0].LocalTraceRef != "" ||
+		strings.Contains(stdout.String(), privatePrompt) || strings.Contains(stdout.String(), tracePath) {
+		t.Fatalf("publish approved procedure code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+
+	procedureStore, err := store.Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer procedureStore.Close()
+	projectProcedures, err := procedurefiles.New(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	localGraph, err := procedureStore.Get(context.Background(), draft.ID)
+	if err != nil || localGraph.Status != proceduregraph.StatusApproved {
+		t.Fatalf("local procedure store lacks approved revision: graph=%#v err=%v", localGraph, err)
+	}
+	publishedRevision, err := projectProcedures.GetLatest(draft.ID)
+	if err != nil || publishedRevision.Status != proceduregraph.StatusApproved || publishedRevision.Revision != publishedGraph.Revision {
+		t.Fatalf("project procedure store lacks published approved revision: graph=%#v err=%v", publishedRevision, err)
+	}
+	server := mcp.NewWithProjectStores(procedureStore, nil, projectProcedures, projectRoot)
+
+	callOpenCode := func(requestID int) string {
+		t.Helper()
+		input := fmt.Sprintf(
+			"%s\n%s\n%s\n",
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"opencode","version":"test"}}}`,
+			`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+			fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"threadforge_procedure_get","arguments":{"procedure_id":%q}}}`, requestID, draft.ID),
+		)
+		var output bytes.Buffer
+		if err := server.ServeStdio(context.Background(), strings.NewReader(input), &output); err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("OpenCode MCP exchange emitted %d responses: %s", len(lines), output.String())
+		}
+		var response struct {
+			Result struct {
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal([]byte(lines[1]), &response); err != nil || len(response.Result.Content) != 1 {
+			t.Fatalf("decode OpenCode MCP result: response=%s err=%v", lines[1], err)
+		}
+		return response.Result.Content[0].Text
+	}
+
+	fresh := callOpenCode(2)
+	if !strings.Contains(fresh, `"status":"complete"`) || !strings.Contains(fresh, `"freshness":"verified"`) ||
+		!strings.Contains(fresh, `"guidance_only":true`) || !strings.Contains(fresh, `"action_ready":false`) ||
+		!strings.Contains(fresh, "Inspect the failing test") || strings.Contains(fresh, privatePrompt) ||
+		strings.Contains(fresh, tracePath) || strings.Contains(fresh, "session:codex:cross-harness-1") ||
+		strings.Contains(fresh, `"execution_authorized":true`) {
+		t.Fatalf("OpenCode did not receive fresh, sanitized, advisory guidance: %s", fresh)
+	}
+
+	if err := os.WriteFile(sourcePath, []byte("package agent // source changed after approval\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := callOpenCode(3)
+	if !strings.Contains(stale, `"status":"stale"`) || !strings.Contains(stale, `"freshness":"stale"`) ||
+		!strings.Contains(stale, `"guidance_only":true`) || !strings.Contains(stale, `"action_ready":false`) ||
+		strings.Contains(stale, "Inspect the failing test") || strings.Contains(stale, privatePrompt) ||
+		strings.Contains(stale, tracePath) {
+		t.Fatalf("OpenCode stale read exposed guidance or lost its stale status: %s", stale)
 	}
 }
 

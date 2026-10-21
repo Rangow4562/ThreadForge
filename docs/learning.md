@@ -22,3 +22,5 @@ Example:
 threadforge memory learn --input .\events.jsonl --project-id repo:example --model-path C:\models\local-instruct
 threadforge procedure audit --id <proposal-id>
 ```
+
+`TestTraceCapturedProcedureCanBePublishedAndRetrievedAcrossHarnesses` exercises the local integration path from a Codex-labeled sanitized event, through draft proposal, validation record, human approval, signed project publication, and an OpenCode-labeled MCP `threadforge_procedure_get` request. It verifies source freshness on retrieval, advisory-only response fields, trace/prompt redaction, and withholding after the bound source changes. The validation report in this test is synthetic and caller-authored; this test verifies wiring and safety behavior only, not held-out task execution, real OpenCode host behavior, model use, or efficacy.

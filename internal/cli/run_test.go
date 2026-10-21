@@ -4571,6 +4571,78 @@ func TestProjectMemoryReadCLIVerifiesFreshnessAndWithholdsStaleContent(t *testin
 	}
 }
 
+func TestCursorSessionStartWithholdsStaleSourceBoundProjectMemory(t *testing.T) {
+	t.Setenv("THREADFORGE_HOME", t.TempDir())
+	projectRoot := t.TempDir()
+	relativeSource := "docs/approved-memory.md"
+	sourcePath := filepath.Join(projectRoot, filepath.FromSlash(relativeSource))
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("reviewed source revision one"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fingerprints, err := sourcefingerprint.FingerprintSources(projectRoot, []string{relativeSource})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := projectmemory.Candidate{
+		SchemaVersion: projectmemory.SchemaVersionV2,
+		ID:            "cursor-source-bound-fact",
+		ProjectID:     "demo-project",
+		Kind:          projectmemory.KindFact,
+		Title:         "Verified Cursor fact",
+		Content:       json.RawMessage(`{"fact":"CURSOR_CURRENT_SOURCE_FACT"}`),
+		Evidence: []projectmemory.Evidence{{
+			Origin: "document", ContentSHA256: strings.Repeat("a", 64), Redacted: true,
+			SourceFiles: []projectmemory.SourceFile{{Path: fingerprints[0].Path, SHA256: fingerprints[0].SHA256}},
+		}},
+	}
+	candidatePath := filepath.Join(t.TempDir(), "cursor-memory-candidate.json")
+	candidateBytes, err := json.Marshal(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(candidatePath, candidateBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	publishArgs := []string{
+		"memory", "publish", "--project-root", projectRoot, "--file", candidatePath,
+		"--expected-revision", "0", "--reviewer", "reviewer", "--reason", "verified Cursor source",
+		"--privacy-reviewed",
+	}
+	if code := Run(publishArgs, &stdout, &stderr); code != 0 {
+		t.Fatalf("publish code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+
+	t.Setenv("CURSOR_PROJECT_DIR", projectRoot)
+	args := []string{
+		"memory", "inject-cursor", "--project-id", candidate.ProjectID,
+		"--threadforge-managed-cursor-memory=v1", "--threadforge-memory=cursor-v1",
+	}
+	hookInput := []byte(`{"session_id":"cursor-session-private","is_background_agent":false,"composer_mode":"agent"}`)
+	stdout.Reset()
+	stderr.Reset()
+	if code := RunWithInput(args, bytes.NewReader(hookInput), &stdout, &stderr); code != 0 ||
+		!strings.Contains(stdout.String(), "Verified Cursor fact") || !strings.Contains(stdout.String(), "CURSOR_CURRENT_SOURCE_FACT") ||
+		!strings.Contains(stdout.String(), "Retrieval status: complete") || strings.Contains(stdout.String(), "cursor-session-private") {
+		t.Fatalf("fresh Cursor injection code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+
+	if err := os.WriteFile(sourcePath, []byte("reviewed source revision two"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := RunWithInput(args, bytes.NewReader(hookInput), &stdout, &stderr); code != 0 ||
+		strings.Contains(stdout.String(), "Verified Cursor fact") || strings.Contains(stdout.String(), "CURSOR_CURRENT_SOURCE_FACT") ||
+		!strings.Contains(stdout.String(), "Retrieval status: stale") || !strings.Contains(stdout.String(), "content was withheld") ||
+		strings.Contains(stdout.String(), "cursor-session-private") {
+		t.Fatalf("stale Cursor injection code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestProjectMemoryFingerprintCLIIsBoundedAndNeverReturnsSourceContent(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "docs", "source.md")

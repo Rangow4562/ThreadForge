@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/task-handoff-cross-harness-smoke-v1.schema.json",
+  "title": "Threadforge installed cross-harness task handoff read smoke v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "provider", "opencode", "codex_cli", "same_offered_handoff_read_by_both",
+    "bounded_page_verified", "advisory_only_verified", "task_owner_and_revision_unchanged",
+    "handoff_content_retained_in_report", "task_or_handoff_identifiers_retained_in_report",
+    "action_ready", "guidance_only", "execution_authorized", "ownership_transferred", "real_model_invocations"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.task-handoff-cross-harness-smoke.v1" },
+    "status": { "const": "verified" },
+    "provider": { "const": "deterministic-loopback-fixture" },
+    "opencode": {
+      "allOf": [
+        { "$ref": "#/$defs/reader" },
+        {
+          "type": "object",
+          "required": ["private_identifiers_absent_from_telemetry"],
+          "properties": { "private_identifiers_absent_from_telemetry": { "const": true } }
+        }
+      ]
+    },
+    "codex_cli": {
+      "allOf": [
+        { "$ref": "#/$defs/reader" },
+        {
+          "type": "object",
+          "required": ["local_telemetry_contains_task_or_handoff_identifiers"],
+          "properties": { "local_telemetry_contains_task_or_handoff_identifiers": { "type": "boolean" } }
+        }
+      ]
+    },
+    "same_offered_handoff_read_by_both": { "const": true },
+    "bounded_page_verified": { "const": true },
+    "advisory_only_verified": { "const": true },
+    "task_owner_and_revision_unchanged": { "const": true },
+    "handoff_content_retained_in_report": { "const": false },
+    "task_or_handoff_identifiers_retained_in_report": { "const": false },
+    "action_ready": { "const": false },
+    "guidance_only": { "const": true },
+    "execution_authorized": { "const": false },
+    "ownership_transferred": { "const": false },
+    "real_model_invocations": { "const": 0 }
+  },
+  "$defs": {
+    "reader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host_cli_version", "tool_call_count", "tool_result_observed", "page_contract_markers_verified"],
+      "properties": {
+        "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "tool_call_count": { "const": 1 },
+        "tool_result_observed": { "const": true },
+        "page_contract_markers_verified": { "const": true },
+        "private_identifiers_absent_from_telemetry": { "const": true },
+        "local_telemetry_contains_task_or_handoff_identifiers": { "type": "boolean" }
+      }
+    }
+  }
+}

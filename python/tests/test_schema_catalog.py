@@ -3517,6 +3517,54 @@ def test_task_handoff_schemas_bind_owner_claim_checkpoint_and_advisory_status():
         validate("task-handoff-page-v1.schema.json", {**page, "execution_authorized": True})
     with pytest.raises(ValidationError):
         validate("task-handoff-page-v1.schema.json", {**page, "handoffs": [handoff] * 101, "limit": 100})
+    cross_harness_smoke = {
+        "schema_version": "threadforge.task-handoff-cross-harness-smoke.v1",
+        "status": "verified",
+        "provider": "deterministic-loopback-fixture",
+        "opencode": {
+            "host_cli_version": "1.18.31",
+            "tool_call_count": 1,
+            "tool_result_observed": True,
+            "page_contract_markers_verified": True,
+            "private_identifiers_absent_from_telemetry": True,
+        },
+        "codex_cli": {
+            "host_cli_version": "codex-cli 0.163.0",
+            "tool_call_count": 1,
+            "tool_result_observed": True,
+            "page_contract_markers_verified": True,
+            "local_telemetry_contains_task_or_handoff_identifiers": True,
+        },
+        "same_offered_handoff_read_by_both": True,
+        "bounded_page_verified": True,
+        "advisory_only_verified": True,
+        "task_owner_and_revision_unchanged": True,
+        "handoff_content_retained_in_report": False,
+        "task_or_handoff_identifiers_retained_in_report": False,
+        "action_ready": False,
+        "guidance_only": True,
+        "execution_authorized": False,
+        "ownership_transferred": False,
+        "real_model_invocations": 0,
+    }
+    validate("task-handoff-cross-harness-smoke-v1.schema.json", cross_harness_smoke)
+    with pytest.raises(ValidationError):
+        validate("task-handoff-cross-harness-smoke-v1.schema.json", {**cross_harness_smoke, "ownership_transferred": True})
+    with pytest.raises(ValidationError):
+        validate("task-handoff-cross-harness-smoke-v1.schema.json", {**cross_harness_smoke, "task_id": "private-task-id"})
+    with pytest.raises(ValidationError):
+        validate("task-handoff-cross-harness-smoke-v1.schema.json", {
+            **cross_harness_smoke,
+            "opencode": {**cross_harness_smoke["opencode"], "private_identifiers_absent_from_telemetry": False},
+        })
+    with pytest.raises(ValidationError):
+        validate("task-handoff-cross-harness-smoke-v1.schema.json", {
+            **cross_harness_smoke,
+            "codex_cli": {
+                key: value for key, value in cross_harness_smoke["codex_cli"].items()
+                if key != "local_telemetry_contains_task_or_handoff_identifiers"
+            },
+        })
     with pytest.raises(ValidationError):
         validate("task-handoff-event-v1.schema.json", {
             "schema_version": "threadforge.task-handoff-event.v1",

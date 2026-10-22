@@ -1021,6 +1021,131 @@ try {
     ],
   });
   assert.equal(codexTaskResumeResult.status, 'verified', 'Codex did not complete the isolated read-only task-resume MCP call');
+  const handoffTaskFixture = {
+    id: 'opencode-codex-handoff-smoke-task',
+    projectID: openCodeTaskFixture.projectID,
+  };
+  const createdHandoffTask = JSON.parse(runThreadforge([
+    'task', 'create', '--id', handoffTaskFixture.id, '--project-id', handoffTaskFixture.projectID,
+    '--title', 'Synthetic OpenCode/Codex offered-handoff fixture',
+    '--objective', 'Inspect the synthetic checkpoint from a separate harness.',
+    '--criterion', 'Read the offered state without changing ownership.', '--db', databasePath,
+  ]));
+  assert.equal(createdHandoffTask.id, handoffTaskFixture.id, 'isolated handoff task was not created');
+  const handoffFixture = {
+    id: 'opencode-codex-offered-handoff-smoke',
+    claimID: 'opencode-codex-handoff-claim-smoke',
+    checkpointID: 'opencode-codex-handoff-checkpoint-smoke',
+    receiver: 'codex-smoke-receiver',
+    baselineSHA256: 'b'.repeat(64),
+    checkpointSummary: 'Synthetic checkpoint marker: inspect the fixture from the receiving harness.',
+  };
+  const taskOwner = createdHandoffTask.owner;
+  assert.equal(typeof taskOwner, 'string', 'task fixture did not record its local owner');
+  assert.ok(taskOwner.length > 0, 'task fixture owner was empty');
+  const ownerBeforeHandoffRead = JSON.parse(runThreadforge([
+    'task', 'show', '--id', handoffTaskFixture.id, '--db', databasePath,
+  ]));
+  runThreadforge([
+    'task', 'claim', 'acquire', '--task-id', handoffTaskFixture.id, '--id', handoffFixture.claimID,
+    '--expected-task-revision', String(ownerBeforeHandoffRead.revision),
+    '--baseline-sha256', handoffFixture.baselineSHA256, '--scope', 'path:src/**', '--actor', taskOwner,
+    '--db', databasePath,
+  ]);
+  const draftedHandoff = JSON.parse(runThreadforge([
+    'task', 'handoff', 'draft', '--id', handoffFixture.id, '--task-id', handoffTaskFixture.id,
+    '--expected-task-revision', String(ownerBeforeHandoffRead.revision), '--claim-id', handoffFixture.claimID,
+    '--expected-claim-revision', '1', '--baseline-sha256', handoffFixture.baselineSHA256,
+    '--to-owner', handoffFixture.receiver, '--checkpoint-entry-id', handoffFixture.checkpointID,
+    '--checkpoint-summary', handoffFixture.checkpointSummary,
+    '--checkpoint-details', 'Synthetic detail remains in the isolated local store.', '--actor', taskOwner,
+    '--db', databasePath,
+  ]));
+  assert.equal(draftedHandoff.handoffs?.[0]?.status, 'draft', 'handoff fixture did not enter the draft state');
+  const offeredHandoff = JSON.parse(runThreadforge([
+    'task', 'handoff', 'offer', '--id', handoffFixture.id, '--task-id', handoffTaskFixture.id,
+    '--expected-revision', '1', '--actor', taskOwner, '--db', databasePath,
+  ]));
+  assert.equal(offeredHandoff.handoffs?.[0]?.status, 'offered', 'handoff fixture was not explicitly offered');
+  assert.equal(offeredHandoff.execution_authorized, false, 'offered handoff unexpectedly authorized execution');
+  const handoffResultMarkers = [
+    'threadforge.task-handoff-page.v1', '"total_count":1', '"offset":0', '"limit":1',
+    '"has_more":false', '"status":"offered"', '"action_ready":false',
+    '"guidance_only":true', '"execution_authorized":false',
+  ];
+  const openCodeAgentTaskHandoffRead = await runOpenCodeAgentMcpRead(
+    handoffTaskFixture.id,
+    handoffFixture.checkpointSummary,
+    {
+      hostVersion: openCodeVersion,
+      toolSuffix: 'threadforge_task_handoffs',
+      toolArguments: { task_id: handoffTaskFixture.id, limit: 1, offset: 0 },
+      prompt: 'Read the explicitly offered handoff page from Threadforge MCP. Report only its status and advisory safety boundary; do not accept or change it.',
+      finalResponse: 'The offered handoff is visible as advisory guidance only; ownership and execution authority did not change.',
+      expectedFinalText: 'ownership and execution authority did not change',
+      requiredResultMarkers: handoffResultMarkers,
+      privateTelemetryMarkers: [handoffFixture.id, handoffFixture.receiver],
+    },
+  );
+  const codexAgentTaskHandoffRead = await runCodexAgentMcpRead({
+    projectRoot, codexHome, cliPath, databasePath, isolatedEnvironment,
+    procedureID: handoffTaskFixture.id,
+    expectedGuidance: handoffFixture.checkpointSummary,
+    hostVersion: codexVersion,
+    toolName: 'threadforge_task_handoffs',
+    toolArguments: { task_id: handoffTaskFixture.id, limit: 1, offset: 0 },
+    prompt: 'Read the same explicitly offered Threadforge handoff page. Report only its status and advisory safety boundary; do not accept, use shell, or modify files.',
+    expectedFinalResponse: 'The same offered handoff is visible as advisory guidance only; ownership and execution authority did not change.',
+    requiredResultMarkers: handoffResultMarkers,
+    privateTelemetryValues: [handoffTaskFixture.id, handoffFixture.id, handoffFixture.receiver],
+  });
+  const ownerAfterHandoffReads = JSON.parse(runThreadforge([
+    'task', 'show', '--id', handoffTaskFixture.id, '--db', databasePath,
+  ]));
+  assert.equal(ownerAfterHandoffReads.owner, ownerBeforeHandoffRead.owner,
+    'read-only cross-harness handoff calls changed the task owner');
+  assert.equal(ownerAfterHandoffReads.revision, ownerBeforeHandoffRead.revision,
+    'read-only cross-harness handoff calls changed the task revision');
+  assert.equal(openCodeAgentTaskHandoffRead.tool, 'threadforge_task_handoffs');
+  assert.equal(openCodeAgentTaskHandoffRead.tool_call_count, 1);
+  assert.equal(openCodeAgentTaskHandoffRead.tool_result_observed, true);
+  assert.equal(openCodeAgentTaskHandoffRead.handoff_page_contract_markers_verified, true);
+  assert.equal(codexAgentTaskHandoffRead.tool, 'threadforge_task_handoffs');
+  assert.equal(codexAgentTaskHandoffRead.tool_call_count, 1);
+  assert.equal(codexAgentTaskHandoffRead.tool_result_observed, true);
+  assert.equal(codexAgentTaskHandoffRead.handoff_page_contract_markers_verified, true);
+  assert.equal(typeof codexAgentTaskHandoffRead.private_identifiers_detected_in_telemetry, 'boolean',
+    'Codex handoff smoke did not classify local telemetry identifier presence');
+  const taskHandoffCrossHarnessSmoke = {
+    schema_version: 'threadforge.task-handoff-cross-harness-smoke.v1',
+    status: 'verified',
+    provider: 'deterministic-loopback-fixture',
+    opencode: {
+      host_cli_version: openCodeVersion,
+      tool_call_count: openCodeAgentTaskHandoffRead.tool_call_count,
+      tool_result_observed: openCodeAgentTaskHandoffRead.tool_result_observed,
+      page_contract_markers_verified: openCodeAgentTaskHandoffRead.handoff_page_contract_markers_verified,
+      private_identifiers_absent_from_telemetry: openCodeAgentTaskHandoffRead.private_identifiers_absent_from_telemetry,
+    },
+    codex_cli: {
+      host_cli_version: codexVersion,
+      tool_call_count: codexAgentTaskHandoffRead.tool_call_count,
+      tool_result_observed: codexAgentTaskHandoffRead.tool_result_observed,
+      page_contract_markers_verified: codexAgentTaskHandoffRead.handoff_page_contract_markers_verified,
+      local_telemetry_contains_task_or_handoff_identifiers: codexAgentTaskHandoffRead.private_identifiers_detected_in_telemetry,
+    },
+    same_offered_handoff_read_by_both: true,
+    bounded_page_verified: true,
+    advisory_only_verified: true,
+    task_owner_and_revision_unchanged: true,
+    handoff_content_retained_in_report: false,
+    task_or_handoff_identifiers_retained_in_report: false,
+    action_ready: false,
+    guidance_only: true,
+    execution_authorized: false,
+    ownership_transferred: false,
+    real_model_invocations: 0,
+  };
   const codexPlanGateTask = {
     id: 'codex-plan-gate-smoke-task',
     projectID: 'codex-plan-gate-smoke-project',
@@ -1356,7 +1481,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v33',
+    schema_version: 'threadforge.installed-skill-smoke.v34',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,
@@ -1386,8 +1511,11 @@ try {
     opencode_agent_stale_mcp_read: openCodeAgentStaleMcpRead,
     opencode_procedure_freshness: openCodeProcedureFreshness,
     opencode_agent_task_resume: openCodeAgentTaskResume,
+    opencode_agent_task_handoff_read: openCodeAgentTaskHandoffRead,
     codex_agent_mcp_read: codexAgentMcpRead,
     codex_agent_task_resume: codexAgentTaskResume,
+    codex_agent_task_handoff_read: codexAgentTaskHandoffRead,
+    task_handoff_cross_harness: taskHandoffCrossHarnessSmoke,
     codex_agent_task_plan_gate: codexPlanGateSmoke,
     claude_agent_task_resume: claudeAgentTaskResume,
     gemini_cli_telemetry_smoke: geminiCliTelemetrySmoke,
@@ -1460,6 +1588,7 @@ async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = 
     expectedFinalText = expectedGuidance,
     requiredResultMarkers = [],
     forbiddenResultMarkers = [],
+    privateTelemetryMarkers = [],
   } = options;
   const providerID = 'threadforge-fixture';
   const modelID = 'fixture-model';
@@ -1632,12 +1761,12 @@ async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = 
     assert.ok(actions.includes('assistant.message.completed'),
       `OpenCode did not send the completed assistant-message event to the local intake; received actions=${actions.join(',') || 'none'}`);
     const serializedPluginEvents = JSON.stringify(pluginEvents);
-    for (const privateValue of [prompt, expectedGuidance, procedureID, 'threadforge-fixture-only', ...forbiddenResultMarkers]) {
+    for (const privateValue of [prompt, expectedGuidance, procedureID, 'threadforge-fixture-only', ...forbiddenResultMarkers, ...privateTelemetryMarkers]) {
       assert.equal(serializedPluginEvents.includes(privateValue), false, `OpenCode plugin telemetry retained ${privateValue}`);
     }
-    if (toolSuffix === 'threadforge_task_resume_context') {
+    if (toolSuffix === 'threadforge_task_resume_context' || toolSuffix === 'threadforge_task_handoffs') {
       assert.equal(serializedPluginEvents.includes(toolArguments.task_id), false,
-        'OpenCode plugin telemetry retained the raw task identifier');
+        'OpenCode plugin telemetry retained the raw continuity task identifier');
     }
     if (requiredResultMarkers.length > 0) {
       const compactResultText = observedToolResultText.replace(/\s+/g, '');
@@ -1651,6 +1780,10 @@ async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = 
         result_advisory_markers_verified: requiredResultMarkers.length > 0,
         requirements_not_finalized_warning_verified: requiredResultMarkers.includes('requirements_not_finalized'),
         action_ready: false, guidance_only: true, execution_authorized: false,
+      } : {}),
+      ...(toolSuffix === 'threadforge_task_handoffs' ? {
+        handoff_page_contract_markers_verified: requiredResultMarkers.length > 0,
+        private_identifiers_absent_from_telemetry: true,
       } : {}),
       status: 'verified', host_cli_version: hostVersion,
       provider: 'deterministic-loopback-fixture',

@@ -14,7 +14,7 @@ const modelID = 'threadforge-codex-fixture-model';
 export async function runCodexAgentMcpRead({
   projectRoot, codexHome, cliPath, databasePath, isolatedEnvironment, procedureID, expectedGuidance,
   toolName = 'threadforge_procedure_get', toolArguments, prompt, expectedFinalResponse,
-  requiredResultMarkers = [], hostVersion = 'unknown',
+  requiredResultMarkers = [], hostVersion = 'unknown', privateTelemetryValues = [],
 }) {
   const mcpArguments = toolArguments ?? { procedure_id: procedureID };
   const promptText = prompt ?? `Read approved procedure ${procedureID} using Threadforge MCP, then repeat its first guidance sentence exactly. Do not use shell or modify files.`;
@@ -32,6 +32,7 @@ export async function runCodexAgentMcpRead({
     ['user_prompt_text', promptText],
     ['assistant_or_memory_text', expectedGuidance],
     ['fixture_key', fixtureKey],
+    ...privateTelemetryValues.map((value, index) => [`private_identifier_${index}`, value]),
   ];
   const inspectTelemetryBody = (signal, body) => {
     const serialized = JSON.stringify(body);
@@ -242,6 +243,11 @@ export async function runCodexAgentMcpRead({
         action_ready: false,
         guidance_only: true,
         execution_authorized: false,
+      } : {}),
+      ...(toolName === 'threadforge_task_handoffs' ? {
+        host_cli_version: hostVersion,
+        handoff_page_contract_markers_verified: requiredResultMarkers.length > 0 && toolResultObserved,
+        private_identifiers_detected_in_telemetry: sensitiveTelemetryFields.some((field) => field.includes(':private_identifier_')),
       } : {}),
       status: 'verified', provider: 'deterministic-loopback-fixture',
       codex_mcp_configured: true, tool: toolName,

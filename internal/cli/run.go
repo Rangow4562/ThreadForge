@@ -2027,7 +2027,25 @@ func safeResumeErrorCode(err error) string {
 	return "stored_context_unavailable"
 }
 
+type learningCandidateStep struct {
+	Kind        proceduregraph.NodeKind `json:"kind"`
+	Instruction string                  `json:"instruction"`
+}
+
+type memoryLearnPythonRunner func(context.Context, string, []byte) ([]byte, error)
+
 func learnMemory(args []string, stdout, stderr io.Writer) int {
+	return learnMemoryWithRunner(args, stdout, stderr, invokeMemoryLearnPython)
+}
+
+func invokeMemoryLearnPython(ctx context.Context, python string, request []byte) ([]byte, error) {
+	command := exec.CommandContext(ctx, python, "-m", "threadforge_py")
+	command.Env = pythonEnvironment()
+	command.Stdin = bytes.NewReader(append(request, '\n'))
+	return command.Output()
+}
+
+func learnMemoryWithRunner(args []string, stdout, stderr io.Writer, runPython memoryLearnPythonRunner) int {
 	fs := flag.NewFlagSet("memory learn", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	input := fs.String("input", "", "sanitized Beacon event JSON/JSONL input")
@@ -2082,10 +2100,7 @@ func learnMemory(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(ctx, *python, "-m", "threadforge_py")
-	command.Env = pythonEnvironment()
-	command.Stdin = bytes.NewReader(append(requestBytes, '\n'))
-	responseBytes, err := command.Output()
+	responseBytes, err := runPython(ctx, *python, requestBytes)
 	if err != nil || len(responseBytes) > 1<<20 {
 		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "local_inference_unavailable", "candidate": nil}, stderr)
 	}
@@ -2111,10 +2126,7 @@ func learnMemory(args []string, stdout, stderr io.Writer) int {
 		SchemaVersion string                       `json:"schema_version"`
 		Title         string                       `json:"title"`
 		Applicability proceduregraph.Applicability `json:"applicability"`
-		Steps         []struct {
-			Kind        proceduregraph.NodeKind `json:"kind"`
-			Instruction string                  `json:"instruction"`
-		} `json:"steps"`
+		Steps         []learningCandidateStep      `json:"steps"`
 	}
 	if err := decodeJSONBytes(response.Result.Candidate, &candidate); err != nil || candidate.SchemaVersion != "threadforge.learning-candidate.v1" {
 		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "invalid_model_candidate", "candidate": nil}, stderr)
@@ -2229,19 +2241,8 @@ func readSanitizedTraceInput(name string) ([]beacon.Event, []map[string]string, 
 }
 
 func graphFromLearningCandidate(projectID, title string, applicability proceduregraph.Applicability,
-	steps []struct {
-		Kind        proceduregraph.NodeKind `json:"kind"`
-		Instruction string                  `json:"instruction"`
-	}, observationBytes []byte, events []beacon.Event, sourceFiles []proceduregraph.PathFingerprint) proceduregraph.Graph {
-	idInput := append(append([]byte(projectID+"\x00"), observationBytes...), []byte(title)...)
-	for _, source := range sourceFiles {
-		idInput = append(idInput, 0)
-		idInput = append(idInput, source.Path...)
-		idInput = append(idInput, 0)
-		idInput = append(idInput, source.SHA256...)
-	}
-	hash := sha256.Sum256(idInput)
-	id := "learn-" + hex.EncodeToString(hash[:10])
+	steps []learningCandidateStep, observationBytes []byte, events []beacon.Event,
+	sourceFiles []proceduregraph.PathFingerprint) proceduregraph.Graph {
 	nodes := make([]proceduregraph.Node, 0, len(steps))
 	edges := make([]proceduregraph.Edge, 0, max(0, len(steps)-1))
 	for index, step := range steps {
@@ -2261,14 +2262,34 @@ func graphFromLearningCandidate(projectID, title string, applicability procedure
 			}
 		}
 	}
-	return proceduregraph.Graph{
-		SchemaVersion: proceduregraph.SchemaVersion, ID: id, ProjectID: projectID, Title: strings.TrimSpace(title),
+	graph := proceduregraph.Graph{
+		SchemaVersion: proceduregraph.SchemaVersion, ProjectID: projectID, Title: strings.TrimSpace(title),
 		Revision: 1, Status: proceduregraph.StatusDraft, Applicability: applicability,
 		SourceFiles: append([]proceduregraph.PathFingerprint(nil), sourceFiles...),
 		Nodes:       nodes, Edges: edges,
 		Evidence: []proceduregraph.Evidence{{Origin: "trace", ContentSHA256: digestBytes(observationBytes), Harness: harness,
 			ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Redacted: true}},
 	}
+	identity, err := json.Marshal(struct {
+		SchemaVersion       string                           `json:"schema_version"`
+		ProjectID           string                           `json:"project_id"`
+		Title               string                           `json:"title"`
+		Applicability       proceduregraph.Applicability     `json:"applicability"`
+		Nodes               []proceduregraph.Node            `json:"nodes"`
+		Edges               []proceduregraph.Edge            `json:"edges"`
+		EvidenceContentHash string                           `json:"evidence_content_sha256"`
+		SourceFiles         []proceduregraph.PathFingerprint `json:"source_files"`
+	}{
+		SchemaVersion: graph.SchemaVersion, ProjectID: graph.ProjectID, Title: graph.Title,
+		Applicability: graph.Applicability, Nodes: graph.Nodes, Edges: graph.Edges,
+		EvidenceContentHash: graph.Evidence[0].ContentSHA256, SourceFiles: graph.SourceFiles,
+	})
+	if err != nil {
+		return graph
+	}
+	hash := sha256.Sum256(identity)
+	graph.ID = "learn-" + hex.EncodeToString(hash[:16])
+	return graph
 }
 
 const maxLearningSourceFiles = 64

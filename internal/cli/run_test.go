@@ -5608,10 +5608,7 @@ func TestMemoryLearnCanBindEvidenceToApplicableProjectFiles(t *testing.T) {
 		t.Fatalf("source fingerprints=%#v err=%v", fingerprints, err)
 	}
 
-	steps := []struct {
-		Kind        proceduregraph.NodeKind `json:"kind"`
-		Instruction string                  `json:"instruction"`
-	}{{Kind: proceduregraph.NodeAction, Instruction: "Run the focused test."}}
+	steps := []learningCandidateStep{{Kind: proceduregraph.NodeAction, Instruction: "Run the focused test."}}
 	observationBytes := []byte(`[{"action":"file.edited","harness":"codex","severity":"info","summary":"A safe summary."}]`)
 	bound := graphFromLearningCandidate("repo:example", "Verify the changed module", graph.Applicability, steps, observationBytes,
 		[]beacon.Event{event}, fingerprints)
@@ -5621,6 +5618,17 @@ func TestMemoryLearnCanBindEvidenceToApplicableProjectFiles(t *testing.T) {
 	encoded, err := json.Marshal(bound)
 	if err != nil || strings.Contains(string(encoded), root) || strings.Contains(string(encoded), sourcePath) {
 		t.Fatalf("absolute source path leaked from learned graph: %s err=%v", encoded, err)
+	}
+	sameCandidate := graphFromLearningCandidate("repo:example", "Verify the changed module", graph.Applicability, steps, observationBytes,
+		[]beacon.Event{event}, fingerprints)
+	if sameCandidate.ID != bound.ID {
+		t.Fatal("identical normalized learning candidates did not keep a stable identity")
+	}
+	changedCandidate := graphFromLearningCandidate("repo:example", "Verify the changed module", graph.Applicability,
+		[]learningCandidateStep{{Kind: proceduregraph.NodeAction, Instruction: "Run a different focused test."}}, observationBytes,
+		[]beacon.Event{event}, fingerprints)
+	if changedCandidate.ID == bound.ID {
+		t.Fatal("different normalized learning candidates collided on the same proposal identity")
 	}
 
 	firstID := bound.ID
@@ -5635,6 +5643,168 @@ func TestMemoryLearnCanBindEvidenceToApplicableProjectFiles(t *testing.T) {
 		[]beacon.Event{event}, changed)
 	if changedGraph.ID == firstID {
 		t.Fatal("source-bound learning identity did not change when applicable source content changed")
+	}
+}
+
+func TestMemoryLearnCLIStoresSourceBoundDraftWithoutSendingLocalPaths(t *testing.T) {
+	root := t.TempDir()
+	projectRoot := filepath.Join(root, "project")
+	sourcePath := filepath.Join(projectRoot, "src", "agent.go")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package agent\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inputPath := filepath.Join(root, "events.jsonl")
+	const privatePrompt = "LEARNING-PRIVATE-PROMPT-DO-NOT-FORWARD"
+	var input bytes.Buffer
+	encoder := json.NewEncoder(&input)
+	for _, action := range []string{"file.edited", "test.failed"} {
+		event := beacon.NewEvent(beacon.NewEventOptions{
+			Action: action, Harness: beacon.HarnessInfo{Name: "codex"}, Message: "A focused change requires validation.",
+		})
+		event.File = &beacon.FileInfo{Path: sourcePath}
+		event.Prompt = &beacon.PromptInfo{Text: privatePrompt}
+		if err := encoder.Encode(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(inputPath, input.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	databasePath := filepath.Join(root, "threadforge.sqlite")
+	pythonResponse, err := json.Marshal(map[string]any{
+		"schema_version": "threadforge.python.v1", "request_id": "memory-learn", "status": "ok",
+		"result": map[string]any{
+			"status": "candidate", "reason": "",
+			"candidate": map[string]any{
+				"schema_version": "threadforge.learning-candidate.v1",
+				"title":          "Validate the changed module",
+				"applicability":  map[string]any{"paths": []string{"src/**"}, "modules": []string{}},
+				"steps":          []map[string]string{{"kind": "action", "instruction": "Run the focused module test."}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := func(ctx context.Context, python string, requestBytes []byte) ([]byte, error) {
+		if python != "fixture-python" {
+			return nil, fmt.Errorf("unexpected python command %q", python)
+		}
+		if _, ok := ctx.Deadline(); !ok {
+			return nil, errors.New("learning inference request omitted its timeout")
+		}
+		if bytes.Contains(requestBytes, []byte(projectRoot)) || bytes.Contains(requestBytes, []byte(sourcePath)) ||
+			bytes.Contains(requestBytes, []byte(privatePrompt)) {
+			return nil, errors.New("local path or raw prompt leaked into model request")
+		}
+		var request struct {
+			SchemaVersion string `json:"schema_version"`
+			RequestID     string `json:"request_id"`
+			Operation     string `json:"operation"`
+			Params        struct {
+				Observations []map[string]string `json:"observations"`
+				Backend      struct {
+					Type   string `json:"type"`
+					Model  string `json:"model_path"`
+					Device string `json:"device"`
+					DType  string `json:"dtype"`
+				} `json:"backend"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(requestBytes, &request); err != nil || request.SchemaVersion != "threadforge.python.v1" ||
+			request.RequestID != "memory-learn" || request.Operation != "memory.learn" || len(request.Params.Observations) != 2 ||
+			request.Params.Backend.Type != "hf" || request.Params.Backend.Model != "fixture-model" ||
+			request.Params.Backend.Device != "cpu" || request.Params.Backend.DType != "float32" {
+			return nil, errors.New("memory learning sent an invalid Python protocol request")
+		}
+		for _, observation := range request.Params.Observations {
+			if len(observation) != 4 || observation["harness"] != "codex" || observation["summary"] != "A focused change requires validation." {
+				return nil, errors.New("memory learning observation was not normalized")
+			}
+		}
+		return pythonResponse, nil
+	}
+	var stdout, stderr bytes.Buffer
+	code := learnMemoryWithRunner([]string{
+		"--input", inputPath, "--project-id", "repo:example", "--project-root", projectRoot,
+		"--model-path", "fixture-model", "--python", "fixture-python", "--db", databasePath,
+	}, &stdout, &stderr, runner)
+	var result struct {
+		Status                    string               `json:"status"`
+		Graph                     proceduregraph.Graph `json:"graph"`
+		HeldOutEvaluationRequired bool                 `json:"held_out_evaluation_required"`
+		HumanApprovalRequired     bool                 `json:"human_approval_required"`
+		ActionReady               bool                 `json:"action_ready"`
+	}
+	if code != 0 || json.Unmarshal(stdout.Bytes(), &result) != nil || result.Status != "proposed" ||
+		len(result.Graph.SourceFiles) != 1 || result.Graph.SourceFiles[0].Path != "src/agent.go" ||
+		result.Graph.Status != proceduregraph.StatusDraft || !result.HeldOutEvaluationRequired ||
+		!result.HumanApprovalRequired || result.ActionReady || strings.Contains(stdout.String(), projectRoot) ||
+		strings.Contains(stdout.String(), privatePrompt) || strings.Contains(stderr.String(), projectRoot) {
+		t.Fatalf("source-bound learn code=%d stdout=%q stderr=%q result=%#v", code, stdout.String(), stderr.String(), result)
+	}
+
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var persistedJSON string
+	if err := database.QueryRow("SELECT graph_json FROM procedure_graphs WHERE id = ?", result.Graph.ID).Scan(&persistedJSON); err != nil {
+		t.Fatalf("read persisted proposal: %v", err)
+	}
+	var persisted proceduregraph.Graph
+	if err := json.Unmarshal([]byte(persistedJSON), &persisted); err != nil || persisted.ID != result.Graph.ID ||
+		len(persisted.SourceFiles) != 1 || persisted.SourceFiles[0] != result.Graph.SourceFiles[0] ||
+		persisted.Status != proceduregraph.StatusDraft {
+		t.Fatalf("persisted source-bound draft mismatch: graph=%#v err=%v", persisted, err)
+	}
+}
+
+func TestMemoryLearnCLIWithRequestedBindingDoesNotPersistWithoutApplicableFiles(t *testing.T) {
+	root := t.TempDir()
+	projectRoot := filepath.Join(root, "project")
+	if err := os.Mkdir(projectRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	inputPath := filepath.Join(root, "events.jsonl")
+	var input bytes.Buffer
+	encoder := json.NewEncoder(&input)
+	for _, action := range []string{"test.failed", "test.failed"} {
+		event := beacon.NewEvent(beacon.NewEventOptions{Action: action, Harness: beacon.HarnessInfo{Name: "codex"}})
+		if err := encoder.Encode(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(inputPath, input.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	response, err := json.Marshal(map[string]any{
+		"schema_version": "threadforge.python.v1", "request_id": "memory-learn", "status": "ok",
+		"result": map[string]any{"status": "candidate", "candidate": map[string]any{
+			"schema_version": "threadforge.learning-candidate.v1", "title": "Validate tests",
+			"applicability": map[string]any{"paths": []string{"src/**"}, "modules": []string{}},
+			"steps":         []map[string]string{{"kind": "action", "instruction": "Run the tests."}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := func(context.Context, string, []byte) ([]byte, error) { return response, nil }
+	databasePath := filepath.Join(root, "must-not-exist.sqlite")
+	var stdout, stderr bytes.Buffer
+	code := learnMemoryWithRunner([]string{
+		"--input", inputPath, "--project-id", "repo:example", "--project-root", projectRoot,
+		"--model-path", "fixture-model", "--db", databasePath,
+	}, &stdout, &stderr, runner)
+	if code != 0 || !strings.Contains(stdout.String(), `"reason": "source_fingerprints_unavailable"`) || stdout.Len() == 0 {
+		t.Fatalf("unbound requested learn code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(databasePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("database was created despite unavailable requested fingerprints: stat err=%v", err)
 	}
 }
 

@@ -373,21 +373,47 @@ export async function runAntigravityPlanGateAttempt({
     .find((entry) => entry.name === 'write_to_file');
   const hostToolErrorObserved = hostToolResponse?.result_signal === 'tool_error' &&
     hostToolResponse?.result_markers?.numeric_status === 1;
-  const guardDecisionObserved = audit.length === 1 && audit[0]?.decision === 'deny' && audit[0]?.exit_code === 0;
-  const probeComplete = hostToolErrorObserved && result.tool_call_count === 1 && result.provider_requests > 0 &&
-    result.local_fixture_authentication_validated && result.real_model_invocations === 0;
-  const verified = guardDecisionObserved && probeComplete;
-  const hookNotObserved = audit.length === 0 && probeComplete;
+  const classification = classifyAntigravityPlanGateProbe({
+    toolCallCount: result.tool_call_count,
+    hookCallbackInvocations: audit.length,
+    guardDecision: audit.length === 1 ? audit[0]?.decision : 'unknown',
+    hostToolErrorObserved,
+    fixtureIntegrityVerified: result.provider_requests > 0 &&
+      result.local_fixture_authentication_validated && result.real_model_invocations === 0,
+  });
   return {
     ...result,
-    status: verified ? 'verified' : hookNotObserved ? 'not_observed' : 'not-verified',
-    reason: verified ? undefined : hookNotObserved ? 'workspace_pretool_hook_not_invoked' : !guardDecisionObserved ? 'guard_denial_not_observed' :
-      !hostToolErrorObserved ? 'host_tool_error_after_guard_denial_not_observed' : result.reason,
+    status: classification.status,
+    reason: classification.reason,
     hook_callback_invocations: audit.length,
     guard_decision: audit.length === 1 ? audit[0]?.decision : 'unknown',
     host_tool_error_observed: hostToolErrorObserved,
     tool_result_observed: hostToolErrorObserved,
   };
+}
+
+export function classifyAntigravityPlanGateProbe({
+  toolCallCount,
+  hookCallbackInvocations,
+  guardDecision,
+  hostToolErrorObserved,
+  fixtureIntegrityVerified,
+}) {
+  if (!fixtureIntegrityVerified || ![0, 1].includes(toolCallCount) || ![0, 1].includes(hookCallbackInvocations)) {
+    return { status: 'not_verified', reason: 'probe_integrity_not_verified' };
+  }
+  if (toolCallCount === 0 && hookCallbackInvocations === 0 && guardDecision === 'unknown' && !hostToolErrorObserved) {
+    return { status: 'probe_not_exercised', reason: 'host_tool_call_not_observed' };
+  }
+  if (toolCallCount === 1 && hookCallbackInvocations === 0 && guardDecision === 'unknown') {
+    return { status: 'not_observed', reason: 'workspace_pretool_hook_not_invoked' };
+  }
+  if (toolCallCount === 1 && hookCallbackInvocations === 1 && guardDecision === 'deny') {
+    return hostToolErrorObserved
+      ? { status: 'verified', reason: undefined }
+      : { status: 'not_verified', reason: 'host_tool_error_after_guard_denial_not_observed' };
+  }
+  return { status: 'not_verified', reason: 'guard_denial_not_observed' };
 }
 
 function runAntigravityCli(args, { cwd, env, timeout }) {

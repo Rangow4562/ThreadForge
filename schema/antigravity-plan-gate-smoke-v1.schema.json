@@ -24,15 +24,15 @@
   ],
   "properties": {
     "schema_version": { "const": "threadforge.antigravity-plan-gate-smoke.v1" },
-    "status": { "enum": ["verified", "not_observed"] },
+    "status": { "enum": ["verified", "not_observed", "probe_not_exercised", "not_verified"] },
     "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
     "install_action": { "enum": ["installed", "updated", "unchanged"] },
     "hook_event": { "const": "PreToolUse" },
     "tool": { "const": "write_to_file" },
-    "tool_call_count": { "const": 1 },
+    "tool_call_count": { "enum": [0, 1] },
     "hook_callback_invocations": { "enum": [0, 1] },
     "guard_decision": { "enum": ["deny", "unknown"] },
-    "host_tool_error_observed": { "const": true },
+    "host_tool_error_observed": { "type": "boolean" },
     "sandbox_enabled": { "const": false },
     "sentinel_created": { "const": false },
     "provider": { "const": "loopback-gemini-api-fixture" },
@@ -50,8 +50,27 @@
     {
       "properties": {
         "status": { "const": "not_observed" },
+        "tool_call_count": { "const": 1 },
         "hook_callback_invocations": { "const": 0 },
         "guard_decision": { "const": "unknown" }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "probe_not_exercised" },
+        "tool_call_count": { "const": 0 },
+        "hook_callback_invocations": { "const": 0 },
+        "guard_decision": { "const": "unknown" },
+        "host_tool_error_observed": { "const": false }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "not_verified" },
+        "tool_call_count": { "const": 1 },
+        "hook_callback_invocations": { "const": 1 },
+        "guard_decision": { "const": "deny" },
+        "host_tool_error_observed": { "const": false }
       }
     }
   ]

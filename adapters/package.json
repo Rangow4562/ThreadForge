@@ -96,7 +96,7 @@
   "scripts": {
     "adapter": "node --experimental-strip-types src/cli.ts",
     "check": "tsc --noEmit -p tsconfig.json",
-    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "test": "node --experimental-strip-types --test test/*.test.ts test/*.test.mjs",
     "test:package": "node scripts/package-smoke.mjs",
     "test:installed-skills": "node --experimental-strip-types scripts/live-skill-smoke.mjs",
     "test:opencode-history-host": "node --experimental-strip-types scripts/opencode-history-host-smoke.mjs"

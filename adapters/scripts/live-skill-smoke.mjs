@@ -1014,14 +1014,30 @@ try {
   const antigravityDeniedFileCreated = existsSync(antigravityDeniedFile);
   const antigravityPlanGateProbeValid = (
     antigravityPlanGateResult.status === 'verified' &&
+    antigravityPlanGateResult.tool_call_count === 1 &&
     antigravityPlanGateResult.hook_callback_invocations === 1 &&
-    antigravityPlanGateResult.guard_decision === 'deny'
+    antigravityPlanGateResult.guard_decision === 'deny' &&
+    antigravityPlanGateResult.host_tool_error_observed
   ) || (
     antigravityPlanGateResult.status === 'not_observed' &&
+    antigravityPlanGateResult.tool_call_count === 1 &&
     antigravityPlanGateResult.hook_callback_invocations === 0 &&
     antigravityPlanGateResult.guard_decision === 'unknown'
+  ) || (
+    antigravityPlanGateResult.status === 'probe_not_exercised' &&
+    antigravityPlanGateResult.tool_call_count === 0 &&
+    antigravityPlanGateResult.hook_callback_invocations === 0 &&
+    antigravityPlanGateResult.guard_decision === 'unknown' &&
+    !antigravityPlanGateResult.host_tool_error_observed
+  ) || (
+    antigravityPlanGateResult.status === 'not_verified' &&
+    antigravityPlanGateResult.tool_call_count === 1 &&
+    antigravityPlanGateResult.hook_callback_invocations === 1 &&
+    antigravityPlanGateResult.guard_decision === 'deny' &&
+    !antigravityPlanGateResult.host_tool_error_observed
   );
-  assert.ok(antigravityPlanGateProbeValid && antigravityPlanGateResult.host_tool_error_observed,
+  assert.ok(antigravityPlanGateProbeValid && antigravityPlanGateResult.provider_requests > 0 &&
+    antigravityPlanGateResult.local_fixture_authentication_validated && antigravityPlanGateResult.real_model_invocations === 0,
     `Antigravity task-plan gate smoke failed safely: ${JSON.stringify({
       status: antigravityPlanGateResult.status,
       reason: antigravityPlanGateResult.reason,

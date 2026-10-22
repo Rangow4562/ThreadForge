@@ -451,7 +451,7 @@ def test_antigravity_plan_gate_smoke_schema_records_callback_non_observation_wit
         "tool_call_count": 1,
         "hook_callback_invocations": 0,
         "guard_decision": "unknown",
-        "host_tool_error_observed": True,
+        "host_tool_error_observed": False,
         "sandbox_enabled": False,
         "sentinel_created": False,
         "provider": "loopback-gemini-api-fixture",
@@ -464,12 +464,25 @@ def test_antigravity_plan_gate_smoke_schema_records_callback_non_observation_wit
         "status": "verified",
         "hook_callback_invocations": 1,
         "guard_decision": "deny",
+        "host_tool_error_observed": True,
+    })
+    validator.validate({
+        **result,
+        "status": "probe_not_exercised",
+        "tool_call_count": 0,
+    })
+    validator.validate({
+        **result,
+        "status": "not_verified",
+        "hook_callback_invocations": 1,
+        "guard_decision": "deny",
     })
     for invalid in (
         {**result, "sentinel_created": True},
         {**result, "hook_callback_invocations": 1},
         {**result, "guard_decision": "allow"},
-        {**result, "host_tool_error_observed": False},
+        {**result, "status": "not_observed", "tool_call_count": 0},
+        {**result, "status": "verified", "host_tool_error_observed": False},
         {**result, "sandbox_enabled": True},
         {**result, "target_path": "private/workspace/file.txt"},
         {**result, "prompt": "create this private file"},

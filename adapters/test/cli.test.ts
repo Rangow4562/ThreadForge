@@ -661,6 +661,35 @@ test('adapter CLI installs and uninstalls the isolated OpenCode project plugin',
   }
 });
 
+test('adapter CLI installs and uninstalls only the OpenCode read-only planning agent', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-opencode-plan-agent-cli-'));
+  try {
+    let result = await invoke(['opencode', 'plan-agent', 'install', '--project-root', root]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'installed');
+    assert.match(result.stdout, /static read-only planning profile/);
+    const profilePath = path.join(root, '.opencode', 'agents', 'threadforge-plan.md');
+    const profile = await readFile(profilePath, 'utf8');
+    assert.match(profile, /"\*": deny/);
+    assert.match(profile, /read: allow/);
+    assert.doesNotMatch(profile, /\n  (?:bash|edit|write|patch|task): allow/);
+    result = await invoke(['opencode', 'plan-agent', 'update', '--project-root', root]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'unchanged');
+    result = await invoke(['opencode', 'plan-agent', 'uninstall', '--project-root', root]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'removed');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('OpenCode plan-agent installation requires an explicit project root', async () => {
+  const result = await invoke(['opencode', 'plan-agent', 'install']);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /--project-root is required/);
+});
+
 test('adapter CLI manages the Cursor observational hook config', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-cursor-cli-'));
   try {

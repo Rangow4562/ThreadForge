@@ -172,6 +172,40 @@ def test_opencode_task_resume_smoke_schema_records_guidance_without_task_content
         }})
 
 
+def test_opencode_read_only_plan_agent_smoke_records_resolved_permissions_without_claiming_task_binding():
+    schema = json.loads((SCHEMA_DIRECTORY / "opencode-read-only-plan-agent-smoke-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.opencode-read-only-plan-agent-smoke.v1",
+        "status": "verified",
+        "host_cli_version": "1.18.31",
+        "agent_name": "threadforge-plan",
+        "agent_mode": "primary",
+        "project_agent_discovered": True,
+        "deny_all_permission_verified": True,
+        "read_search_allowlist_verified": True,
+        "execution_or_mutation_permissions_allowlisted": False,
+        "threadforge_task_state_bound": False,
+        "action_ready": False,
+        "execution_authorized": False,
+        "real_model_invocations": 0,
+    }
+    validator.validate(result)
+    for field in (
+        "project_agent_discovered", "deny_all_permission_verified", "read_search_allowlist_verified",
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate({**result, field: False})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "execution_or_mutation_permissions_allowlisted": True})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "threadforge_task_state_bound": True})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "profile_path": ".opencode/agents/threadforge-plan.md"})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "real_model_invocations": 1})
+
+
 def test_opencode_procedure_freshness_smoke_requires_fresh_and_stale_withholding_evidence():
     schema = json.loads((SCHEMA_DIRECTORY / "opencode-procedure-freshness-smoke-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

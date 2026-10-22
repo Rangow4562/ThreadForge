@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/opencode-read-only-plan-agent-smoke-v1.schema.json",
+  "title": "Threadforge OpenCode read-only planning agent profile smoke v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "host_cli_version", "agent_name", "agent_mode", "project_agent_discovered",
+    "deny_all_permission_verified", "read_search_allowlist_verified", "execution_or_mutation_permissions_allowlisted",
+    "threadforge_task_state_bound", "action_ready", "execution_authorized", "real_model_invocations"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.opencode-read-only-plan-agent-smoke.v1" },
+    "status": { "const": "verified" },
+    "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "agent_name": { "const": "threadforge-plan" },
+    "agent_mode": { "const": "primary" },
+    "project_agent_discovered": { "const": true },
+    "deny_all_permission_verified": { "const": true },
+    "read_search_allowlist_verified": { "const": true },
+    "execution_or_mutation_permissions_allowlisted": { "const": false },
+    "threadforge_task_state_bound": { "const": false },
+    "action_ready": { "const": false },
+    "execution_authorized": { "const": false },
+    "real_model_invocations": { "const": 0 }
+  }
+}

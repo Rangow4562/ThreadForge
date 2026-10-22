@@ -10,6 +10,7 @@ import {
   removeClaudeProjectPlanGateHook,
 } from './claude-hooks-config.ts';
 import { installOpenCodeProjectPlugin, removeOpenCodeProjectPlugin } from './opencode-plugin-config.ts';
+import { installOpenCodeProjectPlanAgent, removeOpenCodeProjectPlanAgent } from './opencode-plan-agent-config.ts';
 import {
   installCursorProjectHooks,
   installCursorProjectMemoryHook,
@@ -135,7 +136,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   let gooseSubsystem: 'otel' | 'sessions' | undefined;
   let vscodeSubsystem: 'otel' | undefined;
   let coworkSubsystem: 'otel' | undefined;
-  let openCodeSubsystem: 'sessions' | undefined;
+  let openCodeSubsystem: 'sessions' | 'plan-agent' | undefined;
   let claudeSubsystem: 'sessions' | undefined;
   let claudeCodeSubsystem: 'memory' | 'plan-gate' | undefined;
   let codexSubsystem: 'memory' | 'plan-gate' | undefined;
@@ -489,6 +490,15 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   }
   if (family === 'opencode' && action === 'sessions') {
     openCodeSubsystem = 'sessions';
+    action = rest[0];
+    rest = rest.slice(1);
+    if (!action) {
+      stderr.write(`${usage()}\n`);
+      return 2;
+    }
+  }
+  if (family === 'opencode' && action === 'plan-agent') {
+    openCodeSubsystem = 'plan-agent';
     action = rest[0];
     rest = rest.slice(1);
     if (!action) {
@@ -1338,6 +1348,13 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
     } else if (family === 'claude' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
       result = await removeClaudeProjectHooks(projectRoot);
+    } else if (family === 'opencode' && openCodeSubsystem === 'plan-agent' && (action === 'install' || action === 'update')) {
+      rejectUnexpected(options, ['project-root']);
+      result = await installOpenCodeProjectPlanAgent(required(options, 'project-root'));
+      warning = 'OpenCode threadforge-plan is a static read-only planning profile with no Threadforge task-state binding; it does not force its selection or constrain other agents. Recheck resolved permissions after changing the profile or OpenCode configuration.';
+    } else if (family === 'opencode' && openCodeSubsystem === 'plan-agent' && action === 'uninstall') {
+      rejectUnexpected(options, ['project-root']);
+      result = await removeOpenCodeProjectPlanAgent(required(options, 'project-root'));
     } else if (family === 'opencode' && (action === 'install' || action === 'update')) {
       rejectUnexpected(options, ['project-root', 'module']);
       result = await installOpenCodeProjectPlugin(projectRoot, required(options, 'module'));
@@ -1668,6 +1685,7 @@ function usage(): string {
     '  npm run adapter -- prime-agent sessions sync [--sessions-dir <absolute-path>] [--artifacts-dir <absolute-path>] [--state-path <absolute-path>] [--endpoint <loopback-v1-events-url>] [--max-files <1-15000>] [--print] [--include-content]',
     '  npm run adapter -- opencode sessions status [--state-path <absolute-path>]',
     '  npm run adapter -- opencode sessions sync --project-root <absolute-path> [--opencode-cli <command>] [--state-path <absolute-path>] [--endpoint <loopback-v1-events-url>] [--max-sessions <1-200>] [--print] [--include-content]',
+    '  npm run adapter -- opencode plan-agent install|update|uninstall --project-root <absolute-path>',
     '  npm run adapter -- codex status [--codex-home <absolute-path>] [--state-path <absolute-path>]',
     '  npm run adapter -- codex sync [--codex-home <absolute-path>] [--state-path <absolute-path>] [--endpoint <loopback-v1-events-url>] [--print] [--include-content]',
     '  npm run adapter -- gemini install|update|uninstall',

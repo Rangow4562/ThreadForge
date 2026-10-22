@@ -21,6 +21,7 @@ import { installGeminiProjectSkill } from '../src/gemini-skill-config.ts';
 import { installOpenCodeProjectSkill } from '../src/opencode-skill-config.ts';
 import { installOpenCodeProjectMcpServer } from '../src/opencode-mcp-config.ts';
 import { installOpenCodeProjectPlugin, opencodeManagedMarker } from '../src/opencode-plugin-config.ts';
+import { installOpenCodeProjectPlanAgent, opencodePlanAgentName } from '../src/opencode-plan-agent-config.ts';
 import { installCodexProjectMcpServer } from '../src/codex-mcp-config.ts';
 import { installProjectMcpServer } from '../src/mcp-config.ts';
 import { installZCodeProjectSkill } from '../src/zcode-skill-config.ts';
@@ -728,6 +729,8 @@ let smokeFailure;
 try {
   mkdirSync(projectRoot, { recursive: true });
   mkdirSync(commandCodeProjectRoot, { recursive: true });
+  const openCodePlanAgentInstallAction = await installOpenCodeProjectPlanAgent(projectRoot);
+  assert.equal(openCodePlanAgentInstallAction, 'installed');
 
   // Exercise the OpenCode callback mapper with a payload-shaped fixture. Its
   // output is digest-only; no actual user transcript or model call is involved.
@@ -898,6 +901,7 @@ try {
   const opencodePluginRuntime = runOpenCodePluginLoadCheck(opencodePluginMarker);
 
   const openCodeVersion = runHost('opencode', ['--version']).trim();
+  const openCodeReadOnlyPlanAgent = runOpenCodePlanAgentCheck(openCodeVersion);
   const openCodeSkills = runHost('opencode', ['debug', 'skill', '--pure']);
   assert.equal(await installOpenCodeProjectMcpServer(projectRoot, 'threadforge', cliPath, [
     'mcp', 'serve', '--db', databasePath, '--project-root', projectRoot, '--threadforge-managed-mcp=v1',
@@ -1481,7 +1485,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v34',
+    schema_version: 'threadforge.installed-skill-smoke.v35',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,
@@ -1507,6 +1511,7 @@ try {
       host_loaded_and_invoked_plugin: opencodePluginRuntime.plugin_invoked,
       callback_contract: opencodePluginCallbackSummary,
     },
+    opencode_read_only_plan_agent: openCodeReadOnlyPlanAgent,
     opencode_agent_mcp_read: openCodeAgentMcpRead,
     opencode_agent_stale_mcp_read: openCodeAgentStaleMcpRead,
     opencode_procedure_freshness: openCodeProcedureFreshness,
@@ -1576,6 +1581,55 @@ function runOpenCodePluginLoadCheck(markerPath) {
   }
   assert.equal(readFileSync(markerPath, 'utf8'), 'threadforge-opencode-plugin-invoked-v1\n');
   return { session_list_completed: true, plugin_invoked: true };
+}
+
+function runOpenCodePlanAgentCheck(hostVersion) {
+  const output = runHost('opencode', ['debug', 'agent', opencodePlanAgentName, '--pure'], {
+    cwd: projectRoot, env: isolatedEnvironment,
+  });
+  let agent;
+  try { agent = JSON.parse(output); }
+  catch { throw new Error('OpenCode debug agent did not return its resolved profile as JSON'); }
+  assert.equal(agent.name, opencodePlanAgentName, 'OpenCode did not discover the project Threadforge planning agent');
+  assert.equal(agent.mode, 'primary', 'Threadforge planning agent is not a primary agent');
+  assert.ok(Array.isArray(agent.permission), 'OpenCode debug output omitted resolved agent permissions');
+
+  const permissions = agent.permission;
+  let denyAllIndex = -1;
+  for (let index = 0; index < permissions.length; index++) {
+    const rule = permissions[index];
+    if (rule?.permission === '*' && rule?.pattern === '*' && rule?.action === 'deny') denyAllIndex = index;
+  }
+  assert.notEqual(denyAllIndex, -1, 'OpenCode did not resolve the explicit deny-all agent rule');
+  const allWildcardIndexes = permissions.flatMap((rule, index) =>
+    rule?.permission === '*' && rule?.pattern === '*' ? [index] : []);
+  assert.equal(denyAllIndex, allWildcardIndexes.at(-1), 'a later wildcard permission overrides the agent deny-all rule');
+
+  const postDenyAllows = permissions.slice(denyAllIndex + 1)
+    .filter((rule) => rule?.action === 'allow' && rule?.permission !== 'external_directory')
+    .map((rule) => rule.permission);
+  const allowedPermissions = [...new Set(postDenyAllows)].sort();
+  assert.deepEqual(allowedPermissions, ['glob', 'grep', 'read'],
+    'OpenCode resolved permissions beyond read/search after the deny-all rule');
+  const mutatingOrExternalAllows = new Set(['bash', 'edit', 'write', 'patch', 'task', 'webfetch', 'websearch', 'skill', 'todowrite']);
+  assert.equal(permissions.slice(denyAllIndex + 1).some((rule) =>
+    rule?.action === 'allow' && mutatingOrExternalAllows.has(rule.permission)), false,
+  'OpenCode resolved an execution or mutation permission after the deny-all rule');
+  return {
+    schema_version: 'threadforge.opencode-read-only-plan-agent-smoke.v1',
+    status: 'verified',
+    host_cli_version: hostVersion,
+    agent_name: opencodePlanAgentName,
+    agent_mode: 'primary',
+    project_agent_discovered: true,
+    deny_all_permission_verified: true,
+    read_search_allowlist_verified: true,
+    execution_or_mutation_permissions_allowlisted: false,
+    threadforge_task_state_bound: false,
+    action_ready: false,
+    execution_authorized: false,
+    real_model_invocations: 0,
+  };
 }
 
 async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = {}) {

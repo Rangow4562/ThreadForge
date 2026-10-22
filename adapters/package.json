@@ -13,6 +13,7 @@
     "./claude-hooks-config": "./src/claude-hooks-config.ts",
     "./opencode-plugin": "./src/opencode-plugin.ts",
     "./opencode-plugin-config": "./src/opencode-plugin-config.ts",
+    "./opencode-plan-agent-config": "./src/opencode-plan-agent-config.ts",
     "./cursor-hook": "./src/cursor-hook.ts",
     "./cursor-hooks-config": "./src/cursor-hooks-config.ts",
     "./codex-hook": "./src/codex-hook.ts",

@@ -91,6 +91,7 @@ import { getGooseHistoryStatus, syncGooseHistory } from './goose-history.ts';
 import { getVSCodeOtelStatus, parseVSCodeOtelDuration, renderVSCodeOtelConfig, validateVSCodeOtelStatus } from './vscode-otel.ts';
 import { renderClaudeCoworkOtelGuidance } from './claude-cowork-otel.ts';
 import { installProjectSkill, uninstallProjectSkill, type ProjectSkillHost } from './project-skill-config.ts';
+import { installCopilotProjectPrompt, uninstallCopilotProjectPrompt } from './copilot-prompt-config.ts';
 import { installQoderProjectCommand, uninstallQoderProjectCommand } from './qoder-command-config.ts';
 import {
   installCodexProjectMcpServer,
@@ -141,7 +142,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   let geminiSubsystem: 'memory' | 'plan-gate' | undefined;
   let qwenSubsystem: 'memory' | 'plan-gate' | undefined;
   let antigravitySubsystem: 'memory' | 'plan-gate' | undefined;
-  let copilotSubsystem: 'sessions' | 'plan-gate' | undefined;
+  let copilotSubsystem: 'sessions' | 'plan-gate' | 'prompts' | undefined;
   let cursorSubsystem: 'sessions' | 'memory' | 'plan-gate' | undefined;
   let factorySubsystem: 'sessions' | undefined;
   let fxSubsystem: 'sessions' | undefined;
@@ -275,6 +276,15 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   }
   if (family === 'copilot' && action === 'plan-gate') {
     copilotSubsystem = 'plan-gate';
+    action = rest[0];
+    rest = rest.slice(1);
+    if (!action) {
+      stderr.write(`${usage()}\n`);
+      return 2;
+    }
+  }
+  if (family === 'copilot' && action === 'prompts') {
+    copilotSubsystem = 'prompts';
     action = rest[0];
     rest = rest.slice(1);
     if (!action) {
@@ -783,6 +793,19 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
           : action === 'uninstall'
             ? 'Restart Senpi to unload the extension.'
             : 'Restart Senpi to load the extension; installed-host API/version behavior remains unverified';
+      }
+    } else if (family === 'copilot' && copilotSubsystem === 'prompts' && (action === 'install' || action === 'uninstall')) {
+      rejectUnexpected(options, ['project-root', 'skill-file', 'sha256']);
+      const promptOptions = {
+        projectRoot,
+        skillFile: required(options, 'skill-file'),
+        sha256: required(options, 'sha256'),
+      };
+      result = action === 'install'
+        ? await installCopilotProjectPrompt(promptOptions)
+        : await uninstallCopilotProjectPrompt(promptOptions);
+      if (action === 'install') {
+        warning = 'Copilot prompt files are manually invoked IDE customizations; discovery and use depend on the selected IDE/version. This command does not configure prompt-file settings, change trust, or enable Copilot CLI prompt-file support.';
       }
     } else if ((family === 'claude-code' || family === 'command-code' || family === 'cline' || family === 'cursor' || family === 'devin' || family === 'opencode' || family === 'codex' || family === 'gemini' || family === 'antigravity' || family === 'copilot' || family === 'openhands' || family === 'kimi' || family === 'zcode' || family === 'dsh' || family === 'qoder' || family === 'windsurf' || family === 'devin-desktop') && projectSkillSubsystem === 'skills' && (action === 'install' || action === 'uninstall')) {
       rejectUnexpected(options, ['project-root', 'skill-file', 'sha256']);
@@ -1694,6 +1717,7 @@ function usage(): string {
     '  npm run adapter -- qoder skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- qoder commands install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- copilot skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
+    '  npm run adapter -- copilot prompts install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
   ].join('\n');
 }
 

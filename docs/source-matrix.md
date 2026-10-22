@@ -2,6 +2,8 @@
 
 This inventory is the migration baseline for Beacon's runtime documentation and Mancode's published platform list. A harness name in Threadforge's event schema is not evidence of capture support. `Partial` records only the slice with local evidence; it is not release acceptance. A row becomes complete only after the host contract, configuration-preservation, packaging, and cross-harness acceptance gates pass.
 
+GitHub Copilot IDE prompt files are tracked separately from the Copilot CLI row: Threadforge can project an approved procedure into `.github/prompts/*.prompt.md` for manual IDE invocation, but does not configure IDE settings or claim host discovery/use. GitHub's current matrix does not list prompt files for Copilot CLI. See [Copilot IDE prompts](copilot-prompts.md).
+
 Codex CLI task-plan gate note (October 20, 2026): installed smoke v29 verified one Codex CLI 0.163.0 exec_command denial for a persisted synthetic plan_only task; the target stayed absent and no real model ran. Direct apply_patch was not exposed by this CLI request. Governed shell effects remain unscoped, and normal trust discovery is unverified; see the [Codex CLI task-plan gate](codex-cli-plan-gate.md).
 
 Antigravity CLI task-plan gate probe (October 20, 2026): smoke v31 on installed `agy` 1.4.2 configured a project `PreToolUse` command and attempted one valid direct file-tool call, but the command observer recorded zero callbacks. The host returned a generic tool error and the sentinel stayed absent; this does not establish a Threadforge denial. Project-hook enforcement through this CLI is unverified for the selected version; Antigravity IDE behavior is not tested.

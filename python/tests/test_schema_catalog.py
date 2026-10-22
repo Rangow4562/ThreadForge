@@ -51,6 +51,27 @@ def test_qoder_project_command_result_schema_is_bounded_and_content_free():
         validator.validate({**result, "path": "../outside.md"})
 
 
+def test_copilot_project_prompt_receipt_is_versioned_path_bound_and_content_free():
+    schema = json.loads((SCHEMA_DIRECTORY / "copilot-project-prompt-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.copilot-project-prompt.v1",
+        "host": "github-copilot",
+        "action": "installed",
+        "prompt_name": "threadforge-approved-procedure-a1b2c3d4-r2",
+        "path": ".github/prompts/threadforge-approved-procedure-a1b2c3d4-r2.prompt.md",
+        "source_sha256": "a" * 64,
+        "prompt_sha256": "b" * 64,
+    }
+    validator.validate(result)
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "path": "../outside.prompt.md"})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "prompt": "private procedure content"})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "prompt_sha256": "not-a-digest"})
+
+
 def test_gemini_cli_telemetry_smoke_schema_distinguishes_missing_delivery_from_verification():
     schema = json.loads((SCHEMA_DIRECTORY / "gemini-cli-telemetry-smoke-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

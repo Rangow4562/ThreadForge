@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/copilot-project-prompt-v1.schema.json",
+  "title": "Threadforge Copilot project prompt receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "host",
+    "action",
+    "prompt_name",
+    "path",
+    "source_sha256",
+    "prompt_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.copilot-project-prompt.v1"
+    },
+    "host": {
+      "const": "github-copilot"
+    },
+    "action": {
+      "enum": [
+        "installed",
+        "unchanged",
+        "removed",
+        "absent"
+      ]
+    },
+    "prompt_name": {
+      "type": "string",
+      "pattern": "^threadforge-[a-z0-9]+(?:-[a-z0-9]+)*-r[0-9]+$",
+      "maxLength": 64
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^\\.github/prompts/threadforge-[a-z0-9]+(?:-[a-z0-9]+)*-r[0-9]+\\.prompt\\.md$",
+      "maxLength": 128
+    },
+    "source_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "prompt_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

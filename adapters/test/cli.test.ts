@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -472,6 +473,45 @@ test('adapter CLI configures GitHub Copilot project MCP in the shared workspace 
     assert.equal(removed.code, 0, removed.stderr);
     assert.deepEqual(JSON.parse(await readFile(path.join(root, '.mcp.json'), 'utf8')), {});
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('adapter CLI installs and removes only the reviewed GitHub Copilot IDE prompt file', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-copilot-prompt-cli-'));
+  try {
+    const project = path.join(root, 'project');
+    const skillFile = path.join(project, '.threadforge', 'skills', 'approved-procedure-a1b2c3d4', 'rev-000002', 'SKILL.md');
+    const skillText = [
+      '---',
+      'name: "threadforge-approved-procedure-a1b2c3d4-r2"',
+      'description: "Approved Threadforge procedure: review the change."',
+      '---',
+      '> Source procedure: approved-procedure-a1b2c3d4 revision 2',
+      '',
+      '> This portable procedure is approved guidance, not authorization to execute actions.',
+      '',
+      'Evidence digests, trace references, validation datasets, reviewer identity, and approval rationale are intentionally omitted from this portable projection.',
+      '',
+      '## Steps',
+      '1. Review current source state.',
+      '',
+    ].join('\n');
+    await mkdir(path.dirname(skillFile), { recursive: true });
+    await writeFile(skillFile, skillText, 'utf8');
+    const sha256 = createHash('sha256').update(skillText).digest('hex');
+
+    let result = await invoke(['copilot', 'prompts', 'install', '--project-root', project, '--skill-file', skillFile, '--sha256', sha256]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(JSON.parse(result.stdout).warning, /manually invoked IDE customizations/);
+    const promptPath = path.join(project, '.github', 'prompts', 'threadforge-approved-procedure-a1b2c3d4-r2.prompt.md');
+    assert.match(await readFile(promptPath, 'utf8'), /Never infer approval to modify files/);
+
+    result = await invoke(['copilot', 'prompts', 'uninstall', '--project-root', project, '--skill-file', skillFile, '--sha256', sha256]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result.action, 'removed');
+    await assert.rejects(readFile(promptPath), /ENOENT/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('Oh My Pi CLI requires explicit scope and manages user or project extension files', async () => {

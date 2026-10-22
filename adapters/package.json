@@ -91,6 +91,7 @@
     "./opencode-mcp-config": "./src/opencode-mcp-config.ts",
     "./opencode-skill-config": "./src/opencode-skill-config.ts",
     "./copilot-skill-config": "./src/copilot-skill-config.ts",
+    "./copilot-prompt-config": "./src/copilot-prompt-config.ts",
     "./cli": "./src/cli.ts"
   },
   "scripts": {

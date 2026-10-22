@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -118,6 +119,41 @@ func TestWazuhRuleContractAndSyntheticSample(t *testing.T) {
 	}
 }
 
+func TestWazuhDashboardHelperUsesOnlyMetadataAndExternalHTTPSCredentials(t *testing.T) {
+	for _, field := range []string{
+		"timestamp", "severity", "threadforge_export.schema_version", "threadforge_export.raw_content",
+	} {
+		if !strings.Contains(wazuhDashboardColumnsScript, field) {
+			t.Fatalf("Wazuh dashboard helper is missing metadata field %q", field)
+		}
+	}
+	for _, forbidden := range []string{
+		"data.prompt", "data.command", "data.file", "data.session", "SecretPassword",
+		"WAZUH_DASHBOARD_PASSWORD", "curl -k", "--insecure", "--location",
+	} {
+		if strings.Contains(wazuhDashboardColumnsScript, forbidden) {
+			t.Fatalf("Wazuh dashboard helper contains forbidden content or unsafe option %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"WAZUH_DASHBOARD_NETRC", "--netrc-file", "--proto '=https'", "--output /dev/null",
+		"without credentials, path, query, or fragment", "must have mode 0600", "! -L",
+	} {
+		if !strings.Contains(wazuhDashboardColumnsScript, required) {
+			t.Fatalf("Wazuh dashboard helper omits safety contract %q", required)
+		}
+	}
+	if shell, err := exec.LookPath("sh"); err == nil {
+		path := filepath.Join(t.TempDir(), "apply-dashboard-default-columns.sh")
+		if err := os.WriteFile(path, []byte(wazuhDashboardColumnsScript), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if output, err := exec.Command(shell, "-n", path).CombinedOutput(); err != nil {
+			t.Fatalf("dashboard helper shell syntax failed: %v: %s", err, output)
+		}
+	}
+}
+
 func TestInstallWazuhPackWritesPrivateFilesAndRefusesOverwrite(t *testing.T) {
 	root := t.TempDir()
 	output := filepath.Join(root, "wazuh-pack")
@@ -132,7 +168,7 @@ func TestInstallWazuhPackWritesPrivateFilesAndRefusesOverwrite(t *testing.T) {
 	if installed != output {
 		t.Fatalf("pack path = %q, want %q", installed, output)
 	}
-	for _, name := range []string{"README.md", "sample-event.jsonl", "threadforge-rules.xml", "ossec-localfile.xml", "vector.toml"} {
+	for _, name := range []string{"README.md", "sample-event.jsonl", "threadforge-rules.xml", "ossec-localfile.xml", "vector.toml", "apply-dashboard-default-columns.sh"} {
 		info, err := os.Stat(filepath.Join(output, name))
 		if err != nil {
 			t.Fatalf("missing Wazuh pack file %s: %v", name, err)
@@ -145,7 +181,7 @@ func TestInstallWazuhPackWritesPrivateFilesAndRefusesOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, phrase := range []string{"does not install", "metadata-only", options.MetadataLogPath, "review that downstream path before activation"} {
+	for _, phrase := range []string{"does not install", "metadata-only", options.MetadataLogPath, "review that downstream path before activation", "WAZUH_DASHBOARD_NETRC", "four"} {
 		if !strings.Contains(string(readme), phrase) {
 			t.Fatalf("Wazuh README omits privacy/setup note %q", phrase)
 		}

@@ -124,8 +124,8 @@ func runEndpointSentinel(args []string, stdout, stderr io.Writer) int {
 }
 
 func runEndpointWazuh(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || (args[0] != "print-config" && args[0] != "install-pack") {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge endpoint wazuh <print-config|install-pack> --metadata-log-path <absolute-path> --allow-remote-metadata-forwarding [--log-path <events.jsonl>] [--output <new-dir>]")
+	if len(args) == 0 || (args[0] != "print-config" && args[0] != "install-pack" && args[0] != "validate") {
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge endpoint wazuh <print-config|install-pack|validate> --allow-remote-metadata-forwarding [--metadata-log-path <absolute-path>] [--log-path <events.jsonl>] [--output <new-dir>]")
 		return 2
 	}
 	operation := args[0]
@@ -154,6 +154,15 @@ func runEndpointWazuh(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		selectedLogPath = paths.Traces
+	}
+	if operation == "validate" {
+		tracePath, err := appendWazuhValidationEvent(selectedLogPath)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err)
+			return 1
+		}
+		_, _ = fmt.Fprintf(stdout, "Synthetic Wazuh validation event appended to local Threadforge trace %s; no network request was made. Vector exports only timestamp and allowlisted severity metadata, but Wazuh may forward it to a remote manager. Expected informational rule: 119510.\n", tracePath)
+		return 0
 	}
 	if strings.TrimSpace(*metadataLogPath) == "" {
 		_, _ = fmt.Fprintln(stderr, "endpoint wazuh requires --metadata-log-path pointing to a separate absolute output file")

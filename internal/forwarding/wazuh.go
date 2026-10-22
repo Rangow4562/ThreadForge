@@ -52,6 +52,32 @@ const wazuhRulesXML = `<?xml version="1.0" encoding="UTF-8"?>
 </group>
 `
 
+const wazuhDashboardColumnsScript = `#!/bin/sh
+set -eu
+
+: "${WAZUH_DASHBOARD_URL:?set WAZUH_DASHBOARD_URL to the HTTPS Wazuh Dashboard origin}"
+: "${WAZUH_DASHBOARD_NETRC:?set WAZUH_DASHBOARD_NETRC to a protected netrc file for this dashboard}"
+
+case "$WAZUH_DASHBOARD_URL" in
+  https://?*) ;;
+  *) echo "WAZUH_DASHBOARD_URL must use HTTPS" >&2; exit 2 ;;
+esac
+
+dashboard_origin=${WAZUH_DASHBOARD_URL%/}
+dashboard_authority=${dashboard_origin#https://}
+case "$dashboard_authority" in
+  ''|*/*|*@*|*\?*|*#*) echo "WAZUH_DASHBOARD_URL must be an HTTPS origin without credentials, path, query, or fragment" >&2; exit 2 ;;
+esac
+
+[ -f "$WAZUH_DASHBOARD_NETRC" ] && [ ! -L "$WAZUH_DASHBOARD_NETRC" ] && [ -r "$WAZUH_DASHBOARD_NETRC" ] || { echo "WAZUH_DASHBOARD_NETRC must be a readable regular non-symlink file" >&2; exit 2; }
+netrc_mode=$(stat -c '%a' "$WAZUH_DASHBOARD_NETRC" 2>/dev/null || stat -f '%Lp' "$WAZUH_DASHBOARD_NETRC" 2>/dev/null) || { echo "could not inspect WAZUH_DASHBOARD_NETRC permissions" >&2; exit 2; }
+[ "$netrc_mode" = "600" ] || { echo "WAZUH_DASHBOARD_NETRC must have mode 0600" >&2; exit 2; }
+
+curl --fail --silent --show-error --proto '=https' --max-time 15 --netrc-file "$WAZUH_DASHBOARD_NETRC" --request POST --header 'osd-xsrf: threadforge' --header 'Content-Type: application/json' --data-binary '{"value":["timestamp","severity","threadforge_export.schema_version","threadforge_export.raw_content"]}' --output /dev/null "$dashboard_origin/api/opensearch-dashboards/settings/defaultColumns"
+
+printf '\nThreadforge metadata-only dashboard columns applied to %s\n' "$dashboard_origin"
+`
+
 // WazuhForwardingOptions configures a local metadata-only handoff to Wazuh.
 // Vector tails the runtime log, writes a newly constructed metadata JSONL file,
 // and Wazuh is configured to read only that output file.
@@ -122,6 +148,7 @@ func InstallWazuhMetadataPack(outputDir string, options WazuhForwardingOptions) 
 		{name: "threadforge-rules.xml", content: []byte(wazuhRulesXML)},
 		{name: "ossec-localfile.xml", content: []byte(localfileConfig)},
 		{name: "vector.toml", content: []byte(vectorConfig)},
+		{name: "apply-dashboard-default-columns.sh", content: []byte(wazuhDashboardColumnsScript)},
 	})
 }
 
@@ -174,9 +201,9 @@ func renderWazuhReadme(options WazuhForwardingOptions) string {
 	return fmt.Sprintf(`# Threadforge metadata-only Wazuh pack
 
 This pack provides a local Vector transform/file sink, a Wazuh localfile
-snippet, a small custom rules file, and a synthetic sample. It does not install
-or start Vector or Wazuh, edit host configuration, read credentials, or make
-network requests.
+snippet, custom rules, a synthetic sample, and an optional dashboard-column
+helper. Pack generation does not install or start Vector or Wazuh, edit host
+configuration, read credentials, or make network requests.
 
 Vector tails new Threadforge runtime JSONL from end-of-file, constructs a new
 record containing only timestamp, allowlisted severity, and the fixed
@@ -203,6 +230,15 @@ The sample-event.jsonl is synthetic. The Vector input starts at EOF and does
 not backfill the existing raw runtime log. The destination file path is
 configured at pack creation time; keep vector.toml and this pack private
 because they contain local filesystem paths.
+
+apply-dashboard-default-columns.sh is inert until you explicitly run it.
+It requires WAZUH_DASHBOARD_URL to be an HTTPS origin and
+WAZUH_DASHBOARD_NETRC to point to a user-managed netrc file with POSIX mode
+0600. It makes one authenticated HTTPS request without following redirects or
+printing the response body. The four selected columns are limited to timestamp,
+severity, the fixed export schema version, and the constant raw-content=false
+marker. No dashboard credentials or prompt, command, path, session, or other
+raw trace fields are included in the pack or displayed by the helper.
 
 Runtime log path: %s
 `, options.MetadataLogPath, options.LogPath)

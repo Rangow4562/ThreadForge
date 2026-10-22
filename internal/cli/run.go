@@ -3878,7 +3878,7 @@ Commands:
   endpoint datadog print-config|install-pack [--path vector|agent] --allow-remote-metadata-forwarding [--endpoint <https-origin>] [--secrets-dir <dir>] [--log-path <events.jsonl>] [--metadata-log-path <absolute-path>] [--output <new-dir>]
   endpoint sumo print-config|install-pack --endpoint <https://.../receiver/v1/http> --auth-header --allow-remote-metadata-forwarding [--secrets-dir <dir>] [--log-path <events.jsonl>] [--output <new-dir>]
   endpoint rapid7 print-config|install-pack --allow-remote-metadata-forwarding --allow-vector-env-interpolation [--log-path <events.jsonl>] [--output <new-dir>]
-  endpoint wazuh print-config|install-pack --metadata-log-path <absolute-path> --allow-remote-metadata-forwarding [--log-path <events.jsonl>] [--output <new-dir>]
+  endpoint wazuh print-config|install-pack|validate --allow-remote-metadata-forwarding [--metadata-log-path <absolute-path>] [--log-path <events.jsonl>] [--output <new-dir>]
   endpoint sentinel print-config|install-pack --path <vector|ama|both> --allow-remote-metadata-forwarding [Azure Logs Ingestion flags] [--metadata-log-path <absolute-path>] [--log-path <events.jsonl>] [--output <new-dir>]
   ci exec [--harness claude-code] [--output-dir <dir>] [--min-events n] -- <command> [args...]
   ci validate --log-path <runtime.jsonl> [--harness claude-code|codex-cli|all] [--min-events n]

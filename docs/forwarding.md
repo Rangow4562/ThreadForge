@@ -532,20 +532,54 @@ threadforge endpoint wazuh install-pack `
 ```
 
 The pack contains `vector.toml`, `ossec-localfile.xml`,
-`threadforge-rules.xml`, a synthetic `sample-event.jsonl`, and a README. Run
-Vector yourself and add the Wazuh localfile snippet on the same machine. Review
-the generated rule IDs `119500`-`119560` for conflicts. They classify only the
-exported severity label; they do not detect threats or authorize actions.
+`threadforge-rules.xml`, a synthetic `sample-event.jsonl`, the optional
+`apply-dashboard-default-columns.sh`, and a README. Run Vector yourself and add
+the Wazuh localfile snippet on the same machine. Review the generated rule IDs
+`119500`-`119560` for conflicts. They classify only the exported severity
+label; they do not detect threats or authorize actions.
 Restrict the source trace to Vector and grant Wazuh access only to the
 sanitized metadata file. Although this file remains local at first, Wazuh may
 forward it to a manager, so the command requires explicit metadata-export
 consent.
 
+For a local ingestion check, explicitly append one synthetic event to the
+Threadforge runtime log:
+
+```powershell
+threadforge endpoint wazuh validate `
+  --log-path "$env:LOCALAPPDATA\Threadforge\traces\events.jsonl" `
+  --allow-remote-metadata-forwarding
+```
+
+The command performs no network request. The synthetic event stores no prompt,
+command, user, hostname, repository, or path fields; the CLI reports which
+local trace file received it. If your separately managed Vector and Wazuh
+services are active, the event passes through the metadata projection; the
+informational Wazuh rule is `119510`. Wazuh may forward that metadata to its
+configured manager.
+
+The optional dashboard helper changes the saved default Discover columns only
+when you explicitly run it. Supply an HTTPS origin and a user-managed netrc
+file (mode `0600` on POSIX systems); credentials are not placed in the pack or
+command line:
+
+```sh
+WAZUH_DASHBOARD_URL='https://wazuh.example' \
+WAZUH_DASHBOARD_NETRC="$HOME/.config/threadforge/wazuh-dashboard.netrc" \
+sh ./apply-dashboard-default-columns.sh
+```
+
+It uses verified HTTPS, does not follow redirects, and suppresses the response
+body. Its columns are limited to `timestamp`, `severity`,
+`threadforge_export.schema_version`, and `threadforge_export.raw_content`;
+Beacon's prompt, command, path, and session columns are intentionally omitted.
+
 Vector 0.58.0 validates the generated file-sink, source, and VRL configuration
 with component/health checks disabled. XML and rule-contract tests pass; no
-Wazuh manager/logtest or downstream forwarding was available for runtime
-validation. The pack intentionally omits Beacon's full event fields and
-dashboard-column helper to preserve Threadforge's raw-trace privacy boundary.
+Wazuh manager/logtest, dashboard API, or downstream forwarding was available
+for runtime validation. The pack intentionally omits Beacon's full event
+fields to preserve Threadforge's raw-trace privacy boundary; its dashboard
+helper displays only the sanitized metadata contract.
 
 ## Microsoft Sentinel
 

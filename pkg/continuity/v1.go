@@ -49,6 +49,7 @@ const TaskClaimReadSchemaVersion = "threadforge.task-claim-read.v1"
 const TaskHandoffSchemaVersion = "threadforge.task-handoff.v1"
 const TaskHandoffEventSchemaVersion = "threadforge.task-handoff-event.v1"
 const TaskHandoffReadSchemaVersion = "threadforge.task-handoff-read.v1"
+const TaskHandoffPageSchemaVersion = "threadforge.task-handoff-page.v1"
 
 type TaskHandoffStatus string
 
@@ -93,6 +94,20 @@ type TaskHandoffRead struct {
 	SchemaVersion       string        `json:"schema_version"`
 	TaskID              string        `json:"task_id"`
 	Handoffs            []TaskHandoff `json:"handoffs"`
+	ExecutionAuthorized bool          `json:"execution_authorized"`
+}
+
+// TaskHandoffPage is a bounded, read-only view of current handoff states for one task.
+type TaskHandoffPage struct {
+	SchemaVersion       string        `json:"schema_version"`
+	TaskID              string        `json:"task_id"`
+	Handoffs            []TaskHandoff `json:"handoffs"`
+	TotalCount          int           `json:"total_count"`
+	Offset              int           `json:"offset"`
+	Limit               int           `json:"limit"`
+	HasMore             bool          `json:"has_more"`
+	ActionReady         bool          `json:"action_ready"`
+	GuidanceOnly        bool          `json:"guidance_only"`
 	ExecutionAuthorized bool          `json:"execution_authorized"`
 }
 

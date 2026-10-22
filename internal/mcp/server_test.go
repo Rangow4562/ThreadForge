@@ -62,6 +62,7 @@ func TestServeStdioNegotiatesLegacyAndCurrentVersions(t *testing.T) {
 				!strings.Contains(lines[1], "threadforge_project_memory_read") ||
 				!strings.Contains(lines[1], "threadforge_project_memory_read_v2") ||
 				!strings.Contains(lines[1], "threadforge_task_discover") ||
+				!strings.Contains(lines[1], "threadforge_task_handoffs") ||
 				!strings.Contains(lines[1], "task-resume-discovery.v1") ||
 				!strings.Contains(lines[1], "readOnlyHint") {
 				t.Fatalf("tools/list missing retrieval tool annotations: %s", lines[1])
@@ -910,6 +911,144 @@ func TestExplicitMCPTaskSessionAndHandoffReads(t *testing.T) {
 	if _, err := server.callTool(context.Background(), toolCallParams{Name: "threadforge_task_discover", Arguments: json.RawMessage(`{"project_id":"repo-mcp","unexpected":true}`)}); err == nil {
 		t.Fatal("unknown task discovery argument was accepted")
 	}
+}
+
+func TestTaskHandoffsMCPPagedReadIsExplicitAndAdvisory(t *testing.T) {
+	database, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	stamp := "2026-10-20T10:00:00Z"
+	task := continuity.Task{
+		SchemaVersion: continuity.SchemaVersion, ID: "task-handoff-mcp", ProjectID: "repo-handoff-mcp", Owner: "alice",
+		Title: "Cross-harness task transfer", Objective: "Expose current handoff state to the receiving harness",
+		AcceptanceCriteria: []string{"The receiver can inspect the offer without receiving execution authority"},
+		Status:             continuity.TaskInProgress, Revision: 1, CreatedAt: stamp, UpdatedAt: stamp,
+	}
+	if err := database.CreateTask(ctx, task, "alice", "MCP task handoff fixture"); err != nil {
+		t.Fatal(err)
+	}
+	claim := continuity.TaskClaim{
+		SchemaVersion: continuity.TaskClaimSchemaVersion, ID: "claim-handoff-mcp", ProjectID: task.ProjectID, TaskID: task.ID,
+		Owner: "alice", Scopes: []continuity.TaskClaimScope{{Kind: continuity.TaskClaimScopePath, Value: "src/**"}},
+		TaskRevision: task.Revision, BaselineSHA256: strings.Repeat("a", 64), LeaseExpiresAt: "2099-01-01T00:00:00Z",
+		Status: "active", Revision: 1, CreatedAt: stamp, UpdatedAt: stamp,
+	}
+	claimEvent := continuity.TaskClaimEvent{
+		SchemaVersion: continuity.TaskClaimEventSchemaVersion, Action: "acquired", Claim: claim,
+	}
+	claimEntry := continuity.Entry{
+		SchemaVersion: continuity.SchemaVersion, ID: "claim-event-handoff-mcp", ProjectID: task.ProjectID, TaskID: task.ID,
+		Kind: continuity.EntryTaskClaim, Actor: "alice", Summary: "Task claim acquired", TaskClaim: &claimEvent, CreatedAt: stamp,
+	}
+	if _, err := database.AppendContinuityEntry(ctx, claimEntry); err != nil {
+		t.Fatal(err)
+	}
+	appendHandoffEvent := func(id, action string, expectedRevision int, actor, createdAt string, handoff continuity.TaskHandoff) {
+		t.Helper()
+		event := continuity.TaskHandoffEvent{
+			SchemaVersion: continuity.TaskHandoffEventSchemaVersion, Action: action,
+			ExpectedRevision: expectedRevision, Handoff: handoff,
+		}
+		entry := continuity.Entry{
+			SchemaVersion: continuity.SchemaVersion, ID: id, ProjectID: task.ProjectID, TaskID: task.ID,
+			Kind: continuity.EntryTaskHandoff, Actor: actor, Summary: "Task handoff " + action,
+			TaskHandoff: &event, CreatedAt: createdAt,
+		}
+		if _, err := database.AppendContinuityEntry(ctx, entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldHandoff := continuity.TaskHandoff{
+		SchemaVersion: continuity.TaskHandoffSchemaVersion, ID: "handoff-mcp-old", ProjectID: task.ProjectID, TaskID: task.ID,
+		FromOwner: "alice", ToOwner: "bob", TaskRevision: task.Revision, ClaimID: claim.ID, ClaimRevision: claim.Revision,
+		BaselineSHA256: claim.BaselineSHA256, CheckpointEntryID: "checkpoint-handoff-mcp-old",
+		CheckpointSummary: "Parser implementation is ready for independent verification.",
+		Status:            continuity.TaskHandoffDraft, Revision: 1, CreatedAt: "2026-10-20T10:00:01Z", UpdatedAt: "2026-10-20T10:00:01Z",
+	}
+	appendHandoffEvent("handoff-event-mcp-old-draft", "drafted", 0, "alice", oldHandoff.CreatedAt, oldHandoff)
+	oldHandoff.Status = continuity.TaskHandoffCancelled
+	oldHandoff.Revision = 2
+	oldHandoff.UpdatedAt = "2026-10-20T10:00:02Z"
+	appendHandoffEvent("handoff-event-mcp-old-cancel", "cancelled", 1, "alice", oldHandoff.UpdatedAt, oldHandoff)
+	handoff := oldHandoff
+	handoff.ID = "handoff-mcp-offer"
+	handoff.CheckpointEntryID = "checkpoint-handoff-mcp-offer"
+	handoff.Status = continuity.TaskHandoffDraft
+	handoff.Revision = 1
+	handoff.CreatedAt = "2026-10-20T10:00:03Z"
+	handoff.UpdatedAt = handoff.CreatedAt
+	appendHandoffEvent("handoff-event-mcp-offer-draft", "drafted", 0, "alice", handoff.CreatedAt, handoff)
+	handoff.Status = continuity.TaskHandoffOffered
+	handoff.Revision = 2
+	handoff.UpdatedAt = "2026-10-20T10:00:04Z"
+	appendHandoffEvent("handoff-event-mcp-offer", "offered", 1, "alice", handoff.UpdatedAt, handoff)
+	server := New(database)
+	value, err := server.callTool(ctx, toolCallParams{
+		Name: "threadforge_task_handoffs", Arguments: json.RawMessage(`{"task_id":"task-handoff-mcp","limit":1}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, ok := value.(continuity.TaskHandoffPage)
+	if !ok || page.SchemaVersion != continuity.TaskHandoffPageSchemaVersion || page.TotalCount != 2 ||
+		page.Offset != 0 || page.Limit != 1 || !page.HasMore || len(page.Handoffs) != 1 ||
+		page.Handoffs[0].ID != oldHandoff.ID || page.Handoffs[0].Status != continuity.TaskHandoffCancelled ||
+		page.ActionReady || !page.GuidanceOnly || page.ExecutionAuthorized {
+		t.Fatalf("handoff page = %#v, type assertion = %t", value, ok)
+	}
+	encoded, err := json.Marshal(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "execution_authorized\":true") {
+		t.Fatalf("handoff read granted execution authority: %s", encoded)
+	}
+	second, err := server.callTool(ctx, toolCallParams{
+		Name: "threadforge_task_handoffs", Arguments: json.RawMessage(`{"task_id":"task-handoff-mcp","limit":1,"offset":1}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondPage := second.(continuity.TaskHandoffPage)
+	if len(secondPage.Handoffs) != 1 || secondPage.Handoffs[0].ID != handoff.ID ||
+		secondPage.Handoffs[0].Status != continuity.TaskHandoffOffered || secondPage.TotalCount != 2 || secondPage.HasMore {
+		t.Fatalf("second handoff page = %#v", secondPage)
+	}
+	empty, err := server.callTool(ctx, toolCallParams{
+		Name: "threadforge_task_handoffs", Arguments: json.RawMessage(`{"task_id":"task-handoff-mcp","offset":2}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyPage := empty.(continuity.TaskHandoffPage)
+	emptyJSON, err := json.Marshal(emptyPage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(emptyPage.Handoffs) != 0 || emptyPage.TotalCount != 2 || emptyPage.HasMore || !strings.Contains(string(emptyJSON), `"handoffs":[]`) {
+		t.Fatalf("handoff page beyond end = %s", emptyJSON)
+	}
+	for _, args := range []string{
+		`{"task_id":"task-handoff-mcp","limit":101}`,
+		`{"task_id":"task-handoff-mcp","offset":-1}`,
+		`{"task_id":"task-handoff-mcp","unexpected":true}`,
+	} {
+		if _, err := server.callTool(ctx, toolCallParams{Name: "threadforge_task_handoffs", Arguments: json.RawMessage(args)}); err == nil {
+			t.Fatalf("invalid handoff read args accepted: %s", args)
+		}
+	}
+	for _, definition := range definitions() {
+		if definition.Name == "threadforge_task_handoffs" {
+			if definition.Annotations["readOnlyHint"] != true || !strings.Contains(definition.Description, "never drafts") {
+				t.Fatalf("handoff tool is not clearly read-only: %#v", definition)
+			}
+			return
+		}
+	}
+	t.Fatal("threadforge_task_handoffs tool is not registered")
 }
 
 func TestTaskResumeContextBundlesPlanAndHandoffWithoutAuthorizing(t *testing.T) {

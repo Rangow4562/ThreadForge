@@ -3500,6 +3500,23 @@ def test_task_handoff_schemas_bind_owner_claim_checkpoint_and_advisory_status():
     validate("task-handoff-read-v1.schema.json", read)
     with pytest.raises(ValidationError):
         validate("task-handoff-read-v1.schema.json", {**read, "execution_authorized": True})
+    page = {
+        "schema_version": "threadforge.task-handoff-page.v1",
+        "task_id": "task-one",
+        "handoffs": [handoff],
+        "total_count": 1,
+        "offset": 0,
+        "limit": 20,
+        "has_more": False,
+        "action_ready": False,
+        "guidance_only": True,
+        "execution_authorized": False,
+    }
+    validate("task-handoff-page-v1.schema.json", page)
+    with pytest.raises(ValidationError):
+        validate("task-handoff-page-v1.schema.json", {**page, "execution_authorized": True})
+    with pytest.raises(ValidationError):
+        validate("task-handoff-page-v1.schema.json", {**page, "handoffs": [handoff] * 101, "limit": 100})
     with pytest.raises(ValidationError):
         validate("task-handoff-event-v1.schema.json", {
             "schema_version": "threadforge.task-handoff-event.v1",

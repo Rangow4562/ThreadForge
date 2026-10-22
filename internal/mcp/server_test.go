@@ -517,6 +517,80 @@ func TestProcedureMCPKeepsPoisonedApprovedInstructionsNonAuthorizing(t *testing.
 	}
 }
 
+func TestProcedureMCPAgentReadsWithholdPrivateLocalTraceReferences(t *testing.T) {
+	procedures, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer procedures.Close()
+	const privateTraceRef = "local://mcp/private-trace"
+	addApprovedProcedureWithEvidence(t, procedures, "private-trace-procedure", nil,
+		"Run the focused regression test.", []proceduregraph.Evidence{{
+			Origin: "trace", ContentSHA256: strings.Repeat("a", 64), LocalTraceRef: privateTraceRef, Redacted: true,
+		}})
+	server := New(procedures)
+
+	for _, tool := range []toolCallParams{
+		{Name: "threadforge_procedure_list", Arguments: json.RawMessage(`{"project_id":"repo"}`)},
+		{Name: "threadforge_procedure_get", Arguments: json.RawMessage(`{"procedure_id":"private-trace-procedure"}`)},
+		{Name: "threadforge_procedure_guide", Arguments: json.RawMessage(`{"procedure_id":"private-trace-procedure","seeds":["compile"],"hops":1,"max_nodes":8}`)},
+		{Name: "threadforge_context_get", Arguments: json.RawMessage(`{"project_id":"repo","query":"regression","paths":["src/main.go"],"max_items":4,"max_tokens":1000}`)},
+	} {
+		value, err := server.callTool(context.Background(), tool)
+		if err != nil {
+			t.Fatalf("%s failed: %v", tool.Name, err)
+		}
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), privateTraceRef) {
+			t.Fatalf("%s exposed private local trace reference: %s", tool.Name, data)
+		}
+		if (tool.Name == "threadforge_procedure_list" || tool.Name == "threadforge_procedure_get") &&
+			(!strings.Contains(string(data), "private-trace-procedure") || !strings.Contains(string(data), strings.Repeat("a", 64))) {
+			t.Fatalf("%s omitted the sanitized procedure or its redacted evidence digest: %s", tool.Name, data)
+		}
+	}
+	stored, err := procedures.Get(context.Background(), "private-trace-procedure")
+	if err != nil || len(stored.Evidence) != 1 || stored.Evidence[0].LocalTraceRef != privateTraceRef {
+		t.Fatalf("local trace reference was not retained in the private store: graph=%#v error=%v", stored, err)
+	}
+
+	protocolVersion := supportedVersions[len(supportedVersions)-1]
+	input := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"` + protocolVersion + `","capabilities":{},"clientInfo":{"name":"privacy-test","version":"1"}}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n" +
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"threadforge_procedure_get","arguments":{"procedure_id":"private-trace-procedure"}}}` + "\n"
+	var rpcOutput bytes.Buffer
+	if err := New(procedures).ServeStdio(context.Background(), strings.NewReader(input), &rpcOutput); err != nil {
+		t.Fatal(err)
+	}
+	responses := strings.Split(strings.TrimSpace(rpcOutput.String()), "\n")
+	if len(responses) != 2 {
+		t.Fatalf("unexpected JSON-RPC response count: %s", rpcOutput.String())
+	}
+	var rpcResponse struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(responses[1]), &rpcResponse); err != nil {
+		t.Fatalf("decode JSON-RPC procedure_get response: %v: %s", err, responses[1])
+	}
+	if len(rpcResponse.Result.Content) != 1 {
+		t.Fatalf("JSON-RPC procedure_get returned unexpected content: %s", responses[1])
+	}
+	procedureResult := rpcResponse.Result.Content[0].Text
+	if strings.Contains(procedureResult, privateTraceRef) ||
+		!strings.Contains(procedureResult, "private-trace-procedure") ||
+		!strings.Contains(procedureResult, `"guidance_only":true`) ||
+		!strings.Contains(procedureResult, `"action_ready":false`) {
+		t.Fatalf("JSON-RPC procedure_get response leaked private trace metadata or lost its advisory graph: %s", rpcOutput.String())
+	}
+}
+
 func TestMCPProcedureReadsSurfaceFreshnessAndWithholdStaleGuidance(t *testing.T) {
 	procedures, err := store.Open(":memory:")
 	if err != nil {
@@ -1223,6 +1297,13 @@ func addApprovedProcedureWithInstruction(t *testing.T, procedures *store.Store, 
 func addApprovedProcedureWithInstructionAndSources(
 	t *testing.T, procedures *store.Store, id string, sourceFiles []proceduregraph.PathFingerprint, instruction string,
 ) proceduregraph.Graph {
+	return addApprovedProcedureWithEvidence(t, procedures, id, sourceFiles, instruction, nil)
+}
+
+func addApprovedProcedureWithEvidence(
+	t *testing.T, procedures *store.Store, id string, sourceFiles []proceduregraph.PathFingerprint,
+	instruction string, evidence []proceduregraph.Evidence,
+) proceduregraph.Graph {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now()
@@ -1235,7 +1316,8 @@ func addApprovedProcedureWithInstructionAndSources(
 			{ID: "compile", Kind: proceduregraph.NodeAction, Instruction: instruction},
 			{ID: "verify", Kind: proceduregraph.NodeCheck, Instruction: "Inspect the failing package, then update the regression test."},
 		},
-		Edges: []proceduregraph.Edge{{From: "compile", To: "verify", Relation: proceduregraph.RelationLeadsTo, Condition: "when a test fails"}},
+		Edges:    []proceduregraph.Edge{{From: "compile", To: "verify", Relation: proceduregraph.RelationLeadsTo, Condition: "when a test fails"}},
+		Evidence: evidence,
 	}
 	if err := procedures.CreateProposal(ctx, graph, "tester", "test fixture", now); err != nil {
 		t.Fatal(err)

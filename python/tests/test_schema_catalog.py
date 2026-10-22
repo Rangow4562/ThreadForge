@@ -151,6 +151,37 @@ def test_opencode_task_resume_smoke_schema_records_guidance_without_task_content
         }})
 
 
+def test_opencode_procedure_freshness_smoke_requires_fresh_and_stale_withholding_evidence():
+    schema = json.loads((SCHEMA_DIRECTORY / "opencode-procedure-freshness-smoke-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.opencode-procedure-freshness-smoke.v1",
+        "status": "verified",
+        "host_cli_version": "1.18.31",
+        "provider": "deterministic-loopback-fixture",
+        "fresh_read_status": "complete",
+        "fresh_read_freshness": "verified",
+        "fresh_guidance_returned": True,
+        "local_trace_reference_withheld": True,
+        "stale_read_status": "stale",
+        "stale_read_freshness": "stale",
+        "stale_guidance_withheld": True,
+        "guidance_only": True,
+        "action_ready": False,
+        "execution_authorized": False,
+        "real_model_invocations": 0,
+    }
+    validator.validate(result)
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "stale_guidance_withheld": False})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "fresh_read_freshness": "unverified"})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "local_trace_reference_withheld": False})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "private_procedure_text": "must not enter smoke reports"})
+
+
 def test_antigravity_task_resume_smoke_schema_is_advisory_and_content_free():
     schema = json.loads((SCHEMA_DIRECTORY / "antigravity-task-resume-smoke-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

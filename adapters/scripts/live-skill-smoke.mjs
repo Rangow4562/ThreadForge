@@ -616,6 +616,13 @@ try {
   }
   const captureDigest = createHash('sha256').update(capturedJSON).digest('hex');
 
+  const freshnessSourceRelativePath = 'src/opencode-smoke.ts';
+  const freshnessSourcePath = path.join(projectRoot, ...freshnessSourceRelativePath.split('/'));
+  const freshnessSourceBytes = Buffer.from('export const smokeSource = "initial";\n');
+  mkdirSync(path.dirname(freshnessSourcePath), { recursive: true });
+  writeFileSync(freshnessSourcePath, freshnessSourceBytes, { flag: 'wx', mode: 0o600 });
+  const freshnessSourceSHA256 = createHash('sha256').update(freshnessSourceBytes).digest('hex');
+
   // This deterministic draft and validation report test lifecycle plumbing
   // only. They are not local-model output or held-out acceptance evidence.
   const procedureID = 'cross-harness-opencode-smoke';
@@ -629,6 +636,7 @@ try {
     applicability: { paths: ['src/**'] },
     nodes: [{ id: 'inspect', kind: 'trigger', instruction: 'Inspect the current change and identify its affected behavior.' }],
     edges: [],
+    source_files: [{ path: freshnessSourceRelativePath, sha256: freshnessSourceSHA256 }],
     evidence: [{
       origin: 'trace', content_sha256: captureDigest, harness: 'opencode',
       observed_at: capturedEvents[0].timestamp, local_trace_ref: 'local://smoke/private-trace', redacted: true,
@@ -767,7 +775,47 @@ try {
   assert.match(openCodeMcpStatus, /connected/i, 'OpenCode did not establish the Threadforge MCP connection');
   const openCodeAgentMcpRead = await runOpenCodeAgentMcpRead(procedureID, graph.nodes[0].instruction, {
     hostVersion: openCodeVersion,
+    requiredResultMarkers: [
+      '"status":"complete"', '"freshness":"verified"',
+      '"guidance_only":true', '"action_ready":false',
+    ],
+    forbiddenResultMarkers: ['local://smoke/private-trace'],
   });
+  writeFileSync(freshnessSourcePath, 'export const smokeSource = "changed-after-approval";\n', { mode: 0o600 });
+  const openCodeAgentStaleMcpRead = await runOpenCodeAgentMcpRead(
+    procedureID,
+    '"freshness":"stale"',
+    {
+      hostVersion: openCodeVersion,
+      prompt: 'Read the approved procedure after its source has changed. Report only its freshness status; do not repeat its guidance.',
+      finalResponse: 'The approved procedure is stale, so its instructions were withheld.',
+      expectedFinalText: 'instructions were withheld',
+      requiredResultMarkers: [
+        '"status":"stale"', '"freshness":"stale"',
+        '"guidance_only":true', '"action_ready":false',
+      ],
+      forbiddenResultMarkers: [graph.title, graph.nodes[0].instruction, 'local://smoke/private-trace'],
+    },
+  );
+  const openCodeProcedureFreshness = {
+    schema_version: 'threadforge.opencode-procedure-freshness-smoke.v1',
+    status: 'verified',
+    host_cli_version: openCodeVersion,
+    provider: 'deterministic-loopback-fixture',
+    fresh_read_status: 'complete',
+    fresh_read_freshness: 'verified',
+    fresh_guidance_returned: openCodeAgentMcpRead.required_result_markers_verified,
+    local_trace_reference_withheld: openCodeAgentMcpRead.forbidden_result_markers_absent &&
+      openCodeAgentStaleMcpRead.forbidden_result_markers_absent,
+    stale_read_status: 'stale',
+    stale_read_freshness: 'stale',
+    stale_guidance_withheld: openCodeAgentStaleMcpRead.forbidden_result_markers_absent,
+    guidance_only: true,
+    action_ready: false,
+    execution_authorized: false,
+    real_model_invocations: 0,
+  };
+  writeFileSync(freshnessSourcePath, freshnessSourceBytes, { mode: 0o600 });
   const openCodeTaskFixture = {
     id: 'opencode-mcp-resume-smoke-task',
     projectID: 'cross-harness-smoke',
@@ -1157,7 +1205,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v31',
+    schema_version: 'threadforge.installed-skill-smoke.v32',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,
@@ -1184,6 +1232,8 @@ try {
       callback_contract: opencodePluginCallbackSummary,
     },
     opencode_agent_mcp_read: openCodeAgentMcpRead,
+    opencode_agent_stale_mcp_read: openCodeAgentStaleMcpRead,
+    opencode_procedure_freshness: openCodeProcedureFreshness,
     opencode_agent_task_resume: openCodeAgentTaskResume,
     codex_agent_mcp_read: codexAgentMcpRead,
     codex_agent_task_resume: codexAgentTaskResume,
@@ -1258,6 +1308,7 @@ async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = 
     finalResponse = expectedGuidance,
     expectedFinalText = expectedGuidance,
     requiredResultMarkers = [],
+    forbiddenResultMarkers = [],
   } = options;
   const providerID = 'threadforge-fixture';
   const modelID = 'fixture-model';
@@ -1331,9 +1382,10 @@ async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = 
           const compactResultText = resultText.replace(/\s+/g, '');
           const missingMarkers = requiredResultMarkers.filter((marker) =>
             !compactResultText.includes(marker.replace(/\s+/g, '')));
-          if (missingMarkers.length > 0) {
-            fixtureError = 'Threadforge task-resume result did not preserve the required advisory fields';
-            sendFixtureCompletion(request, response, body, { content: 'The task-resume result omitted required advisory safety fields.' });
+          const leakedMarkers = forbiddenResultMarkers.filter((marker) => resultText.includes(marker));
+          if (missingMarkers.length > 0 || leakedMarkers.length > 0) {
+            fixtureError = 'Threadforge MCP result omitted required fields or exposed withheld guidance';
+            sendFixtureCompletion(request, response, body, { content: 'The Threadforge MCP result failed its freshness or advisory safety checks.' });
             return;
           }
           sendFixtureCompletion(request, response, body, { content: finalResponse });
@@ -1429,7 +1481,7 @@ async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = 
     assert.ok(actions.includes('assistant.message.completed'),
       `OpenCode did not send the completed assistant-message event to the local intake; received actions=${actions.join(',') || 'none'}`);
     const serializedPluginEvents = JSON.stringify(pluginEvents);
-    for (const privateValue of [prompt, expectedGuidance, procedureID, 'threadforge-fixture-only']) {
+    for (const privateValue of [prompt, expectedGuidance, procedureID, 'threadforge-fixture-only', ...forbiddenResultMarkers]) {
       assert.equal(serializedPluginEvents.includes(privateValue), false, `OpenCode plugin telemetry retained ${privateValue}`);
     }
     if (toolSuffix === 'threadforge_task_resume_context') {
@@ -1454,6 +1506,10 @@ async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = 
       tool: toolSuffix, tool_call_count: fixtureToolCalls,
       tool_result_observed: toolResultObserved, completion_requests: completionRequests,
       auxiliary_completion_requests: auxiliaryRequests,
+      ...(toolSuffix === 'threadforge_procedure_get' ? {
+        required_result_markers_verified: requiredResultMarkers.length > 0,
+        forbidden_result_markers_absent: forbiddenResultMarkers.length > 0,
+      } : {}),
       plugin_event_delivery: {
         status: 'verified', event_count: pluginEvents.length, actions: [...new Set(actions)].sort(),
         provider: 'loopback-only', prompt_text_retained: false, execution_authorized: false,

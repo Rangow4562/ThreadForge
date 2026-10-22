@@ -98,6 +98,27 @@ func TestSanitizeForShareRemovesLocalTraceReference(t *testing.T) {
 	}
 }
 
+func TestSanitizeForAgentRemovesLocalTraceReferenceWithoutMutatingGraph(t *testing.T) {
+	local := passingGraph()
+	agent, err := SanitizeForAgent(local)
+	if err != nil {
+		t.Fatalf("SanitizeForAgent() error = %v", err)
+	}
+	if agent.Evidence[0].LocalTraceRef != "" {
+		t.Fatalf("agent projection retained local trace reference: %q", agent.Evidence[0].LocalTraceRef)
+	}
+	if local.Evidence[0].LocalTraceRef != "trace-local-17" {
+		t.Fatalf("SanitizeForAgent() mutated stored graph: %#v", local.Evidence[0])
+	}
+	if agent.Evidence[0].ContentSHA256 != local.Evidence[0].ContentSHA256 {
+		t.Fatal("agent projection should retain the redacted evidence digest")
+	}
+	agent.Evidence[0].LocalTraceRef = "changed-agent-copy"
+	if local.Evidence[0].LocalTraceRef != "trace-local-17" {
+		t.Fatal("agent projection shares its evidence slice with the local graph")
+	}
+}
+
 func TestSanitizeForShareRejectsUnredactedEvidence(t *testing.T) {
 	g := passingGraph()
 	g.Evidence[0].Redacted = false

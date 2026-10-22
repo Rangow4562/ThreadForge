@@ -528,7 +528,12 @@ func (h *Handler) listProcedures(w http.ResponseWriter, r *http.Request) {
 	approved := make([]proceduregraph.Graph, 0, len(graphs))
 	for _, graph := range graphs {
 		if graph.Status == proceduregraph.StatusApproved {
-			approved = append(approved, graph)
+			agentGraph, err := proceduregraph.SanitizeForAgent(graph)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, fmt.Errorf("sanitize approved procedure response: %w", err))
+				return
+			}
+			approved = append(approved, agentGraph)
 		}
 	}
 	writeJSON(w, http.StatusOK, approved)
@@ -548,7 +553,12 @@ func (h *Handler) getProcedure(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, store.ErrNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, graph)
+	agentGraph, err := proceduregraph.SanitizeForAgent(graph)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("sanitize approved procedure response: %w", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, agentGraph)
 }
 
 func (h *Handler) listTasks(w http.ResponseWriter, r *http.Request) {

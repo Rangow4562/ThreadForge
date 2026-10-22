@@ -447,7 +447,11 @@ func (s *Server) callTool(ctx context.Context, params toolCallParams) (any, erro
 		approved := make([]proceduregraph.Graph, 0, len(graphs))
 		for _, graph := range graphs {
 			if graph.Status == proceduregraph.StatusApproved {
-				approved = append(approved, graph)
+				agentGraph, err := proceduregraph.SanitizeForAgent(graph)
+				if err != nil {
+					return nil, fmt.Errorf("sanitize approved procedure for agent retrieval: %w", err)
+				}
+				approved = append(approved, agentGraph)
 			}
 		}
 		total := len(approved)
@@ -489,7 +493,11 @@ func (s *Server) callTool(ctx context.Context, params toolCallParams) (any, erro
 			"action_ready": false, "guidance_only": true,
 		}
 		if freshness != "stale" {
-			result["procedure"] = graph
+			agentGraph, err := proceduregraph.SanitizeForAgent(graph)
+			if err != nil {
+				return nil, fmt.Errorf("sanitize approved procedure for agent retrieval: %w", err)
+			}
+			result["procedure"] = agentGraph
 		} else {
 			result["procedure_id"] = graph.ID
 			result["revision"] = graph.Revision

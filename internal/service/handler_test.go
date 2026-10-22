@@ -1298,6 +1298,47 @@ func TestContextMarksChangedProcedureSourceAsStaleAndOmitsIt(t *testing.T) {
 	}
 }
 
+func TestProcedureHTTPAndContextReadsWithholdPrivateLocalTraceReferences(t *testing.T) {
+	handler, procedureStore, _ := testHandler(t)
+	const privateTraceRef = "local://http/private-trace"
+	approvedGraphWithEvidence(t, procedureStore, "private-trace-http", "pkg/**", nil, []proceduregraph.Evidence{{
+		Origin: "trace", ContentSHA256: strings.Repeat("a", 64), LocalTraceRef: privateTraceRef, Redacted: true,
+	}})
+
+	for _, target := range []string{
+		"/v1/procedures?project_id=demo",
+		"/v1/procedures/private-trace-http",
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, localRequest(http.MethodGet, target, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("GET %s returned %d: %s", target, recorder.Code, recorder.Body.String())
+		}
+		if strings.Contains(recorder.Body.String(), privateTraceRef) {
+			t.Fatalf("GET %s exposed private local trace reference: %s", target, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), "private-trace-http") || !strings.Contains(recorder.Body.String(), strings.Repeat("a", 64)) {
+			t.Fatalf("GET %s omitted the procedure or its redacted evidence digest: %s", target, recorder.Body.String())
+		}
+	}
+
+	contextBody := `{"schema_version":"threadforge.context-request.v1","project_id":"demo","query":"build","paths":["pkg/build.go"],"max_items":4,"max_tokens":1000}`
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, localRequest(http.MethodPost, "/v1/context", strings.NewReader(contextBody)))
+	var contextResponse ContextResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &contextResponse); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusOK || strings.Contains(recorder.Body.String(), privateTraceRef) || len(contextResponse.Procedures) != 1 {
+		t.Fatalf("context retrieval exposed private trace reference or failed: status=%d response=%s", recorder.Code, recorder.Body.String())
+	}
+
+	stored, err := procedureStore.Get(context.Background(), "private-trace-http")
+	if err != nil || len(stored.Evidence) != 1 || stored.Evidence[0].LocalTraceRef != privateTraceRef {
+		t.Fatalf("local trace reference was not retained in private storage: graph=%#v error=%v", stored, err)
+	}
+}
+
 func TestContextUsesConfiguredProjectRootAndIgnoresCallerFingerprintClaims(t *testing.T) {
 	root := t.TempDir()
 	sourcePath := filepath.Join(root, "src", "main.go")
@@ -1657,6 +1698,13 @@ func approvedGraph(t *testing.T, store *store.Store, id, applicablePath string) 
 }
 
 func approvedGraphWithSources(t *testing.T, store *store.Store, id, applicablePath string, sourceFiles []proceduregraph.PathFingerprint) proceduregraph.Graph {
+	return approvedGraphWithEvidence(t, store, id, applicablePath, sourceFiles, nil)
+}
+
+func approvedGraphWithEvidence(
+	t *testing.T, store *store.Store, id, applicablePath string,
+	sourceFiles []proceduregraph.PathFingerprint, evidence []proceduregraph.Evidence,
+) proceduregraph.Graph {
 	t.Helper()
 	graph := proceduregraph.Graph{
 		SchemaVersion: proceduregraph.SchemaVersion, ID: id, ProjectID: "demo", Title: "Build procedure",
@@ -1664,6 +1712,7 @@ func approvedGraphWithSources(t *testing.T, store *store.Store, id, applicablePa
 		Applicability: proceduregraph.Applicability{Paths: []string{applicablePath}},
 		Nodes:         []proceduregraph.Node{{ID: "check-build", Kind: proceduregraph.NodeAction, Instruction: "Run the build checks before changes."}},
 		SourceFiles:   sourceFiles,
+		Evidence:      evidence,
 	}
 	ctx := context.Background()
 	now := time.Now()

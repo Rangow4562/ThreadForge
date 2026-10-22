@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/opencode-procedure-freshness-smoke-v1.schema.json",
+  "title": "Threadforge installed OpenCode source-bound procedure freshness smoke",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "host_cli_version", "provider",
+    "fresh_read_status", "fresh_read_freshness", "fresh_guidance_returned", "local_trace_reference_withheld",
+    "stale_read_status", "stale_read_freshness", "stale_guidance_withheld",
+    "guidance_only", "action_ready", "execution_authorized", "real_model_invocations"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.opencode-procedure-freshness-smoke.v1" },
+    "status": { "const": "verified" },
+    "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "provider": { "const": "deterministic-loopback-fixture" },
+    "fresh_read_status": { "const": "complete" },
+    "fresh_read_freshness": { "const": "verified" },
+    "fresh_guidance_returned": { "const": true },
+    "local_trace_reference_withheld": { "const": true },
+    "stale_read_status": { "const": "stale" },
+    "stale_read_freshness": { "const": "stale" },
+    "stale_guidance_withheld": { "const": true },
+    "guidance_only": { "const": true },
+    "action_ready": { "const": false },
+    "execution_authorized": { "const": false },
+    "real_model_invocations": { "const": 0 }
+  }
+}

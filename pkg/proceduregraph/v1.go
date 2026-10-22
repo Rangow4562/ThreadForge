@@ -89,7 +89,8 @@ type Edge struct {
 }
 
 // Evidence deliberately stores digests and local references, never source text.
-// LocalTraceRef must be removed from team projections.
+// LocalTraceRef is private local metadata and must be removed from team and
+// agent-facing projections.
 type Evidence struct {
 	Origin        string `json:"origin"`
 	ContentSHA256 string `json:"content_sha256"`
@@ -396,6 +397,17 @@ func Supersede(g Graph, replacementID string) (Graph, error) {
 	return g, nil
 }
 
+// SanitizeForAgent returns a validated, non-mutating projection for retrieval
+// by an agent. It removes local-only trace references without changing the
+// stored graph. Callers remain responsible for enforcing approval and
+// freshness before returning guidance.
+func SanitizeForAgent(g Graph) (Graph, error) {
+	if err := Validate(g); err != nil {
+		return Graph{}, err
+	}
+	return withoutLocalTraceReferences(g), nil
+}
+
 func SanitizeForShare(g Graph) (Graph, error) {
 	if err := Validate(g); err != nil {
 		return Graph{}, err
@@ -408,17 +420,21 @@ func SanitizeForShare(g Graph) (Graph, error) {
 			return Graph{}, errors.New("unredacted evidence cannot be shared")
 		}
 	}
-	shared := g
-	shared.Nodes = append([]Node(nil), g.Nodes...)
-	shared.Edges = append([]Edge(nil), g.Edges...)
-	shared.Evidence = append([]Evidence(nil), g.Evidence...)
-	shared.SourceFiles = append([]PathFingerprint(nil), g.SourceFiles...)
-	shared.Applicability.Modules = append([]string(nil), g.Applicability.Modules...)
-	shared.Applicability.Paths = append([]string(nil), g.Applicability.Paths...)
-	for i := range shared.Evidence {
-		shared.Evidence[i].LocalTraceRef = ""
+	return withoutLocalTraceReferences(g), nil
+}
+
+func withoutLocalTraceReferences(g Graph) Graph {
+	projected := g
+	projected.Nodes = append([]Node(nil), g.Nodes...)
+	projected.Edges = append([]Edge(nil), g.Edges...)
+	projected.Evidence = append([]Evidence(nil), g.Evidence...)
+	projected.SourceFiles = append([]PathFingerprint(nil), g.SourceFiles...)
+	projected.Applicability.Modules = append([]string(nil), g.Applicability.Modules...)
+	projected.Applicability.Paths = append([]string(nil), g.Applicability.Paths...)
+	for i := range projected.Evidence {
+		projected.Evidence[i].LocalTraceRef = ""
 	}
-	return shared, nil
+	return projected
 }
 
 func ApplicableToPath(g Graph, changedPath string) bool {

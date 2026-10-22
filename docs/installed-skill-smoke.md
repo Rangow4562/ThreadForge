@@ -6,6 +6,10 @@ Smoke v30 adds a Gemini CLI project `BeforeTool` plan-gate check. Installed Gemi
 
 Smoke v31 probes Antigravity CLI `1.4.2` project `PreToolUse` discovery with one schema-valid `write_to_file` request, no CLI sandbox, an isolated project, and a local fake provider. A content-free observer recorded zero guard callbacks; the host returned a generic tool error and the sentinel remained absent. The result is `status=not_observed`, not evidence that Threadforge denied the write. No real model was called. Treat Antigravity CLI project plan-gate enforcement as unverified for this version; the IDE hook path is not covered by this smoke.
 
+Smoke v32 adds two installed OpenCode reads for one approved source-bound procedure. The deterministic loopback provider first verifies a fresh `threadforge_procedure_get` response is `complete`/`verified`, advisory-only, and omits the private local trace reference; after the bound source file changes, a second read must report `stale` and withhold the procedure title, instructions, and trace reference. The content-free subresult follows `threadforge.opencode-procedure-freshness-smoke.v1`; the run makes zero real-model calls. This checks retrieval transport and privacy/freshness framing for the installed CLI only, not model adherence, task efficacy, or cutover acceptance.
+
+October 22, 2026 local reruns reached and passed the OpenCode fresh/stale subcheck and the subsequent Codex procedure read, then stopped at the existing Antigravity CLI plan-gate probe. The host result was `status=not-verified`, `reason=guard_denial_not_observed`, zero hook callbacks, `guard_decision=unknown`, `host_tool_error_observed=false`, and no sentinel file. This does not establish a Threadforge denial. The v1 Antigravity report schema currently requires `host_tool_error_observed=true`, so no aggregate v32 report was emitted; treat the installed-host gate as blocked, not passed.
+
 Run the no-model host check from `adapters/`:
 
 ```powershell

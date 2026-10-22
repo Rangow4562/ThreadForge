@@ -325,6 +325,60 @@ def test_codex_cli_plan_gate_smoke_schema_records_only_a_denied_shell_attempt():
         validator.validate({**unsupported, "denial_feedback_observed": True})
 
 
+def test_copilot_cli_plan_gate_smoke_schema_records_all_four_denials_without_content():
+    schema = json.loads((SCHEMA_DIRECTORY / "copilot-cli-plan-gate-smoke-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.copilot-cli-plan-gate-smoke.v1",
+        "status": "verified",
+        "host_cli_version": "GitHub Copilot CLI 1.0.64",
+        "hook_event": "preToolUse",
+        "guard_fixture": "missing-task",
+        "provider": "deterministic-loopback-fixture",
+        "tool_attempts": [
+            {"tool": tool, "tool_available": True, "availability_reason": "exposed", "attempt_count": 1, "denial_feedback_observed": True, "target_state_unchanged": True}
+            for tool in ("create", "edit", "apply_patch", "str_replace_editor")
+        ],
+        "hook_denial_count": 4,
+        "write_effects_observed": 0,
+        "provider_requests": 5,
+        "provider_routes_loopback_only": True,
+        "real_model_invocations": 0,
+    }
+    validator.validate(result)
+    validator.validate({
+        **result,
+        "status": "not-installed",
+        "host_cli_version": None,
+        "provider": None,
+        "tool_attempts": [],
+        "hook_denial_count": 0,
+        "provider_requests": 0,
+    })
+    partial_attempts = [*result["tool_attempts"]]
+    partial_attempts[2] = {
+        "tool": "apply_patch", "tool_available": False, "availability_reason": "not-exposed", "attempt_count": 0,
+        "denial_feedback_observed": False, "target_state_unchanged": True,
+    }
+    validator.validate({
+        **result,
+        "status": "partial",
+        "tool_attempts": partial_attempts,
+        "hook_denial_count": 3,
+    })
+    for invalid in (
+        {**result, "tool_attempts": [{**result["tool_attempts"][0], "denial_feedback_observed": False}, *result["tool_attempts"][1:]]},
+        {**result, "tool_attempts": list(reversed(result["tool_attempts"]))},
+        {**result, "tool_attempts": [{**result["tool_attempts"][0], "tool_available": False}, *result["tool_attempts"][1:]]},
+        {**result, "write_effects_observed": 1},
+        {**result, "real_model_invocations": 1},
+        {**result, "target_path": "private/workspace/file.txt"},
+        {**result, "prompt": "create a private file"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_copilot_task_resume_smoke_schema_is_advisory_and_content_free():
     schema = json.loads((SCHEMA_DIRECTORY / "copilot-task-resume-smoke-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

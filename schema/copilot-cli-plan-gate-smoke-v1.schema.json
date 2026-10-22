@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/copilot-cli-plan-gate-smoke-v1.schema.json",
+  "title": "Threadforge installed GitHub Copilot CLI task-plan gate smoke result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "host_cli_version",
+    "hook_event",
+    "guard_fixture",
+    "provider",
+    "tool_attempts",
+    "hook_denial_count",
+    "write_effects_observed",
+    "provider_requests",
+    "provider_routes_loopback_only",
+    "real_model_invocations"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.copilot-cli-plan-gate-smoke.v1" },
+    "status": { "enum": ["verified", "partial", "not-installed"] },
+    "host_cli_version": {
+      "oneOf": [
+        { "type": "string", "minLength": 1, "maxLength": 128 },
+        { "type": "null" }
+      ]
+    },
+    "hook_event": { "const": "preToolUse" },
+    "guard_fixture": { "const": "missing-task" },
+    "provider": {
+      "oneOf": [
+        { "const": "deterministic-loopback-fixture" },
+        { "type": "null" }
+      ]
+    },
+    "tool_attempts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tool", "tool_available", "availability_reason", "attempt_count", "denial_feedback_observed", "target_state_unchanged"],
+        "properties": {
+          "tool": { "enum": ["create", "edit", "apply_patch", "str_replace_editor"] },
+          "tool_available": { "type": "boolean" },
+          "availability_reason": { "enum": ["exposed", "not-exposed", "unsupported-arguments"] },
+          "attempt_count": { "enum": [0, 1] },
+          "denial_feedback_observed": { "type": "boolean" },
+          "target_state_unchanged": { "const": true }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "tool_available": { "const": true },
+              "availability_reason": { "const": "exposed" },
+              "attempt_count": { "const": 1 },
+              "denial_feedback_observed": { "const": true }
+            }
+          },
+          {
+            "properties": {
+              "tool_available": { "const": false },
+              "availability_reason": { "enum": ["not-exposed", "unsupported-arguments"] },
+              "attempt_count": { "const": 0 },
+              "denial_feedback_observed": { "const": false }
+            }
+          }
+        ]
+      }
+    },
+    "hook_denial_count": { "type": "integer", "minimum": 0, "maximum": 4 },
+    "write_effects_observed": { "const": 0 },
+    "provider_requests": { "type": "integer", "minimum": 0 },
+    "provider_routes_loopback_only": { "const": true },
+    "real_model_invocations": { "const": 0 }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "status": { "const": "verified" },
+        "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "provider": { "const": "deterministic-loopback-fixture" },
+        "tool_attempts": {
+          "prefixItems": [
+            { "properties": { "tool": { "const": "create" } } },
+            { "properties": { "tool": { "const": "edit" } } },
+            { "properties": { "tool": { "const": "apply_patch" } } },
+            { "properties": { "tool": { "const": "str_replace_editor" } } }
+          ],
+          "items": false,
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "hook_denial_count": { "const": 4 },
+        "provider_requests": { "type": "integer", "minimum": 1 }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "partial" },
+        "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "provider": { "const": "deterministic-loopback-fixture" },
+        "tool_attempts": {
+          "prefixItems": [
+            { "properties": { "tool": { "const": "create" } } },
+            { "properties": { "tool": { "const": "edit" } } },
+            { "properties": { "tool": { "const": "apply_patch" } } },
+            { "properties": { "tool": { "const": "str_replace_editor" } } }
+          ],
+          "items": false,
+          "minItems": 4,
+          "maxItems": 4,
+          "contains": { "properties": { "tool_available": { "const": false } } }
+        },
+        "hook_denial_count": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "provider_requests": { "type": "integer", "minimum": 1 }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "not-installed" },
+        "host_cli_version": { "type": "null" },
+        "provider": { "type": "null" },
+        "tool_attempts": { "maxItems": 0 },
+        "hook_denial_count": { "const": 0 },
+        "provider_requests": { "const": 0 }
+      }
+    }
+  ]
+}

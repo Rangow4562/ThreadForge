@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -547,9 +548,20 @@ func TestProcedureMCPAgentReadsWithholdPrivateLocalTraceReferences(t *testing.T)
 		if strings.Contains(string(data), privateTraceRef) {
 			t.Fatalf("%s exposed private local trace reference: %s", tool.Name, data)
 		}
-		if (tool.Name == "threadforge_procedure_list" || tool.Name == "threadforge_procedure_get") &&
+		if tool.Name == "threadforge_procedure_list" {
+			if !strings.Contains(string(data), "private-trace-procedure") ||
+				!strings.Contains(string(data), `"schema_version":"threadforge.procedure-list.v1"`) ||
+				!strings.Contains(string(data), `"status":"incomplete"`) ||
+				!strings.Contains(string(data), `"freshness":"unverified"`) ||
+				!strings.Contains(string(data), `"instructions_included":false`) ||
+				strings.Contains(string(data), strings.Repeat("a", 64)) || strings.Contains(string(data), "Run go test") ||
+				strings.Contains(string(data), `"nodes"`) || strings.Contains(string(data), `"evidence"`) {
+				t.Fatalf("procedure list did not return only versioned metadata: %s", data)
+			}
+		}
+		if tool.Name == "threadforge_procedure_get" &&
 			(!strings.Contains(string(data), "private-trace-procedure") || !strings.Contains(string(data), strings.Repeat("a", 64))) {
-			t.Fatalf("%s omitted the sanitized procedure or its redacted evidence digest: %s", tool.Name, data)
+			t.Fatalf("procedure get omitted the sanitized graph or its redacted evidence digest: %s", data)
 		}
 	}
 	stored, err := procedures.Get(context.Background(), "private-trace-procedure")
@@ -588,6 +600,81 @@ func TestProcedureMCPAgentReadsWithholdPrivateLocalTraceReferences(t *testing.T)
 		!strings.Contains(procedureResult, `"guidance_only":true`) ||
 		!strings.Contains(procedureResult, `"action_ready":false`) {
 		t.Fatalf("JSON-RPC procedure_get response leaked private trace metadata or lost its advisory graph: %s", rpcOutput.String())
+	}
+}
+
+func TestProcedureMCPListReturnsMetadataWithFreshnessButNoGuidance(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "src", "app.go")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package app\nfunc Build() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := procedurefiles.FingerprintSources(root, []string{"src/app.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	procedures, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer procedures.Close()
+	addApprovedProcedureWithSources(t, procedures, "list-freshness-proc", baseline)
+	addApprovedProcedureWithSources(t, procedures, "list-unverified-proc", nil)
+	server := NewWithProjectStores(procedures, nil, nil, root)
+
+	call := func(offset int) proceduregraph.ProcedureListResponse {
+		t.Helper()
+		value, callErr := server.callTool(context.Background(), toolCallParams{
+			Name: "threadforge_procedure_list", Arguments: json.RawMessage(fmt.Sprintf(`{"project_id":"repo","limit":1,"offset":%d}`, offset)),
+		})
+		if callErr != nil {
+			t.Fatal(callErr)
+		}
+		data, marshalErr := json.Marshal(value)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		var response proceduregraph.ProcedureListResponse
+		if err := json.Unmarshal(data, &response); err != nil {
+			t.Fatalf("decode versioned procedure list response: %v: %s", err, data)
+		}
+		if strings.Contains(string(data), "Run go test") || strings.Contains(string(data), `"nodes"`) ||
+			strings.Contains(string(data), `"evidence"`) || !strings.Contains(string(data), `"instructions_included":false`) {
+			t.Fatalf("procedure list returned guidance-bearing fields: %s", data)
+		}
+		return response
+	}
+
+	current := call(0)
+	if current.SchemaVersion != proceduregraph.ProcedureListSchemaVersion || current.TotalCount != 2 ||
+		current.Count != 1 || current.Offset != 0 || !current.HasMore || current.NextOffset != 1 ||
+		len(current.Procedures) != 1 {
+		t.Fatalf("unexpected current procedure list pagination/contract: %#v", current)
+	}
+	item := current.Procedures[0]
+	if item.ID != "list-freshness-proc" || item.Status != "complete" || item.Freshness != "verified" ||
+		item.InstructionsIncluded || len(item.Gaps) != 0 {
+		t.Fatalf("current procedure list metadata is not verified: %#v", item)
+	}
+	unverified := call(1)
+	if unverified.TotalCount != 2 || unverified.Count != 1 || unverified.Offset != 1 ||
+		unverified.HasMore || unverified.NextOffset != 2 || len(unverified.Procedures) != 1 ||
+		unverified.Procedures[0].ID != "list-unverified-proc" ||
+		unverified.Procedures[0].Status != "incomplete" || unverified.Procedures[0].Freshness != "unverified" {
+		t.Fatalf("procedure list pagination or unverified metadata was not preserved: %#v", unverified)
+	}
+
+	if err := os.WriteFile(sourcePath, []byte("package app\nfunc Build() { changed := true; _ = changed }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := call(0)
+	item = stale.Procedures[0]
+	if item.Status != "stale" || item.Freshness != "stale" || len(item.Gaps) != 1 ||
+		item.InstructionsIncluded {
+		t.Fatalf("stale procedure list metadata did not expose only its freshness gap: %#v", item)
 	}
 }
 

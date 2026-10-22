@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.invalid/schema/procedure-list-v1.schema.json",
+  "title": "Threadforge Procedure List v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "total_count", "count", "offset", "has_more", "next_offset", "procedures"],
+  "properties": {
+    "schema_version": { "const": "threadforge.procedure-list.v1" },
+    "total_count": { "type": "integer", "minimum": 0 },
+    "count": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "offset": { "type": "integer", "minimum": 0 },
+    "has_more": { "type": "boolean" },
+    "next_offset": { "type": "integer", "minimum": 0 },
+    "procedures": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/procedure" }
+    }
+  },
+  "$defs": {
+    "procedure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "revision", "title", "status", "freshness", "gaps", "instructions_included"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "revision": { "type": "integer", "minimum": 1 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "status": { "enum": ["complete", "incomplete", "stale"] },
+        "freshness": { "enum": ["verified", "unverified", "stale"] },
+        "gaps": { "type": "array", "maxItems": 1, "items": { "type": "string", "minLength": 1, "maxLength": 512 } },
+        "instructions_included": { "const": false }
+      }
+    }
+  }
+}

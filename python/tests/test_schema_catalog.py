@@ -483,6 +483,35 @@ def test_schema_catalog_exists_and_is_nonempty():
     assert SCHEMA_PATHS
 
 
+def test_procedure_list_schema_is_versioned_metadata_only():
+    schema = json.loads((SCHEMA_DIRECTORY / "procedure-list-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    response = {
+        "schema_version": "threadforge.procedure-list.v1",
+        "total_count": 1,
+        "count": 1,
+        "offset": 0,
+        "has_more": False,
+        "next_offset": 1,
+        "procedures": [{
+            "id": "compile-procedure",
+            "revision": 2,
+            "title": "Compile procedure",
+            "status": "stale",
+            "freshness": "stale",
+            "gaps": ["source file changed: src/app.go"],
+            "instructions_included": False,
+        }],
+    }
+    validator.validate(response)
+    with pytest.raises(ValidationError):
+        validator.validate({**response, "procedures": [{**response["procedures"][0], "instructions_included": True}]})
+    with pytest.raises(ValidationError):
+        validator.validate({**response, "procedures": [{**response["procedures"][0], "nodes": []}]})
+    with pytest.raises(ValidationError):
+        validator.validate({**response, "procedures": [{**response["procedures"][0], "evidence": []}]})
+
+
 def test_mancode_coordination_summary_schemas_are_inert_and_identifier_safe():
     documents = {
         "mancode-claim-summary-v1.schema.json": {

@@ -257,7 +257,7 @@ func definitions() []toolDefinition {
 		},
 		{
 			Name:        "threadforge_procedure_list",
-			Description: "List approved project procedures with bounded pagination. Draft, rejected, stale, and superseded procedures are not returned. " + storedTextTrustNotice,
+			Description: "List approved project procedure metadata with bounded pagination and source-freshness status. Stale procedures may appear as metadata, but this tool never returns instructions, evidence, or graph nodes; use procedure_get or procedure_guide for freshness-checked guidance. Draft, rejected, and superseded procedures are not returned. " + storedTextTrustNotice,
 			InputSchema: objectSchema(map[string]any{
 				"project_id": map[string]any{"type": "string", "minLength": 1},
 				"limit":      map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
@@ -444,17 +444,13 @@ func (s *Server) callTool(ctx context.Context, params toolCallParams) (any, erro
 		if err != nil {
 			return nil, err
 		}
-		approved := make([]proceduregraph.Graph, 0, len(graphs))
+		approvedGraphs := make([]proceduregraph.Graph, 0, len(graphs))
 		for _, graph := range graphs {
 			if graph.Status == proceduregraph.StatusApproved {
-				agentGraph, err := proceduregraph.SanitizeForAgent(graph)
-				if err != nil {
-					return nil, fmt.Errorf("sanitize approved procedure for agent retrieval: %w", err)
-				}
-				approved = append(approved, agentGraph)
+				approvedGraphs = append(approvedGraphs, graph)
 			}
 		}
-		total := len(approved)
+		total := len(approvedGraphs)
 		if args.Offset > total {
 			args.Offset = total
 		}
@@ -462,8 +458,27 @@ func (s *Server) callTool(ctx context.Context, params toolCallParams) (any, erro
 		if end > total {
 			end = total
 		}
-		return map[string]any{"total_count": total, "count": end - args.Offset, "offset": args.Offset,
-			"has_more": end < total, "next_offset": end, "procedures": approved[args.Offset:end]}, nil
+		approved := make([]proceduregraph.ProcedureListItem, 0, end-args.Offset)
+		for _, graph := range approvedGraphs[args.Offset:end] {
+			status, freshness, reason, err := s.procedureFreshness(graph, nil, nil)
+			if err != nil {
+				return nil, fmt.Errorf("assess approved procedure freshness for list: %w", err)
+			}
+			gaps := []string{}
+			if reason != "" && freshness != "verified" {
+				gaps = append(gaps, reason)
+			}
+			approved = append(approved, proceduregraph.ProcedureListItem{
+				ID: graph.ID, Revision: graph.Revision, Title: graph.Title,
+				Status: status, Freshness: freshness, Gaps: gaps,
+				InstructionsIncluded: false,
+			})
+		}
+		return proceduregraph.ProcedureListResponse{
+			SchemaVersion: proceduregraph.ProcedureListSchemaVersion,
+			TotalCount:    total, Count: end - args.Offset, Offset: args.Offset,
+			HasMore: end < total, NextOffset: end, Procedures: approved,
+		}, nil
 	case "threadforge_procedure_get":
 		var args struct {
 			ProcedureID      string                           `json:"procedure_id"`

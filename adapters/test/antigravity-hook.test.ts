@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { mapAntigravityHookPayload } from '../src/antigravity-hook.ts';
+import { emitAntigravityHookEvent, mapAntigravityHookPayload } from '../src/antigravity-hook.ts';
 
 const capturedAt = new Date('2026-09-25T12:00:00.000Z');
 const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
@@ -57,7 +57,7 @@ test('bounds digests, suppresses secret-like labels, and ignores invalid payload
   assert.equal(mapAntigravityHookPayload([], 'PreToolUse', capturedAt), undefined);
 });
 
-test('Antigravity hook sends only loopback telemetry and emits no host response body', async () => {
+test('Antigravity hook sends only sanitized loopback telemetry', async () => {
   const received: unknown[] = [];
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -69,25 +69,37 @@ test('Antigravity hook sends only loopback telemetry and emits no host response 
   const address = server.address();
   assert.ok(address && typeof address === 'object');
   try {
-    const hook = fileURLToPath(new URL('../src/antigravity-hook.ts', import.meta.url));
-    const child = spawn(process.execPath, ['--experimental-strip-types', hook, '--hook-event=PostToolUse'], {
-      env: { ...process.env, THREADFORGE_EVENT_ENDPOINT: `http://127.0.0.1:${address.port}/v1/events` },
-      stdio: ['pipe', 'pipe', 'pipe'],
+    await emitAntigravityHookEvent({
+      conversationId: 'session-1',
+      toolCall: { name: 'run_command', args: { CommandLine: 'do not retain' } },
+    }, 'PostToolUse', {
+      endpoint: `http://127.0.0.1:${address.port}/v1/events`,
+      timeoutMs: 5000,
     });
-    const output: Buffer[] = [];
-    const errors: Buffer[] = [];
-    child.stdout.on('data', (chunk) => output.push(Buffer.from(chunk)));
-    child.stderr.on('data', (chunk) => errors.push(Buffer.from(chunk)));
-    child.stdin.end(JSON.stringify({ conversationId: 'session-1', toolCall: { name: 'run_command', args: { CommandLine: 'do not retain' } } }));
-    const code = await new Promise<number | null>((resolve, reject) => {
-      child.once('error', reject);
-      child.once('close', resolve);
-    });
-    assert.equal(code, 0, Buffer.concat(errors).toString('utf8'));
-    assert.equal(Buffer.concat(output).toString('utf8'), '');
     assert.equal(received.length, 1);
     assert.equal((received[0] as { harness: { name: string } }).harness.name, 'antigravity_cli');
+    assert.doesNotMatch(JSON.stringify(received), /do not retain/);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
+});
+
+test('Antigravity hook CLI fails open without writing a host response body', async () => {
+  const hook = fileURLToPath(new URL('../src/antigravity-hook.ts', import.meta.url));
+  const child = spawn(process.execPath, ['--experimental-strip-types', hook, '--hook-event=PostToolUse'], {
+    env: { ...process.env, THREADFORGE_EVENT_ENDPOINT: 'https://example.com/v1/events' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const output: Buffer[] = [];
+  const errors: Buffer[] = [];
+  child.stdout.on('data', (chunk) => output.push(Buffer.from(chunk)));
+  child.stderr.on('data', (chunk) => errors.push(Buffer.from(chunk)));
+  child.stdin.end(JSON.stringify({ toolCall: { name: 'run_command' } }));
+  const code = await new Promise<number | null>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', resolve);
+  });
+  assert.equal(code, 0, Buffer.concat(errors).toString('utf8'));
+  assert.equal(Buffer.concat(output).toString('utf8'), '');
+  assert.match(Buffer.concat(errors).toString('utf8'), /capture skipped/);
 });

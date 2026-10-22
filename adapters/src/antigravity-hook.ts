@@ -6,6 +6,7 @@ import { emitEvent, type ThreadforgeEvent } from './emit.ts';
 export const antigravityManagedMarker = '--threadforge-hook=antigravity';
 const maxInputBytes = 1 << 20;
 const maxHashedContentBytes = 64 << 10;
+const defaultEmitTimeoutMs = 250;
 const eventActions: Record<string, string> = {
   PreInvocation: 'agent.invocation_started',
   PostToolUse: 'tool.completed',
@@ -59,6 +60,22 @@ export function mapAntigravityHookPayload(
   }
 
   return event;
+}
+
+/** Sends one privacy-minimized event; timeout and endpoint are injectable for deterministic transport tests. */
+export async function emitAntigravityHookEvent(
+  value: unknown,
+  hookEvent: string,
+  options: { endpoint?: string; timeoutMs?: number } = {},
+): Promise<void> {
+  if (!eventActions[hookEvent]) throw new Error('unsupported hook event');
+  const event = mapAntigravityHookPayload(value, hookEvent);
+  if (event) {
+    await emitEvent(event, {
+      endpoint: options.endpoint ?? process.env.THREADFORGE_EVENT_ENDPOINT,
+      timeoutMs: options.timeoutMs ?? defaultEmitTimeoutMs,
+    });
+  }
 }
 
 function classifyCompletedTool(name: string): string | undefined {
@@ -159,8 +176,7 @@ async function main(): Promise<void> {
   try {
     if (!hookEvent || !eventActions[hookEvent]) throw new Error('unsupported hook event');
     const input = await readBoundedStdin();
-    const event = mapAntigravityHookPayload(JSON.parse(input.toString('utf8')) as unknown, hookEvent);
-    if (event) await emitEvent(event, { endpoint: process.env.THREADFORGE_EVENT_ENDPOINT, timeoutMs: 250 });
+    await emitAntigravityHookEvent(JSON.parse(input.toString('utf8')) as unknown, hookEvent);
   } catch {
     // Capture is observational: failures never write a host decision or block the harness.
     process.stderr.write('threadforge Antigravity hook capture skipped: invalid payload or local intake unavailable\n');

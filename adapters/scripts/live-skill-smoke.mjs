@@ -1063,6 +1063,7 @@ try {
     hook_event: 'PreToolUse',
     tool: antigravityPlanGateResult.tool,
     tool_call_count: antigravityPlanGateResult.tool_call_count,
+    direct_file_tools_declared: antigravityPlanGateResult.direct_file_tools_declared,
     hook_callback_invocations: antigravityPlanGateResult.hook_callback_invocations,
     guard_decision: antigravityPlanGateResult.guard_decision,
     host_tool_error_observed: antigravityPlanGateResult.host_tool_error_observed,

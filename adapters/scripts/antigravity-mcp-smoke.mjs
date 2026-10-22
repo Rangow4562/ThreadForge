@@ -11,7 +11,7 @@ export async function runAntigravityAgentMcpRead({
   projectRoot, home, cliPath, procedureID, expectedGuidance, isolatedEnvironment,
   toolName = 'threadforge_procedure_get', toolArguments, prompt, expectedFinalResponse,
   requiredResultMarkers = [], hostVersion = 'unknown', scriptedFunctionCall, expectedToolResponseMarker,
-  sandbox = true,
+  sandbox = true, permissionAllowRules, executionMode,
 }) {
   const requestedArguments = toolArguments ?? { procedure_id: procedureID };
   const finalResponse = expectedFinalResponse ?? expectedGuidance;
@@ -83,6 +83,8 @@ export async function runAntigravityAgentMcpRead({
             Object.keys(part ?? {}).filter((key) => ['text', 'functionCall', 'functionResponse', 'inlineData', 'fileData'].includes(key)).join('+') || 'other'))
             .slice(-12),
           declared_threadforge_tools: declarations.map((item) => item.name).filter((name) => /threadforge|mcp/i.test(name)).slice(0, 16),
+          declared_direct_file_tools: declarations.map((item) => item.name).filter((name) =>
+            ['write_to_file', 'replace_file_content', 'multi_replace_file_content'].includes(name)).slice(0, 8),
           declared_tool_schemas: declarations.filter((item) => item.name.includes(toolName) || /call_mcp_tool/i.test(item.name))
             .map((item) => ({
               name: item.name,
@@ -232,10 +234,18 @@ export async function runAntigravityAgentMcpRead({
 
   const settingsPath = path.join(home, '.gemini', 'antigravity-cli', 'settings.json');
   mkdirSync(path.dirname(settingsPath), { recursive: true, mode: 0o700 });
+  const allowedRules = permissionAllowRules ?? [`mcp(threadforge/${toolName})`];
+  if (!Array.isArray(allowedRules) || allowedRules.length < 1 || allowedRules.length > 16 ||
+      allowedRules.some((rule) => typeof rule !== 'string' || rule.length < 1 || rule.length > 1024 || /[\r\n\0]/.test(rule))) {
+    throw new Error('Antigravity smoke permission rules are invalid');
+  }
+  if (executionMode !== undefined && !['accept-edits', 'auto', 'plan'].includes(executionMode)) {
+    throw new Error('Antigravity smoke execution mode is invalid');
+  }
   writeFileSync(settingsPath, `${JSON.stringify({
     modelProvider: 'gemini',
     trustedWorkspaces: [projectRoot],
-    permissions: { allow: [`mcp(threadforge/${toolName})`] },
+    permissions: { allow: allowedRules },
   }, null, 2)}\n`, { flag: 'w', mode: 0o600 });
 
   const endpoint = `http://127.0.0.1:${address.port}/v1beta`;
@@ -265,6 +275,7 @@ export async function runAntigravityAgentMcpRead({
       '--print-timeout', '8s',
       '--model', fixtureModel,
     ];
+    cliArgs.push(...antigravityExecutionModeArgs(executionMode));
     if (sandbox) cliArgs.push('--sandbox');
     const run = await runAntigravityCli(cliArgs, { cwd: projectRoot, env: environment, timeout: 12_000 });
     output = run.stdout;
@@ -347,6 +358,8 @@ export async function runAntigravityPlanGateAttempt({
     isolatedEnvironment,
     hostVersion,
     sandbox: false,
+    executionMode: 'accept-edits',
+    permissionAllowRules: [scopedAntigravityWritePermissionRule(projectRoot, deniedFilePath)],
     toolName: 'write_to_file',
     prompt: 'Create one file in the project and wait for the tool result.',
     expectedFinalResponse: 'The requested file write was denied by the Threadforge task plan gate.',
@@ -386,10 +399,32 @@ export async function runAntigravityPlanGateAttempt({
     status: classification.status,
     reason: classification.reason,
     hook_callback_invocations: audit.length,
+    direct_file_tools_declared: [...new Set(['write_to_file', 'replace_file_content', 'multi_replace_file_content'])]
+      .filter((name) => result.provider_trace?.some((trace) => trace.declared_direct_file_tools?.includes(name))),
     guard_decision: audit.length === 1 ? audit[0]?.decision : 'unknown',
     host_tool_error_observed: hostToolErrorObserved,
     tool_result_observed: hostToolErrorObserved,
   };
+}
+
+export function scopedAntigravityWritePermissionRule(projectRoot, targetPath) {
+  if (typeof projectRoot !== 'string' || typeof targetPath !== 'string' || !projectRoot || !targetPath) {
+    throw new Error('Antigravity scoped write permission requires a project root and target path');
+  }
+  const root = path.resolve(projectRoot);
+  const target = path.resolve(targetPath);
+  const relativeTarget = path.relative(root, target);
+  if (!relativeTarget || path.isAbsolute(relativeTarget) || relativeTarget === '..' ||
+      relativeTarget.startsWith(`..${path.sep}`)) {
+    throw new Error('Antigravity smoke write permission target must be inside the disposable project');
+  }
+  return `write_file (${relativeTarget.split(path.sep).join('/')})`;
+}
+
+export function antigravityExecutionModeArgs(mode) {
+  if (mode === undefined) return [];
+  if (!['accept-edits', 'auto', 'plan'].includes(mode)) throw new Error('Antigravity smoke execution mode is invalid');
+  return ['--mode', mode];
 }
 
 export function classifyAntigravityPlanGateProbe({

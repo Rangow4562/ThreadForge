@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 
-import { classifyAntigravityPlanGateProbe } from '../scripts/antigravity-mcp-smoke.mjs';
+import {
+  antigravityExecutionModeArgs,
+  classifyAntigravityPlanGateProbe,
+  scopedAntigravityWritePermissionRule,
+} from '../scripts/antigravity-mcp-smoke.mjs';
 
 const validFixture = {
   toolCallCount: 1,
@@ -48,4 +53,22 @@ test('fails closed for an unexpected allow, invalid fixture, or repeated invocat
   ]) {
     assert.equal(classifyAntigravityPlanGateProbe(invalid).status, 'not_verified');
   }
+});
+
+test('scopes the plan-gate fixture permission to one project-relative write target', () => {
+  const root = path.resolve('disposable', 'project');
+  assert.equal(
+    scopedAntigravityWritePermissionRule(root, path.join(root, 'src', 'denied.txt')),
+    'write_file (src/denied.txt)',
+  );
+  assert.throws(
+    () => scopedAntigravityWritePermissionRule(root, path.resolve(root, '..', 'outside', 'denied.txt')),
+    /inside the disposable project/,
+  );
+});
+
+test('Antigravity execution mode flags are explicit and constrained', () => {
+  assert.deepEqual(antigravityExecutionModeArgs(undefined), []);
+  assert.deepEqual(antigravityExecutionModeArgs('accept-edits'), ['--mode', 'accept-edits']);
+  assert.throws(() => antigravityExecutionModeArgs('--dangerously-skip-permissions'), /execution mode is invalid/);
 });

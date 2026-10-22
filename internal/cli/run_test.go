@@ -3031,11 +3031,11 @@ func TestEvolutionEngineeringInventoryCLIWritesOnlyVerifiedPrivateBundle(t *test
 	}
 	checkCode := "import sys; from rrsi.inventory import load_domain_inventory; " +
 		"value=load_domain_inventory(sys.argv[1], 'rrsi-engineering-design'); " +
-		"print(f'{len(value.evolve_ids)}:{len(value.heldout_ids)}:{len(value.verified_sources)}')"
+		"print(f'{len(value.evolve_ids)}:{len(value.heldout_ids)}:{len(value.ood_ids)}:{len(value.verified_sources)}')"
 	check := exec.Command(python, "-c", checkCode, bundlePath)
 	check.Env = append(os.Environ(), "PYTHONPATH="+filepath.Join(repositoryRoot, "python"))
 	loaded, err := check.Output()
-	if err != nil || strings.TrimSpace(string(loaded)) != "61:61:2" {
+	if err != nil || strings.TrimSpace(string(loaded)) != "61:0:61:2" {
 		t.Fatal("generated engineering bundle failed the production loader check")
 	}
 	out.Reset()
@@ -5586,6 +5586,76 @@ func TestMemoryLearnTreatsPromptTextAsUntrustedAndBlocksTraceCredentials(t *test
 	cleanJSON, err := json.Marshal(cleanEvents)
 	if err != nil || strings.Contains(string(cleanJSON), "do-not-send-to-model") {
 		t.Fatalf("sanitized trace retained prompt credential: events=%s err=%v", cleanJSON, err)
+	}
+}
+
+func TestMemoryLearnCanBindEvidenceToApplicableProjectFiles(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "src", "agent.go")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package agent\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	event := beacon.NewEvent(beacon.NewEventOptions{Action: "file.edited", Harness: beacon.HarnessInfo{Name: "codex"}})
+	event.File = &beacon.FileInfo{Path: sourcePath}
+	ignored := beacon.NewEvent(beacon.NewEventOptions{Action: "file.edited", Harness: beacon.HarnessInfo{Name: "codex"}})
+	ignored.File = &beacon.FileInfo{Path: filepath.Join(root, "docs", "unrelated.md")}
+	graph := proceduregraph.Graph{Applicability: proceduregraph.Applicability{Paths: []string{"src/**"}}}
+	fingerprints, err := learningSourceFingerprints(root, graph, []beacon.Event{event, ignored})
+	if err != nil || len(fingerprints) != 1 || fingerprints[0].Path != "src/agent.go" || !validLowerSHA256(fingerprints[0].SHA256) {
+		t.Fatalf("source fingerprints=%#v err=%v", fingerprints, err)
+	}
+
+	steps := []struct {
+		Kind        proceduregraph.NodeKind `json:"kind"`
+		Instruction string                  `json:"instruction"`
+	}{{Kind: proceduregraph.NodeAction, Instruction: "Run the focused test."}}
+	observationBytes := []byte(`[{"action":"file.edited","harness":"codex","severity":"info","summary":"A safe summary."}]`)
+	bound := graphFromLearningCandidate("repo:example", "Verify the changed module", graph.Applicability, steps, observationBytes,
+		[]beacon.Event{event}, fingerprints)
+	if len(bound.SourceFiles) != 1 || bound.SourceFiles[0].Path != "src/agent.go" || proceduregraph.Validate(bound) != nil {
+		t.Fatalf("bound learning graph is invalid: %#v err=%v", bound, proceduregraph.Validate(bound))
+	}
+	encoded, err := json.Marshal(bound)
+	if err != nil || strings.Contains(string(encoded), root) || strings.Contains(string(encoded), sourcePath) {
+		t.Fatalf("absolute source path leaked from learned graph: %s err=%v", encoded, err)
+	}
+
+	firstID := bound.ID
+	if err := os.WriteFile(sourcePath, []byte("package agent\n\n// changed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := learningSourceFingerprints(root, graph, []beacon.Event{event})
+	if err != nil || len(changed) != 1 || changed[0].SHA256 == fingerprints[0].SHA256 {
+		t.Fatalf("source change was not fingerprinted: %#v err=%v", changed, err)
+	}
+	changedGraph := graphFromLearningCandidate("repo:example", "Verify the changed module", graph.Applicability, steps, observationBytes,
+		[]beacon.Event{event}, changed)
+	if changedGraph.ID == firstID {
+		t.Fatal("source-bound learning identity did not change when applicable source content changed")
+	}
+}
+
+func TestMemoryLearnSourceBindingFailsClosedWithoutApplicableFiles(t *testing.T) {
+	root := t.TempDir()
+	outsideRoot := t.TempDir()
+	outside := beacon.NewEvent(beacon.NewEventOptions{Action: "file.edited", Harness: beacon.HarnessInfo{Name: "codex"}})
+	outside.File = &beacon.FileInfo{Path: filepath.Join(outsideRoot, "outside.go")}
+	graph := proceduregraph.Graph{Applicability: proceduregraph.Applicability{Paths: []string{"src/**"}}}
+	if _, err := learningSourceFingerprints(root, graph, []beacon.Event{outside}); err == nil {
+		t.Fatal("source binding accepted evidence with no applicable in-project file")
+	}
+
+	tooMany := make([]beacon.Event, maxLearningSourceFiles+1)
+	for index := range tooMany {
+		event := beacon.NewEvent(beacon.NewEventOptions{Action: "file.edited", Harness: beacon.HarnessInfo{Name: "codex"}})
+		event.File = &beacon.FileInfo{Path: filepath.Join("src", fmt.Sprintf("file-%02d.go", index))}
+		tooMany[index] = event
+	}
+	if _, err := learningSourceFingerprints(root, proceduregraph.Graph{}, tooMany); err == nil {
+		t.Fatal("source binding accepted more than the bounded file count")
 	}
 }
 

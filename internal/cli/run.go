@@ -2032,6 +2032,7 @@ func learnMemory(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	input := fs.String("input", "", "sanitized Beacon event JSON/JSONL input")
 	projectID := fs.String("project-id", "", "target project identifier")
+	projectRoot := fs.String("project-root", "", "bind the proposal to applicable files under this project root")
 	modelPath := fs.String("model-path", os.Getenv("THREADFORGE_MODEL_PATH"), "local HF model directory (or THREADFORGE_MODEL_PATH)")
 	device := fs.String("device", "cpu", "local inference device: cpu, mps, cuda, or cuda:N")
 	dtype := fs.String("dtype", "float32", "local model dtype: auto, float32, float16, or bfloat16")
@@ -2042,8 +2043,16 @@ func learnMemory(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *input == "" || strings.TrimSpace(*projectID) == "" || fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory learn --input <events.jsonl> --project-id <id> [--model-path <local-dir>] [--device cpu] [--dtype float32] [--python python] [--actor local-user] [--db <path>]")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory learn --input <events.jsonl> --project-id <id> [--project-root <root>] [--model-path <local-dir>] [--device cpu] [--dtype float32] [--python python] [--actor local-user] [--db <path>]")
 		return 2
+	}
+	if *projectRoot != "" {
+		var err error
+		*projectRoot, err = validateLearningProjectRoot(*projectRoot)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "--project-root must be an existing non-symlink directory")
+			return 2
+		}
 	}
 	if strings.TrimSpace(*modelPath) == "" {
 		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "local_model_not_configured", "candidate": nil}, stderr)
@@ -2110,7 +2119,17 @@ func learnMemory(args []string, stdout, stderr io.Writer) int {
 	if err := decodeJSONBytes(response.Result.Candidate, &candidate); err != nil || candidate.SchemaVersion != "threadforge.learning-candidate.v1" {
 		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "invalid_model_candidate", "candidate": nil}, stderr)
 	}
-	graph := graphFromLearningCandidate(*projectID, candidate.Title, candidate.Applicability, candidate.Steps, observationBytes, events)
+	graph := graphFromLearningCandidate(*projectID, candidate.Title, candidate.Applicability, candidate.Steps, observationBytes, events, nil)
+	if err := proceduregraph.Validate(graph); err != nil {
+		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "candidate_failed_graph_validation", "candidate": nil}, stderr)
+	}
+	if *projectRoot != "" {
+		sourceFiles, err := learningSourceFingerprints(*projectRoot, graph, events)
+		if err != nil {
+			return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "source_fingerprints_unavailable", "candidate": nil}, stderr)
+		}
+		graph = graphFromLearningCandidate(*projectID, candidate.Title, candidate.Applicability, candidate.Steps, observationBytes, events, sourceFiles)
+	}
 	if err := proceduregraph.Validate(graph); err != nil {
 		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "candidate_failed_graph_validation", "candidate": nil}, stderr)
 	}
@@ -2213,8 +2232,15 @@ func graphFromLearningCandidate(projectID, title string, applicability procedure
 	steps []struct {
 		Kind        proceduregraph.NodeKind `json:"kind"`
 		Instruction string                  `json:"instruction"`
-	}, observationBytes []byte, events []beacon.Event) proceduregraph.Graph {
-	hash := sha256.Sum256(append(append([]byte(projectID+"\x00"), observationBytes...), []byte(title)...))
+	}, observationBytes []byte, events []beacon.Event, sourceFiles []proceduregraph.PathFingerprint) proceduregraph.Graph {
+	idInput := append(append([]byte(projectID+"\x00"), observationBytes...), []byte(title)...)
+	for _, source := range sourceFiles {
+		idInput = append(idInput, 0)
+		idInput = append(idInput, source.Path...)
+		idInput = append(idInput, 0)
+		idInput = append(idInput, source.SHA256...)
+	}
+	hash := sha256.Sum256(idInput)
 	id := "learn-" + hex.EncodeToString(hash[:10])
 	nodes := make([]proceduregraph.Node, 0, len(steps))
 	edges := make([]proceduregraph.Edge, 0, max(0, len(steps)-1))
@@ -2238,10 +2264,65 @@ func graphFromLearningCandidate(projectID, title string, applicability procedure
 	return proceduregraph.Graph{
 		SchemaVersion: proceduregraph.SchemaVersion, ID: id, ProjectID: projectID, Title: strings.TrimSpace(title),
 		Revision: 1, Status: proceduregraph.StatusDraft, Applicability: applicability,
-		Nodes: nodes, Edges: edges,
+		SourceFiles: append([]proceduregraph.PathFingerprint(nil), sourceFiles...),
+		Nodes:       nodes, Edges: edges,
 		Evidence: []proceduregraph.Evidence{{Origin: "trace", ContentSHA256: digestBytes(observationBytes), Harness: harness,
 			ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Redacted: true}},
 	}
+}
+
+const maxLearningSourceFiles = 64
+
+func validateLearningProjectRoot(projectRoot string) (string, error) {
+	root, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return "", errors.New("project root is unavailable")
+	}
+	info, err := os.Lstat(root)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("project root must be an existing non-symlink directory")
+	}
+	return root, nil
+}
+
+// learningSourceFingerprints uses paths only as local selectors: no absolute
+// path is sent to Python, written to evidence, or returned to the caller.
+func learningSourceFingerprints(projectRoot string, graph proceduregraph.Graph, events []beacon.Event) ([]proceduregraph.PathFingerprint, error) {
+	paths := make(map[string]bool)
+	for _, event := range events {
+		if event.File == nil || strings.TrimSpace(event.File.Path) == "" {
+			continue
+		}
+		path := event.File.Path
+		if filepath.IsAbs(path) {
+			absolute, err := filepath.Abs(path)
+			if err != nil {
+				continue
+			}
+			relative, err := filepath.Rel(projectRoot, absolute)
+			if err != nil || relative == "." || filepath.IsAbs(relative) {
+				continue
+			}
+			path = relative
+		}
+		path = filepath.ToSlash(filepath.Clean(path))
+		if err := proceduregraph.ValidateRepositoryPath(path); err != nil || !proceduregraph.ApplicableToPath(graph, path) {
+			continue
+		}
+		paths[path] = true
+		if len(paths) > maxLearningSourceFiles {
+			return nil, errors.New("too many source paths in learning evidence")
+		}
+	}
+	if len(paths) == 0 {
+		return nil, errors.New("learning evidence has no applicable project files")
+	}
+	ordered := make([]string, 0, len(paths))
+	for path := range paths {
+		ordered = append(ordered, path)
+	}
+	sort.Strings(ordered)
+	return procedurefiles.FingerprintSources(projectRoot, ordered)
 }
 
 func decodeJSONBytes(data []byte, target any) error {
@@ -3803,7 +3884,7 @@ Commands:
   migrate status [--db <path>]
   migrate records --id <migration-id> [--limit 50] [--offset 0]
   migrate rollback --id <migration-id> --reason <reason> [--db <path>]
-  memory learn --input <events.jsonl> --project-id <id> [--model-path <local-dir>] [--device cpu] [--dtype float32] [--python python] [--actor local-user] [--db <path>]
+  memory learn --input <events.jsonl> --project-id <id> [--project-root <root>] [--model-path <local-dir>] [--device cpu] [--dtype float32] [--python python] [--actor local-user] [--db <path>]
   memory inject --project-id <id> --threadforge-managed-claude-memory=v1 --threadforge-memory=claude-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory inject-codex --project-id <id> --threadforge-managed-codex-memory=v1 --threadforge-memory=codex-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory inject-gemini --project-id <id> --threadforge-managed-gemini-memory=v1 --threadforge-memory=gemini-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]

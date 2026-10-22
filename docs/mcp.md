@@ -15,6 +15,21 @@ For a selected set of supported project MCP hosts, use the preservation-aware [p
 
 The MCP `tools/call` envelope accepts the standard optional `_meta` object and continues to reject unrelated unknown fields. Metadata is ignored by the application and does not alter the requested tool or its authorization semantics.
 
+## Read-only MCP resources
+
+Threadforge also advertises the MCP `resources` capability. `resources/list` is empty because the available entries are parameterized; `resources/templates/list` returns four read-only templates:
+
+| Resource URI | Purpose |
+| --- | --- |
+| `threadforge://context?project_id=<id>&query=<url-encoded-query>` | Bounded project facts and approved procedure context, through the same context retriever as `threadforge_context_get`. |
+| `threadforge://procedure?procedure_id=<id>` | One approved procedure through the same source-freshness path as `threadforge_procedure_get`. |
+| `threadforge://task-resume?task_id=<id>[&session_id=<id>][&max_entries=1..100]` | One explicitly selected task snapshot, including existing plan-only suppression and session-ambiguity rules. |
+| `threadforge://task-discovery?project_id=<id>[&max_entries=1..100]` | Explicit project-scoped discovery; task details are returned only for a unique eligible task. |
+
+Read a template by sending its expanded URI to `resources/read`. Each result is one `application/json` text item containing `threadforge.mcp-resource-document.v1`: the unchanged tool-equivalent result in `data`, a trust notice, `guidance_only=true`, `action_ready=false`, and `execution_authorized=false`. See [the resource document schema](../schema/mcp-resource-document-v1.schema.json). Invalid URIs and read failures do not echo IDs or stored content.
+
+Resource access is an explicit client/application read, not automatic prompt injection. Context resource URIs intentionally carry only project ID and query; use `threadforge_context_get` when path/module applicability or caller fingerprints are needed. A configured project root is still used by the shared retriever for its local freshness checks. Resource support does not convert task notes into permission or prove that a host/model will consume the returned content.
+
 `threadforge_procedure_list` returns the versioned `threadforge.procedure-list.v1` contract: bounded pagination plus procedure ID, revision, title, freshness status, freshness value, and gaps. It is metadata-only: instructions, evidence, and graph nodes are never included. Stale or unverified approved procedures may appear in the index with their gap; use `threadforge_procedure_get` or `threadforge_procedure_guide` to request guidance under freshness checks.
 
 `threadforge_procedure_get` and `threadforge_procedure_guide` return `status`, `freshness`, and `gaps`. If any current source fingerprint differs from the approved graph, the response is `stale` and omits the graph/neighborhood instructions. Missing source hashes or missing baselines for supplied applicable paths return `incomplete`/`unverified`; bounded guidance may be present but must not be represented as current. Matching hashes return `complete`/`verified`, with `action_ready=false` in every case. When `threadforge mcp serve --project-root <root>` is used, the server hashes the graph's recorded source files locally and ignores caller-supplied fingerprints. Without a configured project root, generate hashes locally with `threadforge procedure fingerprint --root <project-root> --path <relative-path> ...` and pass `path_fingerprints`. Caller-supplied digests are assertions, not independent acceptance evidence. See the [procedure list schema](../schema/procedure-list-v1.schema.json).

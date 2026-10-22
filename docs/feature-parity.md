@@ -18,6 +18,8 @@ Installed-smoke evidence classification (October 22, 2026): the Antigravity plan
 
 OpenCode read-only planning profile (October 22, 2026): the project adapter can install `.opencode/agents/threadforge-plan.md`, a selectable primary profile with a wildcard deny followed by `read`, `glob`, and `grep` only. Smoke v35 on CLI 1.18.31 verifies the host-resolved configuration through `debug agent --pure` without model inference. This is static and does not inspect Threadforge task state, enforce plan decisions in other agents, or establish real-task behavior; the Mancode task-plan row remains partial.
 
+MCP resource retrieval (October 22, 2026): the stdio server now advertises read-only `resources` capability with templates for project context, approved procedure reads, explicit task resume, and project task discovery. `resources/read` reuses existing retrieval paths and wraps results in `threadforge.mcp-resource-document.v1` with an explicit untrusted-content notice and non-authorization markers. It is still an application-controlled explicit read, not automatic host injection or model-adherence/effectiveness evidence.
+
 `Complete` means the feature is implemented and has acceptance evidence. A source-code snapshot alone does not count as parity. Threadforge must not replace or uninstall any legacy product while a required row is incomplete.
 
 The pinned source revisions, documented commands/interfaces/formats, benchmark/test inventory, and license/reuse dispositions are summarized in the [legacy source baseline audit](legacy-baseline.md). The audit is a source snapshot only; it does not promote any partial row below to `Complete`.

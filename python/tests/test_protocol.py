@@ -125,7 +125,7 @@ DOMAIN_SPLITS = {
         "jobbench": ["ood"], "gdpval": ["ood"], "apex-agents": ["ood"],
     },
     "rrsi-engineering-design": {
-        "engdesign-open": ["evolve"], "engdesign-v1": ["held_out", "ood"],
+        "engdesign-open": ["evolve"], "engdesign-v1": ["ood"],
         "frontier-eng": ["held_out", "ood"],
     },
 }
@@ -251,6 +251,18 @@ def test_rrsi_domain_result_contract_rejects_inconsistent_metrics_and_wrong_regi
     params["splits"][0]["roles"] = ["held_out"]
     with pytest.raises(ProtocolError, match="roles do not match"):
         dispatch(request("evolution.domain.validate", params))
+
+
+def test_rrsi_engdesign_v1_is_registered_only_as_ood_not_independent_holdout():
+    params = {"domain": "rrsi-engineering-design", "splits": [{
+        "split_id": "engdesign-v1", "roles": ["held_out", "ood"],
+    }]}
+    with pytest.raises(ProtocolError, match="roles do not match"):
+        dispatch(request("evolution.domain.validate", params))
+
+    params["splits"][0]["roles"] = ["ood"]
+    result = dispatch(request("evolution.domain.validate", params))["result"]
+    assert result["splits"][0]["roles"] == ["ood"]
 
 
 def test_rrsi_domain_result_contract_rejects_unregistered_split_ids():

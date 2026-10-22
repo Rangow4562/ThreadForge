@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://threadforge.dev/schema/evolution-domain-inventory-bundle-v1.schema.json",
   "title": "Threadforge private RRSI domain inventory bundle v1",
-  "description": "Local task identifiers and provenance for an anchored evolve and held-out split pair. Do not commit benchmark IDs or task data.",
+  "description": "Local task identifiers and provenance for an anchored evolve/held-out or evolve/OOD split pair. Do not commit benchmark IDs or task data.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "domain", "benchmark_inventories"],

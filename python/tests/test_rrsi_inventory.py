@@ -44,8 +44,28 @@ def test_inventory_loader_routes_only_the_pinned_evolve_and_heldout_sources(tmp_
     assert result.domain == "rrsi-coding"
     assert result.evolve_ids == ("fixture-task-00",)
     assert result.heldout_ids == ("fixture-task-01",)
+    assert result.ood_ids == ()
     assert result.verified_sources == tuple(sorted(sources))
     assert len(result.source_bundle_sha256) == 64
+
+
+def test_engineering_v1_inventory_is_ood_not_an_independent_heldout_set(tmp_path, monkeypatch):
+    bundle = _bundle("rrsi-engineering-design")
+    shared_ids = ["engineering/open-fixture-01", "engineering/open-fixture-02"]
+    for entry in bundle["benchmark_inventories"]:
+        entry["task_ids"] = shared_ids
+    sources = [entry["source_id"] for entry in bundle["benchmark_inventories"]]
+    ids = {task_id.casefold() for task_id in shared_ids}
+    monkeypatch.setattr(
+        inventory_module, "_validate_benchmark_inventories",
+        lambda domain, inventories: (ids, sorted(sources), []),
+    )
+
+    result = load_domain_inventory(_write_bundle(tmp_path, bundle), "rrsi-engineering-design")
+
+    assert result.evolve_ids == tuple(shared_ids)
+    assert result.heldout_ids == ()
+    assert result.ood_ids == tuple(shared_ids)
 
 
 @pytest.mark.parametrize("mutation", ["missing_source", "wrong_domain", "extra_field", "bad_json"])

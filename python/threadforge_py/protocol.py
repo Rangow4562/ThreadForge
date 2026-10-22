@@ -94,7 +94,9 @@ RRSI_DOMAIN_SPLITS = {
     },
     "rrsi-engineering-design": {
         "engdesign-open": ["evolve"],
-        "engdesign-v1": ["held_out", "ood"],
+        # EngDesign v1 hardens the same task IDs and is OOD evaluation,
+        # not an independent ID-based held-out split.
+        "engdesign-v1": ["ood"],
         "frontier-eng": ["held_out", "ood"],
     },
 }

@@ -69,6 +69,8 @@ def test_engineering_domain_uses_verified_open_and_explicit_v1_surfaces(tmp_path
 
     assert domain.evolve_ids() == open_ids
     assert v1_ids == open_ids  # the hardened surface reuses the same task IDs
+    assert domain._inventory.heldout_ids == ()
+    assert domain._inventory.ood_ids == tuple(v1_ids)
     assert domain.heldout_ids() == []  # it is not an ID-based holdout
     assert len(domain.smoke_ids()) == 2
     assert any(re.search(pattern, open_ids[0]) for pattern, _ in domain.critic_patterns)

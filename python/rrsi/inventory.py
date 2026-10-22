@@ -49,7 +49,7 @@ DOMAIN_SPLIT_SOURCES = {
     },
     "rrsi-engineering-design": {
         "evolve": "engdesign-open",
-        "held_out": "engdesign-v1",
+        "ood": "engdesign-v1",
     },
 }
 
@@ -63,6 +63,7 @@ class DomainInventory:
     domain: str
     evolve_ids: tuple[str, ...]
     heldout_ids: tuple[str, ...]
+    ood_ids: tuple[str, ...]
     verified_sources: tuple[str, ...]
     source_bundle_sha256: str
 
@@ -198,17 +199,21 @@ def load_domain_inventory(path: str | os.PathLike[str], domain: str) -> DomainIn
 
     by_source = {entry["source_id"]: tuple(entry["task_ids"]) for entry in inventories}
     evolve_ids = by_source[required_roles["evolve"]]
-    heldout_ids = by_source[required_roles["held_out"]]
+    heldout_source = required_roles.get("held_out")
+    ood_source = required_roles.get("ood")
+    heldout_ids = by_source[heldout_source] if heldout_source else ()
+    ood_ids = by_source[ood_source] if ood_source else ()
     # The pinned EngDesign evolve and v1 surfaces intentionally share IDs;
-    # duplicates across roles are valid and are kept distinct by split.
+    # v1 is OOD evaluation, not an independent ID-based held-out set.
     if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}", task_id)
-           for task_id in (*evolve_ids, *heldout_ids)):
+           for task_id in (*evolve_ids, *heldout_ids, *ood_ids)):
         raise InventoryError("inventory contains an invalid task identifier")
 
     return DomainInventory(
         domain=domain,
         evolve_ids=evolve_ids,
         heldout_ids=heldout_ids,
+        ood_ids=ood_ids,
         verified_sources=tuple(sorted(verified_sources)),
         source_bundle_sha256=hashlib.sha256(raw).hexdigest(),
     )

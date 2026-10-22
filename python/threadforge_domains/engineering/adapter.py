@@ -310,7 +310,7 @@ class EngineeringDomain(Domain):
             raise RuntimeError(f"set {INVENTORY_ENV} to a private, source-verified engineering inventory bundle")
         self._inventory = load_domain_inventory(bundle, "rrsi-engineering-design")
         self._tasks = list(self._inventory.evolve_ids)
-        self._v1_tasks = list(self._inventory.heldout_ids)
+        self._v1_tasks = list(self._inventory.ood_ids)
         self.critic_patterns = self._base_critic_patterns + [
             (rf"(?<![\w-]){re.escape(task_id)}(?![\w-])", "engineering task identifier in diff")
             for task_id in dict.fromkeys(self._tasks + self._v1_tasks)

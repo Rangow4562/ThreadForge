@@ -93,6 +93,14 @@ Pi now also has a partial recursive local-session poller with digest-first mappi
 
 The separate `bootstrap instructions plan|install|update|uninstall` command targets `CLAUDE.md` for Claude Code, `GEMINI.md` for Gemini CLI, `QWEN.md` for Qwen Code, `.github/copilot-instructions.md` for GitHub Copilot, `.goosehints` for Goose, and one shared `AGENTS.md` for Command Code, Cursor, Antigravity, Codex in ChatGPT desktop/CLI/IDE, OpenCode, ZCode, Kimi Code, Qoder, and DeepSeek Harness. It appends only a fixed advisory memory-use block with a digest marker and preserves surrounding content. This is file-generation/configuration evidence only: Goose and the other hosts still require live discovery, precedence, and actual prompt-time use verification; native prompts/skills/commands, session propagation, and other runtimes' portable-skill/manual setup remain separate.
 
+## Beacon documented provider SDK integrations
+
+| Source reference | Threadforge status |
+| --- | --- |
+| `sdk/integrations-openai.mdx` | Partial: `@threadforge/adapter-contracts/genai-sdk` observes `responses.create`, `chat.completions.create`, and `completions.create`; async streams pass through unchanged while terminal status and usage metadata are observed. This is not OpenTelemetry auto-instrumentation. |
+| `sdk/integrations-anthropic.mdx` | Partial: the same module observes `messages.create`, including async streams, without reading message content or provider error text. This is not OpenTelemetry auto-instrumentation. |
+| `sdk/integrations-claude-agent-sdk.mdx`, `sdk/integrations-vercel-ai-sdk.mdx` | Not implemented by this slice; their provider-specific SDK contracts and host/runtime packaging still require separate adapters and verification. |
+
 ## Release gate
 
 For every row, record supported event coverage, install/update/uninstall behavior, unrelated-configuration preservation, rollback, host-version contract, and end-to-end capture evidence. Prefer MCP or portable skill/file access where automatic injection is unsupported. No adapter may enable context injection until its host contract is verified, and no host is marked complete based only on a shared schema or a successful compile.

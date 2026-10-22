@@ -204,7 +204,7 @@ cd adapters
 npm test
 ```
 
-Custom SDK integrations can use `adapters/src/emit.ts` to submit validated Beacon-compatible event envelopes to `http://127.0.0.1:4318/v1/events`. The emitter restricts destinations to loopback, caps batches at 100, and uses a bounded timeout; remote forwarding is not enabled. Go intake redacts content before persistence. This does not count as a host-specific hook, plugin, poller, or browser/cloud integration.
+Custom SDK integrations can use `adapters/src/emit.ts` to submit validated Beacon-compatible event envelopes to the loopback receiver. For direct OpenAI and Anthropic SDK clients, `@threadforge/adapter-contracts/genai-sdk` wraps supported create calls and reports bounded model, token-usage, duration, and outcome metadata. The adapter does not inspect or emit prompt/output bodies or provider error text; streaming chunks pass through unchanged. The emitter restricts destinations to loopback, caps batches at 100, and uses a bounded timeout; remote forwarding is not enabled. See [Node SDK instrumentation](docs/sdk-instrumentation.md). This does not count as a host-specific hook, plugin, poller, or browser/cloud integration.
 
 Factory Droid has a partial, read-only local history poller (`factory sessions status|sync`) for Beacon-observed session files, with digest-first retention, explicit capped text opt-in, and local-only settings checkpoints. Its installed-host/export compatibility remains unverified; see [Factory history](docs/factory-history.md).
 

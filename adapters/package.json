@@ -93,7 +93,8 @@
     "./opencode-skill-config": "./src/opencode-skill-config.ts",
     "./copilot-skill-config": "./src/copilot-skill-config.ts",
     "./copilot-prompt-config": "./src/copilot-prompt-config.ts",
-    "./cli": "./src/cli.ts"
+    "./cli": "./src/cli.ts",
+    "./genai-sdk": "./src/genai-sdk.ts"
   },
   "scripts": {
     "adapter": "node --experimental-strip-types src/cli.ts",

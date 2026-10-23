@@ -99,7 +99,8 @@ The separate `bootstrap instructions plan|install|update|uninstall` command targ
 | --- | --- |
 | `sdk/integrations-openai.mdx` | Partial: `@threadforge/adapter-contracts/genai-sdk` observes `responses.create`, `chat.completions.create`, and `completions.create`; async streams pass through unchanged while terminal status and usage metadata are observed. This is not OpenTelemetry auto-instrumentation. |
 | `sdk/integrations-anthropic.mdx` | Partial: the same module observes `messages.create`, including async streams, without reading message content or provider error text. This is not OpenTelemetry auto-instrumentation. |
-| `sdk/integrations-claude-agent-sdk.mdx`, `sdk/integrations-vercel-ai-sdk.mdx` | Not implemented by this slice; their provider-specific SDK contracts and host/runtime packaging still require separate adapters and verification. |
+| `sdk/integrations-claude-agent-sdk.mdx` | Partial: `@threadforge/adapter-contracts/claude-agent-sdk` observes a query's async result stream while preserving yielded messages and query controls; it records duration, terminal status, and result count only, omitting prompt/output, identifiers, usage snapshots, and token/cost attribution. Structural fixtures pass; no live SDK process or model run. |
+| `sdk/integrations-vercel-ai-sdk.mdx` | Not implemented by this slice; its provider-specific SDK contract, telemetry behavior, packaging, and live compatibility still require a separate adapter and verification. |
 
 ## Release gate
 

@@ -633,11 +633,10 @@ func normalizeMancodeGitRefManifest(sourceRoot string, value any, source Mancode
 		normalized, err := normalizeMancodeGitRefTaskBundle(bundle, privacyExcludedDigests)
 		items = appendMancodeGitRefNormalized(items, normalized, err, "Mancode git-ref task bundle did not match the supported review-only workflow contract")
 	}
-	if freezePresent {
-		items = append(items, normalizedItem{Rejected: true, Issue: "Mancode git-ref authority freeze detail requires a source-specific converter"})
-	}
-	if tombstonePresent {
-		items = append(items, normalizedItem{Rejected: true, Issue: "Mancode git-ref authority tombstone detail requires a source-specific converter"})
+	if freezePresent || tombstonePresent {
+		transitions, transitionErr := normalizeMancodeGitRefAuthorityTransitions(object, transportEpoch)
+		items = appendMancodeGitRefNormalized(items, transitions, transitionErr,
+			"Mancode git-ref authority transition did not match the supported review-only contract")
 	}
 	if privacyPolicyPresent {
 		items = appendMancodeGitRefNormalized(items, privacyItems, privacyErr, "Mancode git-ref privacy policy did not match the supported review-only binding contract")

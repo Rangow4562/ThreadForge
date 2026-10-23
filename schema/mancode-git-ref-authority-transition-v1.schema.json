@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-git-ref-authority-transition-v1.schema.json",
+  "title": "Threadforge Mancode git-ref authority transition summary v1",
+  "description": "Identity-reduced historical summary of a validated Mancode authority freeze or tombstone. It does not activate or authorize any authority transition.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "authority", "human_review_required", "execution_authorized", "transition",
+    "successor_mode", "successor_epoch", "transport_epoch", "epoch_advance", "occurred_at",
+    "operation_reference_omitted", "workspace_identity_omitted"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-git-ref-authority-transition.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "transition": { "enum": ["freeze", "tombstone"] },
+    "successor_mode": { "enum": ["local", "git-ref"] },
+    "successor_epoch": { "type": "integer", "minimum": 1 },
+    "transport_epoch": { "type": "integer", "minimum": 1 },
+    "epoch_advance": { "type": "integer", "minimum": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "operation_reference_omitted": { "const": true },
+    "workspace_identity_omitted": { "const": true }
+  }
+}

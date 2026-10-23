@@ -103,6 +103,57 @@ func TestAssessRequiresAndValidatesMigrationFormatCoverage(t *testing.T) {
 	}
 }
 
+func TestAssessBlocksRejectedMancodeGitRefAuthorityFinding(t *testing.T) {
+	root := t.TempDir()
+	report, _, trust := completeFixture(t, root)
+	index := -1
+	for i := range report.Migrations {
+		if report.Migrations[i].Product == "mancode" {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		t.Fatal("complete fixture has no Mancode migration")
+	}
+	migration := &report.Migrations[index]
+	coveragePath := filepath.Join(root, migration.FormatCoverage.Path)
+	content, err := os.ReadFile(coveragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var coverage migrationcoverage.Report
+	if err := json.Unmarshal(content, &coverage); err != nil {
+		t.Fatal(err)
+	}
+	coverage.RecordsFound++
+	coverage.RejectedRecords++
+	coverage.Formats[0].RecordsFound++
+	coverage.Formats[0].RejectedRecords++
+	if err := migrationcoverage.Validate(coverage); err != nil {
+		t.Fatalf("synthetic unresolved git-ref finding is not valid coverage: %v", err)
+	}
+	content, err = json.Marshal(coverage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(coveragePath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(content)
+	migration.FormatCoverage.SHA256 = hex.EncodeToString(digest[:])
+	migration.SourceRecords++
+	migration.ExcludedRecords++
+
+	assessment, err := AssessWithTrust(report, root, trust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Ready || !hasBlocker(assessment.Blockers, "contains rejected source records") {
+		t.Fatalf("cutover accepted unresolved Mancode git-ref authority: %#v", assessment)
+	}
+}
+
 func TestAssessRequiresSnapshotBoundSourceBackupVerification(t *testing.T) {
 	root := t.TempDir()
 	report, _, trust := completeFixture(t, root)

@@ -1005,6 +1005,7 @@ func scanFile(product Product, sourceRoot, relative, fullPath string, data []byt
 	}
 	file := scannedFile{entry: entry}
 	recordIndex := 0
+	unreconciledMancodeGitRef := false
 	for _, value := range items {
 		normalized, err := normalizeItems(product, sourceRoot, relative, value)
 		if err != nil {
@@ -1012,6 +1013,9 @@ func scanFile(product Product, sourceRoot, relative, fullPath string, data []byt
 			recordIndex++
 			file.entry.RejectedCount++
 			continue
+		}
+		if product == Mancode && mancodeGitRefAuthorityNeedsReconciliation(sourceRoot, relative, value) {
+			unreconciledMancodeGitRef = true
 		}
 		for _, item := range normalized {
 			if item.privacyPolicy != nil {
@@ -1042,6 +1046,11 @@ func scanFile(product Product, sourceRoot, relative, fullPath string, data []byt
 				ContentSHA256: hash, Scope: "local_pending_review", Payload: item.Payload,
 			})
 		}
+	}
+	if unreconciledMancodeGitRef {
+		file.entry.RecordCount++
+		file.entry.RejectedCount++
+		file.entry.Issue = mancodeGitRefAuthorityIssue
 	}
 	finalizeScannedFile(&file)
 	return file, expandedBytes, nil

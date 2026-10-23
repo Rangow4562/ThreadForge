@@ -977,9 +977,20 @@ func TestMancodeProjectAndTeamRecordsAreImportedAsLocalReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Summary.RecordsFound != len(fixtures) || manifest.Summary.RecordsImported != len(fixtures) ||
-		manifest.Summary.RecordsCredentialBlocked != 0 || manifest.Summary.RecordsRejected != 0 {
+	if manifest.Summary.RecordsFound != len(fixtures)+1 || manifest.Summary.RecordsImported != len(fixtures) ||
+		manifest.Summary.RecordsCredentialBlocked != 0 || manifest.Summary.RecordsRejected != 1 {
 		t.Fatalf("Mancode project/team records did not reconcile: summary=%#v files=%#v", manifest.Summary, manifest.Files)
+	}
+	var transportConfig *FileEntry
+	for i := range manifest.Files {
+		if manifest.Files[i].Path == ".mancode/shared/config.json" {
+			transportConfig = &manifest.Files[i]
+			break
+		}
+	}
+	if transportConfig == nil || transportConfig.Status != "partially_rejected" ||
+		transportConfig.RejectedCount != 1 || transportConfig.Issue != mancodeGitRefAuthorityIssue {
+		t.Fatalf("unreconciled git-ref authority was not made visible: %#v", transportConfig)
 	}
 	dataRoot := t.TempDir()
 	snapshot, err := CreateSnapshot(Mancode, root, dataRoot)
@@ -987,6 +998,13 @@ func TestMancodeProjectAndTeamRecordsAreImportedAsLocalReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifestPath := filepath.Join(dataRoot, "migrations", "snapshots", string(Mancode), snapshot.SourceFingerprint, "manifest.json")
+	coverage, err := BuildFormatCoverage(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if coverage.RejectedRecords != 1 || coverage.UnclassifiedFiles != 0 || coverage.UnsupportedFiles != 0 {
+		t.Fatalf("configured git-ref authority did not remain a classified cutover blocker: %#v", coverage)
+	}
 	records, err := ReadSnapshotRecords(manifestPath, snapshot)
 	if err != nil {
 		t.Fatal(err)

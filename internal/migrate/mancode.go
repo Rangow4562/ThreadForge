@@ -17,6 +17,7 @@ const mancodeLegacyStateImportSchema = "threadforge.mancode-legacy-state.v1"
 const mancodeProjectProfileImportSchema = "threadforge.mancode-project-profile.v1"
 const mancodeProjectFactImportSchema = "threadforge.mancode-project-fact.v1"
 const mancodeLegacyConfigImportSchema = "threadforge.mancode-legacy-config.v1"
+const mancodeGitRefAuthorityIssue = "configured git-ref team authority is not reconciled from the project-tree snapshot"
 
 var mancodeOperationIDPattern = regexp.MustCompile(`^[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$`)
 
@@ -698,6 +699,19 @@ func normalizeMancodeProjectConfig(value any) ([]normalizedItem, bool, error) {
 		return nil, true, fmt.Errorf("encode Mancode project config: %w", err)
 	}
 	return []normalizedItem{{Type: "mancode_project_config", Payload: payload}}, true, nil
+}
+
+func mancodeGitRefAuthorityNeedsReconciliation(sourceRoot, relative string, value any) bool {
+	path := mancodePath(relative, sourceRoot)
+	if path != "/.mancode/shared/config.json" && path != "/shared/config.json" {
+		return false
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	transport, ok := object["transport"].(map[string]any)
+	return ok && transport["mode"] == "git-ref"
 }
 
 func validMancodeOperationType(value string) bool {

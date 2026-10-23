@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -286,6 +288,8 @@ func runConfiguredMigrationSourceReadback(t *testing.T, product migrate.Product,
 	if _, err := os.Stat(manifestPath); err != nil {
 		t.Fatalf("private %s migration snapshot was not created", product)
 	}
+	backupRoot := filepath.Join(home, "source-backup", string(product))
+	copyMigrationSourceTree(t, absoluteRoot, backupRoot)
 	var coverage migrationcoverage.Report
 	runMigrationJSON(t, &coverage, "migrate", "coverage", "--manifest", manifestPath)
 	if err := migrationcoverage.Validate(coverage); err != nil {
@@ -315,9 +319,13 @@ func runConfiguredMigrationSourceReadback(t *testing.T, product migrate.Product,
 		Receipt        store.MigrationReceipt `json:"receipt"`
 		AlreadyApplied bool                   `json:"already_applied"`
 		Scope          string                 `json:"scope"`
+		Backup         struct {
+			Status string `json:"status"`
+		} `json:"source_backup_verification"`
 	}
-	runMigrationJSON(t, &applied, "migrate", "apply", "--manifest", manifestPath, "--db", databasePath)
+	runMigrationJSON(t, &applied, "migrate", "apply", "--manifest", manifestPath, "--backup-root", backupRoot, "--db", databasePath)
 	if applied.AlreadyApplied || applied.Scope != "local_pending_review" || applied.Receipt.Status != "applied" ||
+		applied.Backup.Status != "verified" ||
 		applied.Receipt.ImportedCount != snapshot.Summary.RecordsImported ||
 		applied.Receipt.ExcludedCount != snapshot.Summary.RecordsCredentialBlocked+snapshot.Summary.RecordsRejected {
 		t.Fatalf("configured %s migration receipt did not reconcile to its snapshot", product)
@@ -327,7 +335,7 @@ func runConfiguredMigrationSourceReadback(t *testing.T, product migrate.Product,
 		AlreadyApplied bool                   `json:"already_applied"`
 		Scope          string                 `json:"scope"`
 	}
-	runMigrationJSON(t, &reapplied, "migrate", "apply", "--manifest", manifestPath, "--db", databasePath)
+	runMigrationJSON(t, &reapplied, "migrate", "apply", "--manifest", manifestPath, "--backup-root", backupRoot, "--db", databasePath)
 	if !reapplied.AlreadyApplied || reapplied.Receipt.ImportedCount != applied.Receipt.ImportedCount {
 		t.Fatalf("configured %s migration apply is not idempotent", product)
 	}
@@ -354,10 +362,71 @@ func runConfiguredMigrationSourceReadback(t *testing.T, product migrate.Product,
 	return migrationSourceReadbackResult{Snapshot: snapshot, ManifestPath: manifestPath, Verification: verification}
 }
 
+func copyMigrationSourceTree(t *testing.T, sourceRoot, backupRoot string) {
+	t.Helper()
+	if err := os.MkdirAll(backupRoot, 0o700); err != nil {
+		t.Fatalf("create isolated migration backup: %v", err)
+	}
+	err := filepath.WalkDir(sourceRoot, func(sourcePath string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := entry.Info()
+		if err != nil || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("test source tree contains an unreadable or linked path")
+		}
+		relative, err := filepath.Rel(sourceRoot, sourcePath)
+		if err != nil {
+			return err
+		}
+		if relative == "." {
+			return nil
+		}
+		destination := filepath.Join(backupRoot, relative)
+		if info.IsDir() {
+			return os.MkdirAll(destination, 0o700)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("test source tree contains a non-regular path")
+		}
+		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+			return err
+		}
+		input, err := os.Open(sourcePath)
+		if err != nil {
+			return err
+		}
+		output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
+		if err != nil {
+			_ = input.Close()
+			return err
+		}
+		_, copyErr := io.Copy(output, input)
+		inputErr := input.Close()
+		outputErr := output.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if inputErr != nil {
+			return inputErr
+		}
+		if outputErr != nil {
+			return outputErr
+		}
+		return os.Chmod(destination, info.Mode().Perm())
+	})
+	if err != nil {
+		t.Fatalf("make isolated migration backup fixture: %v", err)
+	}
+}
+
 func runMigrationJSON(t *testing.T, target any, args ...string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	if code := Run(args, &stdout, &stderr); code != 0 {
+		if len(args) >= 2 && args[0] == "migrate" && (args[1] == "apply" || args[1] == "backup-verify") {
+			t.Fatalf("migration command %q failed with exit code %d: %s", args[:2], code, strings.TrimSpace(stderr.String()))
+		}
 		t.Fatalf("migration command %q failed with exit code %d", args[:2], code)
 	}
 	if err := json.Unmarshal(stdout.Bytes(), target); err != nil {

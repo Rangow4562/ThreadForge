@@ -26,6 +26,7 @@ import (
 	"github.com/threadforge-ai/threadforge/internal/store"
 	"github.com/threadforge-ai/threadforge/pkg/continuity"
 	"github.com/threadforge-ai/threadforge/pkg/decision"
+	"github.com/threadforge-ai/threadforge/pkg/migrationbackup"
 	"github.com/threadforge-ai/threadforge/pkg/migrationcoverage"
 	"github.com/threadforge-ai/threadforge/pkg/proceduregraph"
 	"github.com/threadforge-ai/threadforge/pkg/projectmemory"
@@ -5878,6 +5879,35 @@ func TestMigrationSnapshotApplyIdempotencyReviewQueueAndRollback(t *testing.T) {
 		t.Fatalf("snapshot manifest=%#v", manifest)
 	}
 	manifestPath := filepath.Join(dataRoot, "migrations", "snapshots", "beacon", manifest.SourceFingerprint, "manifest.json")
+	backupRoot := filepath.Join(dataRoot, "migration-backup")
+	copyMigrationSourceTree(t, sourceRoot, backupRoot)
+	out.Reset()
+	stderr.Reset()
+	code = Run([]string{"migrate", "backup-verify", "--manifest", manifestPath, "--backup-root", backupRoot}, &out, &stderr)
+	var backupVerification migrationbackup.Report
+	if code != 0 || json.Unmarshal(out.Bytes(), &backupVerification) != nil || backupVerification.Status != "verified" ||
+		strings.Contains(out.String(), sourceRoot) || strings.Contains(out.String(), "runtime.jsonl") {
+		t.Fatalf("backup verification code=%d stdout=%s stderr=%s report=%#v", code, out.String(), stderr.String(), backupVerification)
+	}
+	if err := migrationbackup.Validate(backupVerification); err != nil {
+		t.Fatalf("CLI emitted invalid source backup verification: %v", err)
+	}
+	badBackupRoot := filepath.Join(dataRoot, "mismatched-backup")
+	copyMigrationSourceTree(t, sourceRoot, badBackupRoot)
+	badBackupFile := filepath.Join(badBackupRoot, ".beacon", "endpoint", "logs", "runtime.jsonl")
+	if err := os.WriteFile(badBackupFile, []byte("altered backup bytes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	blockedDatabase := filepath.Join(dataRoot, "must-not-be-opened.sqlite")
+	out.Reset()
+	stderr.Reset()
+	code = Run([]string{"migrate", "apply", "--manifest", manifestPath, "--backup-root", badBackupRoot, "--db", blockedDatabase}, &out, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "backup does not match snapshot") || out.Len() != 0 {
+		t.Fatalf("apply accepted mismatched source backup: code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	if _, err := os.Stat(blockedDatabase); !os.IsNotExist(err) {
+		t.Fatalf("backup mismatch created/opened the migration database: %v", err)
+	}
 	out.Reset()
 	stderr.Reset()
 	code = Run([]string{"migrate", "coverage", "--manifest", manifestPath}, &out, &stderr)
@@ -5900,7 +5930,7 @@ func TestMigrationSnapshotApplyIdempotencyReviewQueueAndRollback(t *testing.T) {
 		t.Fatalf("unapplied migration verification code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
 	}
 	out.Reset()
-	code = Run([]string{"migrate", "apply", "--manifest", manifestPath}, &out, &stderr)
+	code = Run([]string{"migrate", "apply", "--manifest", manifestPath, "--backup-root", backupRoot}, &out, &stderr)
 	if code != 0 {
 		t.Fatalf("apply code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
 	}
@@ -5921,7 +5951,7 @@ func TestMigrationSnapshotApplyIdempotencyReviewQueueAndRollback(t *testing.T) {
 		t.Fatalf("applied snapshot reconciliation code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
 	}
 	out.Reset()
-	code = Run([]string{"migrate", "apply", "--manifest", manifestPath}, &out, &stderr)
+	code = Run([]string{"migrate", "apply", "--manifest", manifestPath, "--backup-root", backupRoot}, &out, &stderr)
 	if code != 0 || !strings.Contains(out.String(), `"already_applied": true`) {
 		t.Fatalf("repeat apply code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
 	}
@@ -5947,7 +5977,7 @@ func TestMigrationSnapshotApplyIdempotencyReviewQueueAndRollback(t *testing.T) {
 		t.Fatalf("tampered migration verification code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
 	}
 	out.Reset()
-	code = Run([]string{"migrate", "apply", "--manifest", manifestPath}, &out, &stderr)
+	code = Run([]string{"migrate", "apply", "--manifest", manifestPath, "--backup-root", backupRoot}, &out, &stderr)
 	if code == 0 {
 		t.Fatal("idempotent apply accepted a modified staged payload")
 	}
@@ -5985,7 +6015,8 @@ func TestMigrateApplyCLICrashChild(t *testing.T) {
 	}
 	manifestPath := os.Getenv("THREADFORGE_MIGRATION_CLI_MANIFEST")
 	databasePath := os.Getenv("THREADFORGE_MIGRATION_CLI_DB")
-	code := Run([]string{"migrate", "apply", "--manifest", manifestPath, "--db", databasePath, "--progress-stderr"},
+	backupRoot := os.Getenv("THREADFORGE_MIGRATION_CLI_BACKUP")
+	code := Run([]string{"migrate", "apply", "--manifest", manifestPath, "--backup-root", backupRoot, "--db", databasePath, "--progress-stderr"},
 		os.Stdout, migrationProgressBarrierWriter{})
 	os.Exit(code)
 }
@@ -6032,11 +6063,14 @@ func TestMigrateApplyProcessKillRollsBackThroughCLI(t *testing.T) {
 	}
 	manifestPath := filepath.Join(dataRoot, "migrations", "snapshots", "beacon", manifest.SourceFingerprint, "manifest.json")
 	databasePath := filepath.Join(dataRoot, "threadforge.sqlite")
+	backupRoot := filepath.Join(dataRoot, "migration-backup")
+	copyMigrationSourceTree(t, sourceRoot, backupRoot)
 	command := exec.Command(os.Args[0], "-test.run=^TestMigrateApplyCLICrashChild$")
 	command.Env = append(os.Environ(),
 		"THREADFORGE_MIGRATION_CLI_CRASH_HELPER=1",
 		"THREADFORGE_MIGRATION_CLI_MANIFEST="+manifestPath,
 		"THREADFORGE_MIGRATION_CLI_DB="+databasePath,
+		"THREADFORGE_MIGRATION_CLI_BACKUP="+backupRoot,
 	)
 	childStdout, err := command.StdoutPipe()
 	if err != nil {
@@ -6099,7 +6133,7 @@ func TestMigrateApplyProcessKillRollsBackThroughCLI(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := Run([]string{"migrate", "apply", "--manifest", manifestPath, "--db", databasePath}, &stdout, &stderr); code != 0 {
+	if code := Run([]string{"migrate", "apply", "--manifest", manifestPath, "--backup-root", backupRoot, "--db", databasePath}, &stdout, &stderr); code != 0 {
 		t.Fatalf("retry after CLI process death code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()

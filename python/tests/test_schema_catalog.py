@@ -1843,8 +1843,8 @@ def test_cutover_v3_requires_evaluator_attestation_and_external_key_contracts():
     })
 
 
-def test_cutover_v4_requires_migration_format_coverage_artifacts():
-    report_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v4.schema.json").read_text(encoding="utf-8"))
+def test_cutover_v5_requires_format_coverage_and_source_backup_verification():
+    report_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v5.schema.json").read_text(encoding="utf-8"))
     v3_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v3.schema.json").read_text(encoding="utf-8"))
     v2_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v2.schema.json").read_text(encoding="utf-8"))
     registry = Registry().with_resources([
@@ -1854,7 +1854,7 @@ def test_cutover_v4_requires_migration_format_coverage_artifacts():
     ])
     report_validator = validator_for(report_schema)(report_schema, registry=registry)
     report = {
-        "schema_version": "threadforge.cutover-evidence.v4",
+        "schema_version": "threadforge.cutover-evidence.v5",
         "candidate_commit": "a" * 40,
         "features": [],
         "adapters": [],
@@ -1863,6 +1863,7 @@ def test_cutover_v4_requires_migration_format_coverage_artifacts():
             "source_fingerprint": "b" * 64,
             "snapshot_sha256": "c" * 64,
             "format_coverage": {"path": "migration-coverage.json", "sha256": "d" * 64},
+            "source_backup_verification": {"path": "source-backup.json", "sha256": "f" * 64},
             "source_records": 0,
             "imported_records": 0,
             "excluded_records": 0,
@@ -1881,6 +1882,29 @@ def test_cutover_v4_requires_migration_format_coverage_artifacts():
     missing_coverage["migrations"][0].pop("format_coverage")
     with pytest.raises(ValidationError):
         report_validator.validate(missing_coverage)
+    missing_backup = json.loads(json.dumps(report))
+    missing_backup["migrations"][0].pop("source_backup_verification")
+    with pytest.raises(ValidationError):
+        report_validator.validate(missing_backup)
+
+    backup_schema = json.loads((SCHEMA_DIRECTORY / "migration-source-backup-verification-v1.schema.json").read_text(encoding="utf-8"))
+    validator_for(backup_schema)(backup_schema).validate({
+        "schema_version": "threadforge.migration-source-backup-verification.v1",
+        "product": "beacon",
+        "source_fingerprint": "b" * 64,
+        "current_source_fingerprint": "b" * 64,
+        "snapshot_sha256": "c" * 64,
+        "source_tree_sha256": "e" * 64,
+        "backup_tree_sha256": "e" * 64,
+        "source_files": 0,
+        "backup_files": 0,
+        "source_bytes": 0,
+        "backup_bytes": 0,
+        "different_files": 0,
+        "snapshot_source_mismatches": 0,
+        "shared_files": 0,
+        "status": "verified",
+    })
 
     coverage_schema = json.loads((SCHEMA_DIRECTORY / "migration-format-coverage-v1.schema.json").read_text(encoding="utf-8"))
     validator_for(coverage_schema)(coverage_schema).validate({

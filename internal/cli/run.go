@@ -30,6 +30,7 @@ import (
 	"github.com/threadforge-ai/threadforge/internal/store"
 	"github.com/threadforge-ai/threadforge/pkg/continuity"
 	"github.com/threadforge-ai/threadforge/pkg/cutover"
+	"github.com/threadforge-ai/threadforge/pkg/migrationbackup"
 	"github.com/threadforge-ai/threadforge/pkg/privacy"
 	"github.com/threadforge-ai/threadforge/pkg/proceduregraph"
 	"github.com/threadforge-ai/threadforge/pkg/projectmemory"
@@ -2540,7 +2541,7 @@ func historyProjectMemory(args []string, stdout, stderr io.Writer) int {
 
 func runMigrate(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "migration action required: inspect, snapshot, coverage, apply, verify, rollback, status, or records")
+		_, _ = fmt.Fprintln(stderr, "migration action required: inspect, snapshot, backup-verify, coverage, apply, verify, rollback, status, or records")
 		return 2
 	}
 	switch args[0] {
@@ -2550,6 +2551,8 @@ func runMigrate(args []string, stdout, stderr io.Writer) int {
 		return snapshotMigration(args[1:], stdout, stderr)
 	case "coverage":
 		return migrationFormatCoverage(args[1:], stdout, stderr)
+	case "backup-verify":
+		return migrationSourceBackupVerification(args[1:], stdout, stderr)
 	case "apply":
 		return applyMigration(args[1:], stdout, stderr)
 	case "verify":
@@ -2659,13 +2662,14 @@ func applyMigration(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("migrate apply", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	manifestName := fs.String("manifest", "", "path to a verified local Threadforge migration snapshot manifest")
+	backupRoot := fs.String("backup-root", "", "independent retained copy of the complete migration source tree")
 	database := fs.String("db", "", "SQLite path (defaults under the local Threadforge data directory)")
 	progressStderr := fs.Bool("progress-stderr", false, "emit only staged/total record counts to stderr")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 0 || *manifestName == "" {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge migrate apply --manifest <snapshot\\manifest.json> [--db <path>] [--progress-stderr]")
+	if fs.NArg() != 0 || *manifestName == "" || *backupRoot == "" {
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge migrate apply --manifest <snapshot\\manifest.json> --backup-root <independent-copy> [--db <path>] [--progress-stderr]")
 		return 2
 	}
 	paths, err := appdata.Resolve(*database, "")
@@ -2688,17 +2692,29 @@ func applyMigration(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
+	imported := make([]store.ImportedRecord, len(records))
+	for i, record := range records {
+		imported[i] = store.ImportedRecord{Key: record.Key, Type: record.Type, SourcePath: record.SourcePath,
+			ContentSHA256: record.ContentSHA256, Scope: record.Scope, Payload: record.Payload}
+	}
+	backupVerification, err := migrationbackup.VerifySnapshot(manifestPath, *backupRoot)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "migration refused because source backup verification failed: %s\n", err)
+		return 1
+	}
+	if backupVerification.Status != "verified" {
+		_, _ = fmt.Fprintf(stderr,
+			"migration refused because source backup does not match snapshot (different_files=%d snapshot_source_mismatches=%d shared_files=%d source_files=%d backup_files=%d)\n",
+			backupVerification.DifferentFiles, backupVerification.SnapshotSourceMismatches,
+			backupVerification.SharedFiles, backupVerification.SourceFiles, backupVerification.BackupFiles)
+		return 1
+	}
 	procedureStore, err := store.Open(paths.SQLite)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 	defer procedureStore.Close()
-	imported := make([]store.ImportedRecord, len(records))
-	for i, record := range records {
-		imported[i] = store.ImportedRecord{Key: record.Key, Type: record.Type, SourcePath: record.SourcePath,
-			ContentSHA256: record.ContentSHA256, Scope: record.Scope, Payload: record.Payload}
-	}
 	receipt := store.MigrationReceipt{ID: manifest.ID, Product: string(manifest.Product), SourceFingerprint: manifest.SourceFingerprint,
 		ExpectedCount: manifest.Summary.RecordsImported, ExcludedCount: manifest.Summary.RecordsCredentialBlocked + manifest.Summary.RecordsRejected}
 	var progress func(store.MigrationProgress) error
@@ -2713,7 +2729,10 @@ func applyMigration(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	return writeIndentedJSON(stdout, map[string]any{"receipt": result, "already_applied": already, "scope": "local_pending_review"}, stderr)
+	return writeIndentedJSON(stdout, map[string]any{
+		"receipt": result, "already_applied": already, "scope": "local_pending_review",
+		"source_backup_verification": backupVerification,
+	}, stderr)
 }
 
 type migrationVerification struct {
@@ -3900,7 +3919,8 @@ Commands:
   migrate inspect --product <beacon|mancode|anyjev|rrsi> --root <path>
   migrate snapshot --product <beacon|mancode|anyjev|rrsi> --root <path>
   migrate coverage --manifest <snapshot\\manifest.json>
-  migrate apply --manifest <snapshot\\manifest.json> [--db <path>] [--progress-stderr]
+  migrate backup-verify --manifest <snapshot\\manifest.json> --backup-root <independent-copy>
+  migrate apply --manifest <snapshot\\manifest.json> --backup-root <independent-copy> [--db <path>] [--progress-stderr]
   migrate verify --manifest <snapshot\\manifest.json> [--expect applied|rolled_back] [--db <path>]
   migrate status [--db <path>]
   migrate records --id <migration-id> [--limit 50] [--offset 0]

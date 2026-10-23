@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/threadforge-ai/threadforge/pkg/migrationbackup"
 	"github.com/threadforge-ai/threadforge/pkg/migrationcoverage"
 )
 
@@ -99,6 +100,49 @@ func TestAssessRequiresAndValidatesMigrationFormatCoverage(t *testing.T) {
 	assessment, err = AssessWithTrust(report, root, trust)
 	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "does not match migration fingerprints") {
 		t.Fatalf("coverage with a mismatched source fingerprint was accepted: %#v, %v", assessment, err)
+	}
+}
+
+func TestAssessRequiresSnapshotBoundSourceBackupVerification(t *testing.T) {
+	root := t.TempDir()
+	report, _, trust := completeFixture(t, root)
+
+	missing := report
+	missing.Migrations = append([]MigrationEvidence(nil), report.Migrations...)
+	missing.Migrations[0].SourceBackupVerification = Evidence{}
+	assessment, err := AssessWithTrust(missing, root, trust)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "source backup verification") {
+		t.Fatalf("migration without source-backup proof was accepted: %#v, %v", assessment, err)
+	}
+
+	tampered := report
+	tampered.Migrations = append([]MigrationEvidence(nil), report.Migrations...)
+	changed := migrationbackup.Report{
+		SchemaVersion:     migrationbackup.SchemaVersion,
+		Product:           tampered.Migrations[0].Product,
+		SourceFingerprint: strings.Repeat("f", 64), CurrentSourceFingerprint: strings.Repeat("f", 64),
+		SnapshotSHA256:   tampered.Migrations[0].SnapshotSHA256,
+		SourceTreeSHA256: testDigest("source-tree"),
+		BackupTreeSHA256: testDigest("source-tree"),
+		SourceFiles:      4, BackupFiles: 4, SourceBytes: 4, BackupBytes: 4,
+		Status: "verified",
+	}
+	if err := migrationbackup.Validate(changed); err != nil {
+		t.Fatalf("test backup verification receipt is invalid: %v", err)
+	}
+	content, err := json.Marshal(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "wrong-source-backup-verification.json"
+	if err := os.WriteFile(filepath.Join(root, path), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(content)
+	tampered.Migrations[0].SourceBackupVerification = Evidence{Path: path, SHA256: hex.EncodeToString(digest[:])}
+	assessment, err = AssessWithTrust(tampered, root, trust)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "source backup verification does not match migration fingerprints") {
+		t.Fatalf("source backup receipt bound to another source was accepted: %#v, %v", assessment, err)
 	}
 }
 
@@ -546,6 +590,7 @@ func completeFixture(t *testing.T, root string) (Report, Evidence, EvaluatorTrus
 	report := completeReportWithoutWriting(evidence)
 	for i := range report.Migrations {
 		report.Migrations[i].FormatCoverage = writeMigrationCoverageFixture(t, root, report.Migrations[i])
+		report.Migrations[i].SourceBackupVerification = writeMigrationBackupFixture(t, root, report.Migrations[i])
 	}
 	trust := fixtureTrustStore()
 	for i := range report.Evaluations {
@@ -556,6 +601,34 @@ func completeFixture(t *testing.T, root string) (Report, Evidence, EvaluatorTrus
 		refreshEvaluation(t, root, &report.Evaluations[i], trials)
 	}
 	return report, evidence, trust
+}
+
+func writeMigrationBackupFixture(t *testing.T, root string, migration MigrationEvidence) Evidence {
+	t.Helper()
+	treeDigest := testDigest(migration.Product + "/independent-source-tree")
+	backup := migrationbackup.Report{
+		SchemaVersion:     migrationbackup.SchemaVersion,
+		Product:           migration.Product,
+		SourceFingerprint: migration.SourceFingerprint, CurrentSourceFingerprint: migration.SourceFingerprint,
+		SnapshotSHA256:   migration.SnapshotSHA256,
+		SourceTreeSHA256: treeDigest,
+		BackupTreeSHA256: treeDigest,
+		SourceFiles:      4, BackupFiles: 4, SourceBytes: 4, BackupBytes: 4,
+		Status: "verified",
+	}
+	if err := migrationbackup.Validate(backup); err != nil {
+		t.Fatalf("invalid source backup verification fixture: %v", err)
+	}
+	content, err := json.Marshal(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "migration-source-backup-" + migration.Product + ".json"
+	if err := os.WriteFile(filepath.Join(root, path), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(content)
+	return Evidence{Path: path, SHA256: hex.EncodeToString(digest[:])}
 }
 
 func writeMigrationCoverageFixture(t *testing.T, root string, migration MigrationEvidence) Evidence {

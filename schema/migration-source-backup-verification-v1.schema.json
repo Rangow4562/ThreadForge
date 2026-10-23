@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/migration-source-backup-verification-v1.schema.json",
+  "title": "Threadforge source-to-backup verification v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "product", "source_fingerprint", "current_source_fingerprint", "snapshot_sha256",
+    "source_tree_sha256", "backup_tree_sha256", "source_files", "backup_files",
+    "source_bytes", "backup_bytes", "different_files", "snapshot_source_mismatches",
+    "shared_files", "status"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.migration-source-backup-verification.v1" },
+    "product": { "enum": ["beacon", "mancode", "anyjev", "rrsi"] },
+    "source_fingerprint": { "$ref": "#/$defs/sha256" },
+    "current_source_fingerprint": { "$ref": "#/$defs/sha256" },
+    "snapshot_sha256": { "$ref": "#/$defs/sha256" },
+    "source_tree_sha256": { "$ref": "#/$defs/sha256" },
+    "backup_tree_sha256": { "$ref": "#/$defs/sha256" },
+    "source_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "backup_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "source_bytes": { "type": "integer", "minimum": 0, "maximum": 1073741824 },
+    "backup_bytes": { "type": "integer", "minimum": 0, "maximum": 1073741824 },
+    "different_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "snapshot_source_mismatches": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "shared_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "status": { "enum": ["verified", "mismatch"] }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "verified" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "different_files": { "const": 0 },
+          "snapshot_source_mismatches": { "const": 0 },
+          "shared_files": { "const": 0 }
+        }
+      }
+    }
+  ]
+}

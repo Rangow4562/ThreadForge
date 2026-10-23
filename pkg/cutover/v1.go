@@ -15,11 +15,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/threadforge-ai/threadforge/pkg/migrationbackup"
 	"github.com/threadforge-ai/threadforge/pkg/migrationcoverage"
 	"github.com/threadforge-ai/threadforge/pkg/privacy"
 )
 
-const SchemaVersion = "threadforge.cutover-evidence.v4"
+const SchemaVersion = "threadforge.cutover-evidence.v5"
 
 const (
 	maxArtifactBytes = 128 << 20
@@ -64,6 +65,7 @@ type MigrationEvidence struct {
 	SourceFingerprint          string     `json:"source_fingerprint"`
 	SnapshotSHA256             string     `json:"snapshot_sha256"`
 	FormatCoverage             Evidence   `json:"format_coverage"`
+	SourceBackupVerification   Evidence   `json:"source_backup_verification"`
 	SourceRecords              int        `json:"source_records"`
 	ImportedRecords            int        `json:"imported_records"`
 	ExcludedRecords            int        `json:"excluded_records"`
@@ -235,6 +237,8 @@ func AssessWithTrust(report Report, evidenceRoot string, trustedEvaluators Evalu
 		}
 		verifyEvidence(&assessment, verifier, "migration "+product+" format coverage", []Evidence{migration.FormatCoverage})
 		validateMigrationFormatCoverage(&assessment, verifier, migration)
+		verifyEvidence(&assessment, verifier, "migration "+product+" source backup verification", []Evidence{migration.SourceBackupVerification})
+		validateMigrationSourceBackup(&assessment, verifier, migration)
 		verifyEvidence(&assessment, verifier, "migration "+product, migration.Evidence)
 	}
 
@@ -367,6 +371,40 @@ func AssessWithTrust(report Report, evidenceRoot string, trustedEvaluators Evalu
 	sort.Strings(assessment.Blockers)
 	assessment.Ready = len(assessment.Blockers) == 0
 	return assessment, nil
+}
+
+func validateMigrationSourceBackup(assessment *Assessment, verifier *artifactVerifier, migration MigrationEvidence) {
+	content, actual, err := verifier.readEvidence(migration.SourceBackupVerification)
+	if err != nil {
+		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" source backup verification: "+err.Error())
+		return
+	}
+	if actual != migration.SourceBackupVerification.SHA256 {
+		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" source backup verification digest mismatch")
+		return
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(content)))
+	decoder.DisallowUnknownFields()
+	var report migrationbackup.Report
+	if err := decoder.Decode(&report); err != nil {
+		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" source backup verification is invalid JSON")
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" source backup verification has trailing data")
+		return
+	}
+	if err := migrationbackup.Validate(report); err != nil {
+		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" source backup verification is invalid")
+		return
+	}
+	if report.Status != "verified" {
+		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" source backup does not match the snapshotted source")
+	}
+	if report.Product != migration.Product || report.SourceFingerprint != migration.SourceFingerprint || report.SnapshotSHA256 != migration.SnapshotSHA256 {
+		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" source backup verification does not match migration fingerprints")
+	}
 }
 
 func validateMigrationFormatCoverage(assessment *Assessment, verifier *artifactVerifier, migration MigrationEvidence) {

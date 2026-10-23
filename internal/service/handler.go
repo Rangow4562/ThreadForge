@@ -806,33 +806,32 @@ func matchesPaths(graph proceduregraph.Graph, paths []string) bool {
 	return false
 }
 
-func matchesQuery(graph proceduregraph.Graph, query string) bool {
-	query = strings.ToLower(strings.TrimSpace(query))
-	if query == "*" {
-		return true
-	}
-	if strings.Contains(strings.ToLower(graph.Title), query) {
-		return true
-	}
-	for _, node := range graph.Nodes {
-		if strings.Contains(strings.ToLower(node.Instruction), query) {
-			return true
+func matchesProcedureApplicability(graph proceduregraph.Graph, paths, modules []string) bool {
+	return matchesProcedureModules(graph, modules) && matchesPaths(graph, paths)
+}
+
+func matchesProcedureModules(graph proceduregraph.Graph, modules []string) bool {
+	if len(graph.Applicability.Modules) > 0 {
+		if len(modules) == 0 {
+			return false
+		}
+		matched := false
+		for _, required := range graph.Applicability.Modules {
+			for _, current := range modules {
+				if required == current {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				break
+			}
+		}
+		if !matched {
+			return false
 		}
 	}
-	terms := queryTerms(query)
-	if len(terms) == 0 {
-		return false
-	}
-	corpus := strings.ToLower(graph.Title)
-	for _, node := range graph.Nodes {
-		corpus += " " + strings.ToLower(node.Instruction)
-	}
-	for _, term := range terms {
-		if len(term) > 2 && strings.Contains(corpus, term) {
-			return true
-		}
-	}
-	return false
+	return true
 }
 
 func queryTerms(query string) []string {

@@ -77,6 +77,7 @@ func RetrieveContextWithProjectRoot(
 			}
 		}
 	}
+	rankedGraphs := rankProcedureGraphs(graphs, request.Query)
 	responseVersion := ContextResponseV1
 	if version2 {
 		responseVersion = ContextResponseV2
@@ -93,8 +94,8 @@ func RetrieveContextWithProjectRoot(
 	localFingerprintError := false
 	if strings.TrimSpace(projectRoot) != "" {
 		candidates := make([]proceduregraph.Graph, 0, request.MaxItems)
-		for _, graph := range graphs {
-			if graph.Status == proceduregraph.StatusApproved && matchesPaths(graph, request.Paths) && matchesQuery(graph, request.Query) {
+		for _, graph := range rankedGraphs {
+			if matchesProcedureApplicability(graph, request.Paths, request.Modules) {
 				candidates = append(candidates, graph)
 				if len(candidates) >= request.MaxItems {
 					break
@@ -114,15 +115,22 @@ func RetrieveContextWithProjectRoot(
 	privacyBlocked := publishedProcedureError
 	response.Gaps = append(response.Gaps, publishedProcedureGap...)
 	if len(request.Paths) == 0 {
-		for _, graph := range graphs {
-			if graph.Status == proceduregraph.StatusApproved && len(graph.Applicability.Paths) > 0 && matchesQuery(graph, request.Query) {
+		for _, graph := range rankedGraphs {
+			if len(graph.Applicability.Paths) > 0 && matchesProcedureModules(graph, request.Modules) {
 				response.Gaps = append(response.Gaps, fmt.Sprintf("procedure %s applicability is unverified because path context is missing", graph.ID))
 			}
 		}
 	}
+	if len(request.Modules) == 0 {
+		for _, graph := range rankedGraphs {
+			if len(graph.Applicability.Modules) > 0 {
+				response.Gaps = append(response.Gaps, fmt.Sprintf("procedure %s applicability is unverified because module context is missing", graph.ID))
+			}
+		}
+	}
 	remaining := request.MaxTokens
-	for _, graph := range graphs {
-		if graph.Status != proceduregraph.StatusApproved || !matchesPaths(graph, request.Paths) || !matchesQuery(graph, request.Query) {
+	for _, graph := range rankedGraphs {
+		if !matchesProcedureApplicability(graph, request.Paths, request.Modules) {
 			continue
 		}
 		freshness, reason := "", ""
@@ -218,10 +226,7 @@ func RetrieveContextWithProjectRoot(
 					conflicted[key] = true
 				}
 			}
-			for _, record := range applicable {
-				if !matchesMemoryQuery(record, request.Query) {
-					continue
-				}
+			for _, record := range rankProjectMemories(applicable, request.Query) {
 				if record.ConflictKey != "" && scopeUnknownConflictKeys[record.ConflictKey] {
 					continue
 				}
@@ -362,20 +367,8 @@ func validateContextRequest(request *ContextRequest) error {
 }
 
 func matchesMemoryQuery(record projectmemory.Record, query string) bool {
-	query = strings.ToLower(strings.TrimSpace(query))
-	if query == "*" {
-		return true
-	}
-	corpus := strings.ToLower(record.Title + " " + string(record.Content))
-	if strings.Contains(corpus, query) {
-		return true
-	}
-	for _, term := range queryTerms(query) {
-		if len(term) > 2 && strings.Contains(corpus, term) {
-			return true
-		}
-	}
-	return false
+	_, matched := projectMemoryContextRelevanceScore(record, query)
+	return matched
 }
 
 // AssessProcedureFreshness applies the same fingerprint and changed-path rules

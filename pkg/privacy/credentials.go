@@ -51,17 +51,119 @@ func ContainsCredentialText(text string) bool {
 	if !hasCredentialAssignmentHint(lower) {
 		return false
 	}
-	for _, match := range credentialAssignment.FindAllStringSubmatch(text, -1) {
-		if len(match) < 2 || !isPlaceholder(match[1]) {
-			return true
+	if hasCredentialAssignmentCandidate(lower) {
+		for _, match := range credentialAssignment.FindAllStringSubmatch(text, -1) {
+			if len(match) < 2 || !isPlaceholder(match[1]) {
+				return true
+			}
 		}
 	}
-	for _, match := range credentialFlagAssignment.FindAllStringSubmatch(text, -1) {
-		if len(match) < 2 || !isPlaceholder(match[1]) {
+	if hasCredentialFlagCandidate(text) {
+		for _, match := range credentialFlagAssignment.FindAllStringSubmatch(text, -1) {
+			if len(match) < 2 || !isPlaceholder(match[1]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var credentialAssignmentNames = [...]string{
+	"apikey", "accesstoken", "refreshtoken", "idtoken", "token", "clientsecret",
+	"password", "passwd", "authorization", "cookie", "privatekey",
+}
+
+// hasCredentialAssignmentCandidate cheaply confirms that an assignment key is
+// adjacent to a ':' or '=' before running the general-purpose regex across the
+// entire string. This matters for large opaque values (for example compact
+// numeric arrays encoded as base64) that can coincidentally contain "api" or
+// "token" and base64 padding, but cannot contain a credential assignment.
+func hasCredentialAssignmentCandidate(lower string) bool {
+	for separator := 0; separator < len(lower); separator++ {
+		if lower[separator] != ':' && lower[separator] != '=' {
+			continue
+		}
+		keyEnd := separator
+		for keyEnd > 0 && isCredentialWhitespace(lower[keyEnd-1]) {
+			keyEnd--
+		}
+		if keyEnd > 0 && (lower[keyEnd-1] == '"' || lower[keyEnd-1] == '\'') {
+			keyEnd--
+		}
+		keyStart := keyEnd
+		for keyStart > 0 && isCredentialNameByte(lower[keyStart-1]) {
+			keyStart--
+		}
+		if credentialNameHasSuffix(lower[keyStart:keyEnd]) {
 			return true
 		}
 	}
 	return false
+}
+
+// hasCredentialFlagCandidate avoids scanning long free text unless it contains
+// a complete credential flag followed by a value, which is the only shape the
+// flag-assignment expression can match.
+func hasCredentialFlagCandidate(text string) bool {
+	for start := 0; start < len(text); start++ {
+		if text[start] != '-' || (start > 0 && !isCredentialWhitespace(text[start-1])) {
+			continue
+		}
+		keyStart := start + 1
+		if keyStart < len(text) && text[keyStart] == '-' {
+			keyStart++
+		}
+		keyEnd := keyStart
+		for keyEnd < len(text) && isCredentialNameByte(text[keyEnd]) {
+			keyEnd++
+		}
+		if keyEnd == keyStart || keyEnd >= len(text) || !isCredentialWhitespace(text[keyEnd]) {
+			continue
+		}
+		valueStart := keyEnd
+		for valueStart < len(text) && isCredentialWhitespace(text[valueStart]) {
+			valueStart++
+		}
+		if valueStart >= len(text) || strings.ContainsRune(`"',;`, rune(text[valueStart])) {
+			continue
+		}
+		compact := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(text[keyStart:keyEnd]))
+		for _, name := range credentialAssignmentNames {
+			if compact == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func credentialNameHasSuffix(value string) bool {
+	for _, name := range credentialAssignmentNames {
+		valueIndex, nameIndex := len(value)-1, len(name)-1
+		for nameIndex >= 0 {
+			for valueIndex >= 0 && (value[valueIndex] == '_' || value[valueIndex] == '-') {
+				valueIndex--
+			}
+			if valueIndex < 0 || value[valueIndex] != name[nameIndex] {
+				break
+			}
+			valueIndex--
+			nameIndex--
+		}
+		if nameIndex < 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func isCredentialNameByte(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' ||
+		value >= '0' && value <= '9' || value == '_' || value == '-'
+}
+
+func isCredentialWhitespace(value byte) bool {
+	return value == ' ' || value == '\t' || value == '\n' || value == '\r' || value == '\f' || value == '\v'
 }
 
 // hasCredentialAssignmentHint avoids running the broader assignment expressions

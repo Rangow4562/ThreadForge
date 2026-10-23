@@ -70,6 +70,46 @@ func TestContainsCredentialTextAssignmentHintPreservesCredentialAndPlaceholderDe
 	}
 }
 
+func TestContainsCredentialTextPrefiltersLargeHintedValuesWithoutAssignments(t *testing.T) {
+	// Compact calibration arrays can be large, opaque strings. Keyword
+	// substrings and base64 padding must not force the assignment regexes to
+	// scan the entire value when no assignment syntax is present.
+	value := "api " + strings.Repeat("calibration-token-metadata-apiary-", 4096) + "=="
+	if ContainsCredentialText(value) {
+		t.Fatal("large opaque metadata was classified as a credential")
+	}
+
+	for _, assignment := range []string{
+		`prefix token = opaque-value`,
+		`"api_key"   : "opaque-value"`,
+		`run --client-secret opaque-value`,
+		`-refresh_token opaque-value`,
+	} {
+		if !ContainsCredentialText(assignment) {
+			t.Errorf("ContainsCredentialText(%q) = false, want true", assignment)
+		}
+	}
+	for _, placeholder := range []string{
+		`token=[redacted]`,
+		`--api-key <your-api-key>`,
+	} {
+		if ContainsCredentialText(placeholder) {
+			t.Errorf("ContainsCredentialText(%q) = true, want false", placeholder)
+		}
+	}
+}
+
+func BenchmarkContainsCredentialTextLongHintedOpaqueValue(b *testing.B) {
+	value := "api " + strings.Repeat("calibration-token-metadata-apiary-", 4096) + "=="
+	b.SetBytes(int64(len(value)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if ContainsCredentialText(value) {
+			b.Fatal("opaque benchmark input was classified as a credential")
+		}
+	}
+}
+
 func TestContainsCredentialPath(t *testing.T) {
 	for _, value := range []string{".env", ".env.local", "keys/id_ed25519", "config/service.pem", ".kube/config", "docs/readme.md"} {
 		got := ContainsCredentialPath(value)

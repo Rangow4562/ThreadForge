@@ -185,10 +185,12 @@ func TestMancodeLegacyWorkflowMetadataRejectsSchemaDriftAndUnsafeState(t *testin
 	for _, unsafePath := range []string{
 		".mancode/workflows/not_valid!/metadata.json",
 		".mancode/local/workflows/20261020-120000-legacy-workflow/metadata.json",
-		".mancode/workflows/20261020-120000-legacy-workflow/requirements.json",
 	} {
 		if _, handled, err := normalizeMancodeItems("", unsafePath, base); handled || err != nil {
 			t.Errorf("non-legacy metadata path unexpectedly entered legacy converter: path=%q handled=%v err=%v", unsafePath, handled, err)
 		}
+	}
+	if _, handled, err := normalizeMancodeItems("", ".mancode/workflows/20261020-120000-legacy-workflow/requirements.json", base); !handled || err == nil {
+		t.Errorf("requirements path was not routed to its strict independent converter: handled=%v err=%v", handled, err)
 	}
 }

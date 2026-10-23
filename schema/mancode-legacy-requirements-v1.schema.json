@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-legacy-requirements-v1.schema.json",
+  "title": "Threadforge Mancode Legacy Requirements v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authority",
+    "human_review_required",
+    "execution_authorized",
+    "task_id_sha256",
+    "readiness",
+    "requirements",
+    "raw_task_identity_omitted",
+    "source_authority_omitted"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-legacy-requirements.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "task_id_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "readiness": { "enum": ["ready", "needs_clarification"] },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version", "goal", "confirmedScope", "excludedScope", "technicalDecisions",
+        "defaults", "blockingUnknowns", "coverage", "acceptanceCriteria"
+      ],
+      "properties": {
+        "version": { "const": 1 },
+        "goal": { "type": "string", "minLength": 1, "maxLength": 32768 },
+        "confirmedScope": { "$ref": "#/$defs/stringList", "minItems": 1 },
+        "excludedScope": { "$ref": "#/$defs/stringList" },
+        "technicalDecisions": { "$ref": "#/$defs/stringList" },
+        "defaults": { "$ref": "#/$defs/stringList" },
+        "blockingUnknowns": { "$ref": "#/$defs/stringList" },
+        "coverage": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "items": { "$ref": "#/$defs/coverage" }
+        },
+        "acceptanceCriteria": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/acceptanceCriterion" }
+        }
+      }
+    },
+    "raw_task_identity_omitted": { "const": true },
+    "source_authority_omitted": { "const": true }
+  },
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "maxItems": 128,
+      "items": { "type": "string", "minLength": 1, "maxLength": 32768 }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dimension", "status", "rationale"],
+      "properties": {
+        "dimension": {
+          "enum": ["platform", "core_scope", "technical_stack", "data_and_persistence", "performance", "compatibility", "security"]
+        },
+        "status": { "enum": ["confirmed", "defaulted", "not_applicable"] },
+        "rationale": { "type": "string", "minLength": 1, "maxLength": 32768 }
+      }
+    },
+    "acceptanceCriterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description", "required", "method"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^AC-[A-Z0-9][A-Z0-9-]{0,27}$" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 32768 },
+        "required": { "type": "boolean" },
+        "method": { "enum": ["automated", "manual", "hybrid"] },
+        "verificationSurfaces": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "automated": { "$ref": "#/$defs/surface" },
+            "manual": { "$ref": "#/$defs/surface" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "method": { "const": "automated" } }, "required": ["method"] },
+          "then": {
+            "properties": {
+              "verificationSurfaces": {
+                "required": ["automated"],
+                "not": { "required": ["manual"] }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "method": { "const": "manual" } }, "required": ["method"] },
+          "then": {
+            "properties": {
+              "verificationSurfaces": {
+                "required": ["manual"],
+                "not": { "required": ["automated"] }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "method": { "const": "hybrid" } }, "required": ["method"] },
+          "then": {
+            "properties": {
+              "verificationSurfaces": { "required": ["automated", "manual"] }
+            }
+          }
+        }
+      ]
+    },
+    "surface": {
+      "enum": ["unit", "component", "handler", "real_http", "browser", "device", "external_service", "manual_observation"]
+    }
+  }
+}

@@ -3,7 +3,6 @@ package migrate
 import (
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -50,20 +49,6 @@ type mancodeLegacyWorkflowSummary struct {
 	RawParentTaskIDOmitted    bool   `json:"raw_parent_task_id_omitted"`
 	RawSkippedStepsOmitted    bool   `json:"raw_skipped_steps_omitted"`
 	SourceAuthorityOmitted    bool   `json:"source_authority_omitted"`
-}
-
-func isMancodeLegacyWorkflowMetadataPath(relative, sourceRoot string) (string, bool) {
-	standard := filepath.ToSlash(strings.TrimPrefix(relative, "./"))
-	if strings.EqualFold(filepath.Base(filepath.Clean(sourceRoot)), ".mancode") &&
-		!strings.HasPrefix(strings.ToLower(standard), ".mancode/") {
-		standard = filepath.ToSlash(filepath.Join(".mancode", standard))
-	}
-	parts := strings.Split(strings.Trim(standard, "/"), "/")
-	if len(parts) != 4 || !strings.EqualFold(parts[0], ".mancode") || !strings.EqualFold(parts[1], "workflows") ||
-		!strings.EqualFold(parts[3], "metadata.json") || !mancodeLegacyWorkflowTaskID.MatchString(parts[2]) {
-		return "", false
-	}
-	return parts[2], true
 }
 
 func mancodeLegacyWorkflowSourceAlias(relative string) string {

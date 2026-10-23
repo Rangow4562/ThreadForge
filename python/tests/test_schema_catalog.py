@@ -631,6 +631,60 @@ def test_schema_catalog_exists_and_is_nonempty():
     assert SCHEMA_PATHS
 
 
+def test_mancode_legacy_requirements_schema_keeps_content_review_only_and_typed():
+    schema = json.loads((SCHEMA_DIRECTORY / "mancode-legacy-requirements-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    dimensions = [
+        "platform", "core_scope", "technical_stack", "data_and_persistence",
+        "performance", "compatibility", "security",
+    ]
+    document = {
+        "schema_version": "threadforge.mancode-legacy-requirements.v1",
+        "authority": "local_pending_review",
+        "human_review_required": True,
+        "execution_authorized": False,
+        "task_id_sha256": "a" * 64,
+        "readiness": "needs_clarification",
+        "requirements": {
+            "version": 1,
+            "goal": "Build the requested capability",
+            "confirmedScope": ["local import"],
+            "excludedScope": [],
+            "technicalDecisions": ["SQLite"],
+            "defaults": [],
+            "blockingUnknowns": ["deployment target"],
+            "coverage": [
+                {"dimension": dimension, "status": "confirmed", "rationale": "reviewed"}
+                for dimension in dimensions
+            ],
+            "acceptanceCriteria": [{
+                "id": "AC-IMPORT-1",
+                "description": "The imported record remains review-only",
+                "required": True,
+                "method": "hybrid",
+                "verificationSurfaces": {"automated": "unit", "manual": "manual_observation"},
+            }],
+        },
+        "raw_task_identity_omitted": True,
+        "source_authority_omitted": True,
+    }
+    validator.validate(document)
+    for invalid in (
+        {**document, "execution_authorized": True},
+        {**document, "authority": "approved"},
+        {**document, "unexpected": "source content"},
+        {**document, "requirements": {
+            **document["requirements"],
+            "acceptanceCriteria": [{
+                **document["requirements"]["acceptanceCriteria"][0],
+                "verificationSurfaces": {"automated": "unit"},
+            }],
+        }},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_procedure_list_schema_is_versioned_metadata_only():
     schema = json.loads((SCHEMA_DIRECTORY / "procedure-list-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

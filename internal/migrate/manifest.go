@@ -711,6 +711,7 @@ func validateSnapshotRecord(record Record, file FileEntry, product Product, sour
 	aliasedRRSIRecord := product == RRSI && (record.Type == "rrsi_trial_artifact" || record.Type == "rrsi_trajectory_summary")
 	aliasedMancodeCoordinationRecord := product == Mancode && isMancodeCoordinationRecordType(record.Type)
 	aliasedMancodeLegacyWorkflowRecord := product == Mancode && record.Type == "mancode_legacy_workflow_summary"
+	aliasedMancodeLegacyRequirementsRecord := product == Mancode && record.Type == "mancode_legacy_requirements"
 	wantMancodeAlias := ""
 	if aliasedMancodeCoordinationRecord {
 		wantMancodeAlias = mancodeCoordinationSourceAlias(file.Path, record.Type)
@@ -719,16 +720,21 @@ func validateSnapshotRecord(record Record, file FileEntry, product Product, sour
 	if aliasedMancodeLegacyWorkflowRecord {
 		wantLegacyWorkflowAlias = mancodeLegacyWorkflowSourceAlias(file.Path)
 	}
+	wantLegacyRequirementsAlias := ""
+	if aliasedMancodeLegacyRequirementsRecord {
+		wantLegacyRequirementsAlias = mancodeLegacyRequirementsSourceAlias(file.Path)
+	}
 	if !safeRelative(record.SourcePath) ||
-		(!aliasedRRSIRecord && !aliasedMancodeCoordinationRecord && !aliasedMancodeLegacyWorkflowRecord && record.SourcePath != file.Path) ||
+		(!aliasedRRSIRecord && !aliasedMancodeCoordinationRecord && !aliasedMancodeLegacyWorkflowRecord && !aliasedMancodeLegacyRequirementsRecord && record.SourcePath != file.Path) ||
 		(aliasedMancodeCoordinationRecord && record.SourcePath != wantMancodeAlias) ||
 		(aliasedMancodeLegacyWorkflowRecord && record.SourcePath != wantLegacyWorkflowAlias) ||
+		(aliasedMancodeLegacyRequirementsRecord && record.SourcePath != wantLegacyRequirementsAlias) ||
 		!json.Valid(record.Payload) || digest(record.Payload) != record.ContentSHA256 || privacy.ContainsCredential(record.Payload) ||
 		record.Scope != "local_pending_review" || !knownRecordType(record.Type) || !recordTypeMatchesSource(product, file.Path, record.Type, sourceRoot) {
 		return errors.New("record fields are not valid for this migration")
 	}
 	prefix := file.Path + "#"
-	if aliasedRRSIRecord || aliasedMancodeCoordinationRecord || aliasedMancodeLegacyWorkflowRecord {
+	if aliasedRRSIRecord || aliasedMancodeCoordinationRecord || aliasedMancodeLegacyWorkflowRecord || aliasedMancodeLegacyRequirementsRecord {
 		prefix = record.SourcePath + "#"
 	}
 	if !strings.HasPrefix(record.Key, prefix) {
@@ -758,7 +764,7 @@ func knownRecordType(value string) bool {
 		"mancode_git_ref_authority", "mancode_git_ref_receipt", "mancode_git_ref_task_bundle", "mancode_git_ref_authority_transition",
 		"mancode_progress_projection", "workflow_metadata", "workflow_requirements", "workflow_review",
 		"workflow_verification", "workflow_plan", "workflow_checkpoint",
-		"mancode_workflow_aggregate", "mancode_legacy_workflow_summary",
+		"mancode_workflow_aggregate", "mancode_legacy_workflow_summary", "mancode_legacy_requirements",
 		"rrsi_evaluation_result", "rrsi_edit_history", "rrsi_attribution", "rrsi_selection_decision", "rrsi_trial_artifact",
 		"rrsi_trajectory_summary":
 		return true
@@ -770,6 +776,10 @@ func knownRecordType(value string) bool {
 func recordTypeMatchesSource(product Product, relative, recordType, sourceRoot string) bool {
 	if product == Mancode && recordType == "mancode_legacy_workflow_summary" {
 		_, ok := isMancodeLegacyWorkflowMetadataPath(relative, sourceRoot)
+		return ok
+	}
+	if product == Mancode && recordType == "mancode_legacy_requirements" {
+		_, ok := isMancodeLegacyWorkflowRequirementsPath(relative, sourceRoot)
 		return ok
 	}
 	if product == Mancode && relative == mancodeGitRefVirtualPath {
@@ -1192,6 +1202,8 @@ func scanFileWithMancodeGitRef(product Product, sourceRoot, relative, fullPath s
 				recordPath = mancodeCoordinationSourceAlias(relative, item.Type)
 			} else if product == Mancode && item.Type == "mancode_legacy_workflow_summary" {
 				recordPath = mancodeLegacyWorkflowSourceAlias(relative)
+			} else if product == Mancode && item.Type == "mancode_legacy_requirements" {
+				recordPath = mancodeLegacyRequirementsSourceAlias(relative)
 			}
 			file.records = append(file.records, Record{
 				Key: fmt.Sprintf("%s#%06d", recordPath, recordIndex), Type: item.Type, SourcePath: recordPath,

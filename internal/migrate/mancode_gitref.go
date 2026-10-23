@@ -607,8 +607,9 @@ func normalizeMancodeGitRefManifest(sourceRoot string, value any, source Mancode
 			items = append(items, normalized)
 		}
 	}
-	for range collections["taskBundles"].values {
-		items = append(items, normalizedItem{Rejected: true, Issue: "Mancode git-ref task bundle requires a source-specific workflow artifact converter"})
+	for _, bundle := range collections["taskBundles"].values {
+		normalized, err := normalizeMancodeGitRefTaskBundle(bundle)
+		items = appendMancodeGitRefNormalized(items, normalized, err, "Mancode git-ref task bundle did not match the supported review-only workflow contract")
 	}
 	if freezePresent {
 		items = append(items, normalizedItem{Rejected: true, Issue: "Mancode git-ref authority freeze detail requires a source-specific converter"})

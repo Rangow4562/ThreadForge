@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-git-ref-task-bundle-v1.schema.json",
+  "title": "Threadforge Mancode git-ref task bundle migration summary v1",
+  "description": "Identity- and code-reference-reduced integrity summary for a validated local Mancode task bundle. Imported workflow artifacts remain local, pending human review, and non-authorizing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "authority", "human_review_required", "execution_authorized",
+    "task_identity_omitted", "code_reference_omitted", "task_revision", "ownership_epoch",
+    "workflow_status", "requirements_status", "review_status", "verification_status",
+    "artifact_count", "artifact_kinds", "bundle_digest_verified", "aggregate_verified", "created_at"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-git-ref-task-bundle.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "task_identity_omitted": { "const": true },
+    "code_reference_omitted": { "const": true },
+    "task_revision": { "type": "integer", "minimum": 1 },
+    "ownership_epoch": { "type": "integer", "minimum": 0 },
+    "workflow_status": { "type": "string", "minLength": 1 },
+    "requirements_status": { "type": "string", "minLength": 1 },
+    "review_status": { "type": "string", "minLength": 1 },
+    "verification_status": { "type": "string", "minLength": 1 },
+    "artifact_count": { "type": "integer", "minimum": 5, "maximum": 16 },
+    "artifact_kinds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["metadata", "checkpoint", "requirements", "review", "verification", "plan", "summary"] }
+    },
+    "bundle_digest_verified": { "const": true },
+    "aggregate_verified": { "const": true },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}

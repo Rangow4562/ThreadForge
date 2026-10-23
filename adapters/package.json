@@ -105,6 +105,7 @@
     "test": "node --experimental-strip-types --test test/*.test.ts test/*.test.mjs",
     "build:cline-plugin": "node scripts/build-cline-plugin-package.mjs",
     "test:cline-plugin-host": "node scripts/cline-plugin-host-smoke.mjs",
+    "test:cline-skill-host": "node --experimental-strip-types scripts/cline-skill-host-smoke.mjs",
     "test:package": "node scripts/package-smoke.mjs",
     "test:installed-skills": "node --experimental-strip-types scripts/live-skill-smoke.mjs",
     "test:opencode-history-host": "node --experimental-strip-types scripts/opencode-history-host-smoke.mjs"

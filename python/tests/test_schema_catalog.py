@@ -3684,3 +3684,31 @@ def test_cline_plugin_host_smoke_separates_installed_import_from_host_dispatch()
     ):
         with pytest.raises(ValidationError):
             validator.validate(invalid)
+
+
+def test_cline_skill_inventory_smoke_does_not_claim_model_retrieval():
+    schema = json.loads((SCHEMA_DIRECTORY / "cline-skill-inventory-smoke-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    report = {
+        "schema_version": "threadforge.cline-skill-inventory-smoke.v1",
+        "host": "cline-cli",
+        "host_version": "3.0.73",
+        "project_skill_install_status": "passed",
+        "project_skill_inventory_status": "passed",
+        "discovered_project_skill_count": 1,
+        "procedure_name_retained_in_report": False,
+        "procedure_body_retained_in_report": False,
+        "agent_retrieval_status": "not_exercised",
+        "model_invocations": 0,
+        "execution_authorized": False,
+    }
+    validator.validate(report)
+    for invalid in (
+        {**report, "agent_retrieval_status": "passed"},
+        {**report, "discovered_project_skill_count": 2},
+        {**report, "procedure_body_retained_in_report": True},
+        {**report, "model_invocations": 1},
+        {**report, "project_path": "C:/private/project"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)

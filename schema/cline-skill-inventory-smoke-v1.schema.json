@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/cline-skill-inventory-smoke-v1.schema.json",
+  "title": "Threadforge Cline Project Skill Inventory Smoke v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "host",
+    "host_version",
+    "project_skill_install_status",
+    "project_skill_inventory_status",
+    "discovered_project_skill_count",
+    "procedure_name_retained_in_report",
+    "procedure_body_retained_in_report",
+    "agent_retrieval_status",
+    "model_invocations",
+    "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.cline-skill-inventory-smoke.v1" },
+    "host": { "const": "cline-cli" },
+    "host_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },
+    "project_skill_install_status": { "const": "passed" },
+    "project_skill_inventory_status": { "const": "passed" },
+    "discovered_project_skill_count": { "const": 1 },
+    "procedure_name_retained_in_report": { "const": false },
+    "procedure_body_retained_in_report": { "const": false },
+    "agent_retrieval_status": { "const": "not_exercised" },
+    "model_invocations": { "const": 0 },
+    "execution_authorized": { "const": false }
+  }
+}

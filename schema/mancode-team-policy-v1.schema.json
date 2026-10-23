@@ -15,7 +15,7 @@
     "authority": { "const": "local_pending_review" },
     "human_review_required": { "const": true },
     "execution_authorized": { "const": false },
-    "workspace_binding_verified": { "const": false },
+    "workspace_binding_verified": { "type": "boolean" },
     "revision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
     "source_policy": { "enum": ["on", "off", "auto"] },
     "recent_days": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },

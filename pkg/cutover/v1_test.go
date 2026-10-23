@@ -338,6 +338,66 @@ func TestAssessBlocksIncompleteMancodeLegacyWorkflowBinding(t *testing.T) {
 	}
 }
 
+func TestAssessBlocksIncompleteMancodeTeamPolicyWorkspaceBinding(t *testing.T) {
+	root := t.TempDir()
+	report, _, trust := completeFixture(t, root)
+	var mancodeMigration *MigrationEvidence
+	for index := range report.Migrations {
+		if report.Migrations[index].Product == "mancode" {
+			mancodeMigration = &report.Migrations[index]
+			break
+		}
+	}
+	if mancodeMigration == nil {
+		t.Fatal("Mancode migration fixture is missing")
+	}
+	coveragePath := filepath.Join(root, mancodeMigration.FormatCoverage.Path)
+	content, err := os.ReadFile(coveragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var coverage migrationcoverage.Report
+	if err := json.Unmarshal(content, &coverage); err != nil {
+		t.Fatal(err)
+	}
+	for index := range coverage.Formats {
+		row := &coverage.Formats[index]
+		switch row.ID {
+		case "mancode.team-policy", "mancode.project-config":
+			row.Files, row.RecordsFound, row.RecordsImported, row.SnapshotFiles = 1, 1, 1, 1
+			row.FileSetSHA256 = testDigest(row.ID)
+		}
+	}
+	coverage.FilesScanned += 2
+	coverage.RecordsFound += 2
+	coverage.RecordsImported += 2
+	coverage.SnapshotFiles += 2
+	coverage.MancodeTeamPolicyChecks = []migrationcoverage.MancodeTeamPolicyCheck{{
+		SchemaVersion: migrationcoverage.MancodeTeamPolicyBindingSchemaVersion,
+		Relationship:  "mancode_team_policy_project_config", PairIDSHA256: testDigest("mancode-team-policy"),
+		TeamPolicyFileCount: 1, TeamPolicyValid: true, TeamPolicySourceSetSHA256: testDigest("team-policy"),
+		ProjectConfigFileCount: 1, ProjectConfigValid: true, ProjectConfigSourceSetSHA256: testDigest("project-config"),
+		Status: "incomplete", Issues: []string{"legacy_unverified"}, Authority: "local_pending_review",
+		HumanReviewRequired: true, ExecutionAuthorized: false,
+	}}
+	updated, err := json.Marshal(coverage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationcoverage.Validate(coverage); err != nil {
+		t.Fatalf("incomplete team-policy binding fixture is invalid: %v", err)
+	}
+	if err := os.WriteFile(coveragePath, updated, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(updated)
+	mancodeMigration.FormatCoverage.SHA256 = hex.EncodeToString(digest[:])
+	assessment, err := AssessWithTrust(report, root, trust)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "team-policy workspace binding") {
+		t.Fatalf("incomplete Mancode team-policy workspace binding was not blocked: %#v, %v", assessment, err)
+	}
+}
+
 func TestAssessBlocksUnclassifiedMigrationSourceFiles(t *testing.T) {
 	root := t.TempDir()
 	report, _, trust := completeFixture(t, root)

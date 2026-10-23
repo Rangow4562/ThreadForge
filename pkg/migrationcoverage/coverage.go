@@ -13,6 +13,7 @@ const UnclassifiedFormat = "unclassified"
 
 const MancodePrivacyBindingSchemaVersion = "threadforge.mancode-privacy-binding-check.v1"
 const MancodeLegacyWorkflowBindingSchemaVersion = "threadforge.mancode-legacy-workflow-binding.v1"
+const MancodeTeamPolicyBindingSchemaVersion = "threadforge.mancode-team-policy-binding-check.v1"
 
 const (
 	maxCoverageFiles   = 10000
@@ -40,6 +41,7 @@ type Report struct {
 	UnclassifiedFiles           int                          `json:"unclassified_files"`
 	CrossFileChecks             []CrossFileCheck             `json:"cross_file_checks,omitempty"`
 	MancodeLegacyWorkflowChecks []MancodeLegacyWorkflowCheck `json:"mancode_legacy_workflow_checks,omitempty"`
+	MancodeTeamPolicyChecks     []MancodeTeamPolicyCheck     `json:"mancode_team_policy_checks,omitempty"`
 	Formats                     []Format                     `json:"formats"`
 }
 
@@ -110,6 +112,27 @@ type CrossFileCheck struct {
 	Authority                  string   `json:"authority"`
 	HumanReviewRequired        bool     `json:"human_review_required"`
 	ExecutionAuthorized        bool     `json:"execution_authorized"`
+}
+
+// MancodeTeamPolicyCheck records a path-redacted binding between a V3 team
+// policy and the shared project config that owns its workspace identity.
+// The result is migration evidence only and never activates source policy.
+type MancodeTeamPolicyCheck struct {
+	SchemaVersion                string   `json:"schema_version"`
+	Relationship                 string   `json:"relationship"`
+	PairIDSHA256                 string   `json:"pair_id_sha256"`
+	TeamPolicyFileCount          int      `json:"team_policy_file_count"`
+	TeamPolicyValid              bool     `json:"team_policy_valid"`
+	TeamPolicySourceSetSHA256    string   `json:"team_policy_source_set_sha256,omitempty"`
+	ProjectConfigFileCount       int      `json:"project_config_file_count"`
+	ProjectConfigValid           bool     `json:"project_config_valid"`
+	ProjectConfigSourceSetSHA256 string   `json:"project_config_source_set_sha256,omitempty"`
+	WorkspaceBindingVerified     bool     `json:"workspace_binding_verified"`
+	Status                       string   `json:"status"`
+	Issues                       []string `json:"issues"`
+	Authority                    string   `json:"authority"`
+	HumanReviewRequired          bool     `json:"human_review_required"`
+	ExecutionAuthorized          bool     `json:"execution_authorized"`
 }
 
 type Format struct {
@@ -192,6 +215,9 @@ func Validate(report Report) error {
 		return err
 	}
 	if err := ValidateMancodeLegacyWorkflowChecks(report.Product, report.MancodeLegacyWorkflowChecks); err != nil {
+		return err
+	}
+	if err := ValidateMancodeTeamPolicyChecks(report.Product, report.MancodeTeamPolicyChecks); err != nil {
 		return err
 	}
 	for name, value := range map[string]int{
@@ -311,6 +337,15 @@ func Validate(report Report) error {
 			verificationFiles != formatFiles(report.Formats, "mancode.legacy-workflow-verification") ||
 			planFiles != formatFiles(report.Formats, "mancode.legacy-workflow-plan") {
 			return errors.New("Mancode legacy workflow checks do not cover every legacy workflow component")
+		}
+		var teamPolicyFiles, boundProjectConfigFiles int
+		for _, check := range report.MancodeTeamPolicyChecks {
+			teamPolicyFiles += check.TeamPolicyFileCount
+			boundProjectConfigFiles += check.ProjectConfigFileCount
+		}
+		if teamPolicyFiles != formatFiles(report.Formats, "mancode.team-policy") ||
+			boundProjectConfigFiles > formatFiles(report.Formats, "mancode.project-config") {
+			return errors.New("Mancode team-policy checks do not reconcile with team-policy and project-config source files")
 		}
 	}
 	return nil
@@ -557,6 +592,87 @@ func ValidateMancodeLegacyWorkflowChecks(product string, checks []MancodeLegacyW
 			}
 		default:
 			return errors.New("Mancode legacy workflow check status is invalid")
+		}
+	}
+	return nil
+}
+
+// ValidateMancodeTeamPolicyChecks validates review-only V3 team-policy workspace
+// bindings embedded in manifests and coverage receipts.
+func ValidateMancodeTeamPolicyChecks(product string, checks []MancodeTeamPolicyCheck) error {
+	if len(checks) > maxCoverageFiles || len(checks) > 0 && product != "mancode" {
+		return errors.New("Mancode team-policy checks are unsupported for this product or exceed bounds")
+	}
+	allowedIssues := map[string]bool{
+		"team_policy_missing": true, "team_policy_ambiguous": true, "team_policy_invalid": true,
+		"project_config_missing": true, "project_config_ambiguous": true, "project_config_invalid": true,
+		"workspace_mismatch": true, "legacy_unverified": true,
+	}
+	previousPair := ""
+	for _, check := range checks {
+		if check.SchemaVersion != MancodeTeamPolicyBindingSchemaVersion ||
+			check.Relationship != "mancode_team_policy_project_config" ||
+			!digestPattern.MatchString(check.PairIDSHA256) ||
+			previousPair != "" && check.PairIDSHA256 <= previousPair ||
+			check.Authority != "local_pending_review" || !check.HumanReviewRequired || check.ExecutionAuthorized {
+			return errors.New("Mancode team-policy binding identity or authority is invalid")
+		}
+		previousPair = check.PairIDSHA256
+		if check.TeamPolicyFileCount < 0 || check.TeamPolicyFileCount > maxCoverageFiles ||
+			check.ProjectConfigFileCount < 0 || check.ProjectConfigFileCount > maxCoverageFiles ||
+			(check.TeamPolicyFileCount == 0) != (check.TeamPolicySourceSetSHA256 == "") ||
+			(check.ProjectConfigFileCount == 0) != (check.ProjectConfigSourceSetSHA256 == "") ||
+			check.TeamPolicySourceSetSHA256 != "" && !digestPattern.MatchString(check.TeamPolicySourceSetSHA256) ||
+			check.ProjectConfigSourceSetSHA256 != "" && !digestPattern.MatchString(check.ProjectConfigSourceSetSHA256) ||
+			check.TeamPolicyValid && check.TeamPolicyFileCount != 1 ||
+			check.ProjectConfigValid && check.ProjectConfigFileCount != 1 {
+			return errors.New("Mancode team-policy binding source commitments are invalid")
+		}
+		if check.WorkspaceBindingVerified && (!check.TeamPolicyValid || !check.ProjectConfigValid) {
+			return errors.New("Mancode team-policy binding claims verification without valid inputs")
+		}
+		if len(check.Issues) > 8 {
+			return errors.New("Mancode team-policy binding issue list exceeds bounds")
+		}
+		previousIssue := ""
+		mismatch := false
+		legacyUnverified := false
+		for _, issue := range check.Issues {
+			if !allowedIssues[issue] || issue <= previousIssue {
+				return errors.New("Mancode team-policy binding issue list is invalid")
+			}
+			previousIssue = issue
+			if issue == "workspace_mismatch" {
+				mismatch = true
+			}
+			if issue == "legacy_unverified" {
+				legacyUnverified = true
+			}
+		}
+		if mismatch && (!check.TeamPolicyValid || !check.ProjectConfigValid || check.WorkspaceBindingVerified) {
+			return errors.New("Mancode team-policy workspace mismatch contradicts its binding inputs")
+		}
+		if check.TeamPolicyValid && check.ProjectConfigValid && !legacyUnverified && check.WorkspaceBindingVerified == mismatch {
+			return errors.New("Mancode team-policy workspace result contradicts its mismatch issue")
+		}
+		if (!check.TeamPolicyValid || !check.ProjectConfigValid) && (mismatch || check.WorkspaceBindingVerified) {
+			return errors.New("Mancode team-policy workspace binding compares invalid inputs")
+		}
+		switch check.Status {
+		case "verified":
+			if !check.TeamPolicyValid || !check.ProjectConfigValid || !check.WorkspaceBindingVerified || len(check.Issues) != 0 {
+				return errors.New("verified Mancode team-policy binding is incomplete")
+			}
+		case "incomplete":
+			if len(check.Issues) == 0 || mismatch {
+				return errors.New("incomplete Mancode team-policy binding has inconsistent issues")
+			}
+		case "conflicting":
+			if len(check.Issues) == 0 || !mismatch {
+				return errors.New("conflicting Mancode team-policy binding has no workspace mismatch")
+			}
+		default:
+			return errors.New("Mancode team-policy binding status is invalid")
 		}
 	}
 	return nil

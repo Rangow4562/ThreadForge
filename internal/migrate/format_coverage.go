@@ -117,6 +117,11 @@ func BuildFormatCoverage(manifest Manifest) (migrationcoverage.Report, error) {
 		legacyWorkflowChecks = legacyMancodeWorkflowBindingChecks(manifest.Files, manifest.SourceRoot)
 	}
 	report.MancodeLegacyWorkflowChecks = append([]migrationcoverage.MancodeLegacyWorkflowCheck(nil), legacyWorkflowChecks...)
+	teamPolicyChecks := manifest.MancodeTeamPolicyChecks
+	if manifest.Product == Mancode && len(teamPolicyChecks) == 0 {
+		teamPolicyChecks = legacyMancodeTeamPolicyChecks(manifest.Files, manifest.SourceRoot)
+	}
+	report.MancodeTeamPolicyChecks = append([]migrationcoverage.MancodeTeamPolicyCheck(nil), teamPolicyChecks...)
 	for _, file := range manifest.Files {
 		if file.SnapshotPath != "" {
 			report.SnapshotFiles++

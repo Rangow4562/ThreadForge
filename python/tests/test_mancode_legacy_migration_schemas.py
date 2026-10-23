@@ -203,6 +203,28 @@ SCHEMA_DIRECTORY = Path(__file__).resolve().parents[2] / "schema"
             },
         ),
         (
+            "mancode-team-policy-v1.schema.json",
+            {
+                "schema_version": "threadforge.mancode-team-policy.v1",
+                "policy_kind": "team_sharing",
+                "authority": "local_pending_review",
+                "human_review_required": True,
+                "execution_authorized": False,
+                "workspace_binding_verified": True,
+                "revision": 4,
+                "source_policy": "auto",
+                "recent_days": 30,
+                "default_visibility": "local",
+                "share_confirmed_decisions": False,
+                "retention": {
+                    "local_raw_artifact_days": 0,
+                    "local_cache_days": 14,
+                    "completed_session_days": 30,
+                },
+                "updated_at": "2026-10-08T12:00:00Z",
+            },
+        ),
+        (
             "mancode-schema-manifest-v1.schema.json",
             {
                 "schema_version": "threadforge.mancode-schema-manifest.v1",

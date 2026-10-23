@@ -713,7 +713,7 @@ func normalizeMancodeProjectConfig(value any) ([]normalizedItem, bool, error) {
 	if err != nil {
 		return nil, true, fmt.Errorf("encode Mancode project config: %w", err)
 	}
-	return []normalizedItem{{Type: "mancode_project_config", Payload: payload}}, true, nil
+	return []normalizedItem{{Type: "mancode_project_config", Payload: payload, projectConfigWorkspaceID: workspaceID}}, true, nil
 }
 
 func mancodeGitRefAuthorityNeedsReconciliation(sourceRoot, relative string, value any) bool {

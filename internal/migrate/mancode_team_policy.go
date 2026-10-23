@@ -87,5 +87,5 @@ func normalizeMancodeTeamPolicy(value any) ([]normalizedItem, bool, error) {
 	if err != nil {
 		return nil, true, fmt.Errorf("encode Mancode team policy projection: %w", err)
 	}
-	return []normalizedItem{{Type: "mancode_team_policy", Payload: encoded}}, true, nil
+	return []normalizedItem{{Type: "mancode_team_policy", Payload: encoded, teamPolicyWorkspaceID: workspaceID}}, true, nil
 }

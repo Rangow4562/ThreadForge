@@ -197,6 +197,78 @@ func TestValidateMancodeLegacyWorkflowBindingsReconcileAndSurfaceConflicts(t *te
 	}
 }
 
+func TestValidateMancodeTeamPolicyWorkspaceBindingsReconcileAndSurfaceConflicts(t *testing.T) {
+	report := validCoverageFixture("mancode")
+	setMancodeTeamPolicyFileCounts(&report, 1, 1)
+	check := MancodeTeamPolicyCheck{
+		SchemaVersion: MancodeTeamPolicyBindingSchemaVersion, Relationship: "mancode_team_policy_project_config",
+		PairIDSHA256:        strings.Repeat("d", 64),
+		TeamPolicyFileCount: 1, TeamPolicyValid: true, TeamPolicySourceSetSHA256: strings.Repeat("e", 64),
+		ProjectConfigFileCount: 1, ProjectConfigValid: true, ProjectConfigSourceSetSHA256: strings.Repeat("f", 64),
+		WorkspaceBindingVerified: true, Status: "verified", Issues: []string{}, Authority: "local_pending_review",
+		HumanReviewRequired: true, ExecutionAuthorized: false,
+	}
+	report.MancodeTeamPolicyChecks = []MancodeTeamPolicyCheck{check}
+	if err := Validate(report); err != nil {
+		t.Fatalf("verified team-policy workspace binding rejected: %v", err)
+	}
+
+	conflict := report
+	conflict.MancodeTeamPolicyChecks = append([]MancodeTeamPolicyCheck(nil), report.MancodeTeamPolicyChecks...)
+	conflict.MancodeTeamPolicyChecks[0].WorkspaceBindingVerified = false
+	conflict.MancodeTeamPolicyChecks[0].Status = "conflicting"
+	conflict.MancodeTeamPolicyChecks[0].Issues = []string{"workspace_mismatch"}
+	if err := Validate(conflict); err != nil {
+		t.Fatalf("explicit team-policy workspace mismatch should remain reportable: %v", err)
+	}
+
+	contradictory := conflict
+	contradictory.MancodeTeamPolicyChecks = append([]MancodeTeamPolicyCheck(nil), conflict.MancodeTeamPolicyChecks...)
+	contradictory.MancodeTeamPolicyChecks[0].WorkspaceBindingVerified = true
+	if err := Validate(contradictory); err == nil {
+		t.Fatal("team-policy workspace mismatch with a verified flag was accepted")
+	}
+
+	incomplete := report
+	setMancodeTeamPolicyFileCounts(&incomplete, 1, 0)
+	incomplete.MancodeTeamPolicyChecks = []MancodeTeamPolicyCheck{{
+		SchemaVersion: MancodeTeamPolicyBindingSchemaVersion, Relationship: "mancode_team_policy_project_config",
+		PairIDSHA256:        strings.Repeat("d", 64),
+		TeamPolicyFileCount: 1, TeamPolicyValid: true, TeamPolicySourceSetSHA256: strings.Repeat("e", 64),
+		Status: "incomplete", Issues: []string{"project_config_missing"}, Authority: "local_pending_review",
+		HumanReviewRequired: true, ExecutionAuthorized: false,
+	}}
+	if err := Validate(incomplete); err != nil {
+		t.Fatalf("missing sibling project config should remain an explicit incomplete binding: %v", err)
+	}
+
+	uncovered := report
+	setMancodeTeamPolicyFileCounts(&uncovered, 1, 0)
+	uncovered.MancodeTeamPolicyChecks = nil
+	if err := Validate(uncovered); err == nil {
+		t.Fatal("coverage omitted a team-policy binding check for a classified policy file")
+	}
+}
+
+func setMancodeTeamPolicyFileCounts(report *Report, teamPolicy, projectConfig int) {
+	for index := range report.Formats {
+		row := &report.Formats[index]
+		row.Files, row.SourceBytes, row.RecordsFound, row.RecordsImported = 0, 0, 0, 0
+		row.CredentialExcludedRecords, row.RejectedRecords = 0, 0
+		row.SnapshotFiles, row.JoinedFiles, row.UnsupportedFiles, row.UnconvertedFiles = 0, 0, 0, 0
+		switch row.ID {
+		case "mancode.team-policy":
+			row.Files, row.RecordsFound, row.RecordsImported, row.SnapshotFiles = teamPolicy, teamPolicy, teamPolicy, teamPolicy
+		case "mancode.project-config":
+			row.Files, row.RecordsFound, row.RecordsImported, row.SnapshotFiles = projectConfig, projectConfig, projectConfig, projectConfig
+		}
+	}
+	files := teamPolicy + projectConfig
+	report.FilesScanned, report.RecordsFound, report.RecordsImported, report.SnapshotFiles = files, files, files, files
+	report.SourceBytes, report.CredentialExcludedRecords, report.RejectedRecords = 0, 0, 0
+	report.JoinedFiles, report.UnsupportedFiles, report.UnconvertedFiles, report.UnclassifiedFiles = 0, 0, 0, 0
+}
+
 func setMancodePrivacyFileCounts(report *Report, policy, exclusions int) {
 	for index := range report.Formats {
 		row := &report.Formats[index]

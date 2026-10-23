@@ -2184,6 +2184,23 @@ def test_cutover_v5_requires_format_coverage_and_source_backup_verification():
             "human_review_required": True,
             "execution_authorized": False,
         }],
+        "mancode_team_policy_checks": [{
+            "schema_version": "threadforge.mancode-team-policy-binding-check.v1",
+            "relationship": "mancode_team_policy_project_config",
+            "pair_id_sha256": "a" * 64,
+            "team_policy_file_count": 1,
+            "team_policy_valid": True,
+            "team_policy_source_set_sha256": "b" * 64,
+            "project_config_file_count": 1,
+            "project_config_valid": True,
+            "project_config_source_set_sha256": "c" * 64,
+            "workspace_binding_verified": True,
+            "status": "verified",
+            "issues": [],
+            "authority": "local_pending_review",
+            "human_review_required": True,
+            "execution_authorized": False,
+        }],
         "formats": [{
 			"id": "mancode.privacy-policy",
             "files": 1,
@@ -2235,6 +2252,13 @@ def test_cutover_v5_requires_format_coverage_and_source_backup_verification():
     ):
         legacy_check.pop(field)
     coverage_validator.validate(legacy_coverage_document)
+
+    conflicting_team_policy_document = json.loads(json.dumps(coverage_document))
+    team_policy_check = conflicting_team_policy_document["mancode_team_policy_checks"][0]
+    team_policy_check["workspace_binding_verified"] = False
+    team_policy_check["status"] = "conflicting"
+    team_policy_check["issues"] = ["workspace_mismatch"]
+    coverage_validator.validate(conflicting_team_policy_document)
 
     conflicting_coverage_document = json.loads(json.dumps(coverage_document))
     conflicting_check = conflicting_coverage_document["mancode_legacy_workflow_checks"][0]

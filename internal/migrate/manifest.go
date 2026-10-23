@@ -47,6 +47,7 @@ type Manifest struct {
 	Files                       []FileEntry                                    `json:"files"`
 	CrossFileChecks             []migrationcoverage.CrossFileCheck             `json:"cross_file_checks,omitempty"`
 	MancodeLegacyWorkflowChecks []migrationcoverage.MancodeLegacyWorkflowCheck `json:"mancode_legacy_workflow_checks,omitempty"`
+	MancodeTeamPolicyChecks     []migrationcoverage.MancodeTeamPolicyCheck     `json:"mancode_team_policy_checks,omitempty"`
 	Summary                     Summary                                        `json:"summary"`
 }
 
@@ -97,6 +98,8 @@ type scannedFile struct {
 	metadataReadBytes                int64
 	privacyPolicy                    *mancodePrivacyPolicyBindingSource
 	privacyExclusions                *mancodePrivacyExclusionsBindingSource
+	teamPolicyWorkspaceID            string
+	projectConfigWorkspaceID         string
 	legacyRequirementsDigest         string
 	legacyMetadataRequirementsDigest string
 }
@@ -372,13 +375,20 @@ func inspectWithOptions(product Product, sourceRoot string, scannedSink *[]scann
 		}
 		manifest.CrossFileChecks = bindMancodePrivacyPolicyExclusions(&scanned)
 		manifest.MancodeLegacyWorkflowChecks = bindMancodeLegacyWorkflows(root, &scanned)
+		manifest.MancodeTeamPolicyChecks, err = bindMancodeTeamPolicyWorkspace(&scanned, root)
+		if err != nil {
+			return Manifest{}, fmt.Errorf("bind Mancode team-policy workspace: %w", err)
+		}
 	}
 	sort.Slice(scanned, func(i, j int) bool { return scanned[i].entry.Path < scanned[j].entry.Path })
 	manifest.Files = make([]FileEntry, len(scanned))
 	for i := range scanned {
 		manifest.Files[i] = scanned[i].entry
 	}
-	manifest.SourceFingerprint = sourceFingerprint(manifest.Files, manifest.CrossFileChecks, manifest.MancodeLegacyWorkflowChecks, manifest.MancodeGitRef)
+	manifest.SourceFingerprint = sourceFingerprintWithTeamPolicyChecks(
+		manifest.Files, manifest.CrossFileChecks, manifest.MancodeLegacyWorkflowChecks,
+		manifest.MancodeTeamPolicyChecks, manifest.MancodeGitRef,
+	)
 	manifest.ID = string(product) + "-" + manifest.SourceFingerprint[:20]
 	if scannedSink != nil {
 		*scannedSink = append([]scannedFile(nil), scanned...)
@@ -525,6 +535,13 @@ func CreateSnapshotWithOptions(product Product, sourceRoot, dataRoot string, opt
 				bound := inspectedByPath[entry.Path].records
 				if len(bound) != len(parsed.records) {
 					return Manifest{}, fmt.Errorf("legacy workflow verification binding changed during snapshot: %s", entry.Path)
+				}
+				records = append([]Record(nil), bound...)
+			}
+			if isMancodeTeamPolicyPath(entry.Path, manifest.SourceRoot) {
+				bound := inspectedByPath[entry.Path].records
+				if len(bound) != len(parsed.records) {
+					return Manifest{}, fmt.Errorf("team-policy workspace binding changed during snapshot: %s", entry.Path)
 				}
 				records = append([]Record(nil), bound...)
 			}
@@ -947,9 +964,14 @@ func VerifyManifest(manifest Manifest) error {
 	if !validDigest(manifest.SourceFingerprint) || len(manifest.Files) > maxFiles ||
 		migrationcoverage.ValidateCrossFileChecks(string(manifest.Product), manifest.CrossFileChecks) != nil ||
 		migrationcoverage.ValidateMancodeLegacyWorkflowChecks(string(manifest.Product), manifest.MancodeLegacyWorkflowChecks) != nil ||
+		migrationcoverage.ValidateMancodeTeamPolicyChecks(string(manifest.Product), manifest.MancodeTeamPolicyChecks) != nil ||
 		validateMancodePrivacyManifestChecks(manifest) != nil ||
+		validateMancodeTeamPolicyManifestChecks(manifest) != nil ||
 		validateMancodeLegacyWorkflowManifestChecks(manifest) != nil ||
-		manifest.SourceFingerprint != sourceFingerprint(manifest.Files, manifest.CrossFileChecks, manifest.MancodeLegacyWorkflowChecks, manifest.MancodeGitRef) {
+		manifest.SourceFingerprint != sourceFingerprintWithTeamPolicyChecks(
+			manifest.Files, manifest.CrossFileChecks, manifest.MancodeLegacyWorkflowChecks,
+			manifest.MancodeTeamPolicyChecks, manifest.MancodeGitRef,
+		) {
 		return errors.New("migration source fingerprint is invalid")
 	}
 	if manifest.ID != string(manifest.Product)+"-"+manifest.SourceFingerprint[:20] {
@@ -1251,6 +1273,12 @@ func scanFileWithMancodeGitRef(product Product, sourceRoot, relative, fullPath s
 				}
 				file.privacyExclusions = item.privacyExclusions
 			}
+			if item.teamPolicyWorkspaceID != "" {
+				file.teamPolicyWorkspaceID = item.teamPolicyWorkspaceID
+			}
+			if item.projectConfigWorkspaceID != "" {
+				file.projectConfigWorkspaceID = item.projectConfigWorkspaceID
+			}
 			file.entry.RecordCount++
 			recordIndex++
 			if privacy.ContainsCredential(item.Payload) {
@@ -1305,12 +1333,14 @@ func finalizeScannedFile(file *scannedFile) {
 }
 
 type normalizedItem struct {
-	Type              string
-	Payload           json.RawMessage
-	Rejected          bool
-	Issue             string
-	privacyPolicy     *mancodePrivacyPolicyBindingSource
-	privacyExclusions *mancodePrivacyExclusionsBindingSource
+	Type                     string
+	Payload                  json.RawMessage
+	Rejected                 bool
+	Issue                    string
+	privacyPolicy            *mancodePrivacyPolicyBindingSource
+	privacyExclusions        *mancodePrivacyExclusionsBindingSource
+	teamPolicyWorkspaceID    string
+	projectConfigWorkspaceID string
 }
 
 func normalizeItems(product Product, sourceRoot, relative string, value any) ([]normalizedItem, error) {
@@ -1629,6 +1659,12 @@ func writePrivateFile(name string, data []byte) error {
 
 func sourceFingerprint(files []FileEntry, checks []migrationcoverage.CrossFileCheck,
 	legacyWorkflowChecks []migrationcoverage.MancodeLegacyWorkflowCheck, gitRefs ...*MancodeGitRefSource) string {
+	return sourceFingerprintWithTeamPolicyChecks(files, checks, legacyWorkflowChecks, nil, gitRefs...)
+}
+
+func sourceFingerprintWithTeamPolicyChecks(files []FileEntry, checks []migrationcoverage.CrossFileCheck,
+	legacyWorkflowChecks []migrationcoverage.MancodeLegacyWorkflowCheck,
+	teamPolicyChecks []migrationcoverage.MancodeTeamPolicyCheck, gitRefs ...*MancodeGitRefSource) string {
 	var digestInput strings.Builder
 	for _, file := range files {
 		digestInput.WriteString(file.Path)
@@ -1647,6 +1683,12 @@ func sourceFingerprint(files []FileEntry, checks []migrationcoverage.CrossFileCh
 	if len(legacyWorkflowChecks) > 0 {
 		encoded, _ := json.Marshal(legacyWorkflowChecks)
 		digestInput.WriteString("mancode-legacy-workflow-checks-v1\x00")
+		digestInput.Write(encoded)
+		digestInput.WriteByte('\n')
+	}
+	if len(teamPolicyChecks) > 0 {
+		encoded, _ := json.Marshal(teamPolicyChecks)
+		digestInput.WriteString("mancode-team-policy-binding-checks-v1\x00")
 		digestInput.Write(encoded)
 		digestInput.WriteByte('\n')
 	}

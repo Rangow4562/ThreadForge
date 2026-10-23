@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-legacy-review-v1.schema.json",
+  "title": "Threadforge Mancode Legacy Review Summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "authority", "human_review_required", "execution_authorized", "task_id_sha256",
+    "depth", "domains", "remediation_rounds", "skipped", "skip_reason_present", "blocker_ids_omitted",
+    "report_paths_omitted", "raw_task_identity_omitted", "source_authority_omitted"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-legacy-review.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "task_id_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "depth": { "enum": ["targeted", "full"] },
+    "domains": {
+      "type": "array",
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/domain" }
+    },
+    "remediation_rounds": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "skipped": { "type": "boolean" },
+    "skip_recorded_at": { "type": "string", "format": "date-time" },
+    "skip_reason_present": { "type": "boolean" },
+    "blocker_ids_omitted": { "const": true },
+    "report_paths_omitted": { "const": true },
+    "raw_task_identity_omitted": { "const": true },
+    "source_authority_omitted": { "const": true }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "skipped": { "const": true } }, "required": ["skipped"] },
+      "then": {
+        "properties": {
+          "depth": { "const": "targeted" },
+          "domains": { "maxItems": 0 },
+          "remediation_rounds": { "const": 0 },
+          "skip_reason_present": { "const": true }
+        },
+        "required": ["skip_recorded_at"]
+      },
+      "else": {
+        "properties": {
+          "skip_reason_present": { "const": false }
+        },
+        "not": { "required": ["skip_recorded_at"] },
+        "allOf": [
+          {
+            "if": { "properties": { "depth": { "const": "targeted" } }, "required": ["depth"] },
+            "then": { "properties": { "domains": { "minItems": 1, "maxItems": 1 } } }
+          },
+          {
+            "if": { "properties": { "depth": { "const": "full" } }, "required": ["depth"] },
+            "then": { "properties": { "domains": { "minItems": 2, "maxItems": 2 } } }
+          }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "required", "completed", "report_present", "open_blocker_count", "resolved_blocker_count"],
+      "properties": {
+        "domain": { "enum": ["quality", "security"] },
+        "required": { "const": true },
+        "completed": { "type": "boolean" },
+        "report_present": { "type": "boolean" },
+        "open_blocker_count": { "type": "integer", "minimum": 0, "maximum": 128 },
+        "resolved_blocker_count": { "type": "integer", "minimum": 0, "maximum": 128 }
+      }
+    }
+  }
+}

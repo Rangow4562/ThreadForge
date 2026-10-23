@@ -685,6 +685,56 @@ def test_mancode_legacy_requirements_schema_keeps_content_review_only_and_typed(
             validator.validate(invalid)
 
 
+def test_mancode_legacy_review_schema_is_content_reduced_and_non_authorizing():
+    schema = json.loads((SCHEMA_DIRECTORY / "mancode-legacy-review-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    document = {
+        "schema_version": "threadforge.mancode-legacy-review.v1",
+        "authority": "local_pending_review",
+        "human_review_required": True,
+        "execution_authorized": False,
+        "task_id_sha256": "a" * 64,
+        "depth": "full",
+        "domains": [
+            {
+                "domain": "quality", "required": True, "completed": True,
+                "report_present": True, "open_blocker_count": 1, "resolved_blocker_count": 2,
+            },
+            {
+                "domain": "security", "required": True, "completed": False,
+                "report_present": False, "open_blocker_count": 0, "resolved_blocker_count": 0,
+            },
+        ],
+        "remediation_rounds": 1,
+        "skipped": False,
+        "skip_reason_present": False,
+        "blocker_ids_omitted": True,
+        "report_paths_omitted": True,
+        "raw_task_identity_omitted": True,
+        "source_authority_omitted": True,
+    }
+    validator.validate(document)
+    skipped = {
+        **document,
+        "depth": "targeted",
+        "domains": [],
+        "remediation_rounds": 0,
+        "skipped": True,
+        "skip_recorded_at": "2026-10-23T11:30:00Z",
+        "skip_reason_present": True,
+    }
+    validator.validate(skipped)
+    for invalid in (
+        {**document, "execution_authorized": True},
+        {**document, "report_paths_omitted": False},
+        {**document, "unexpected": "source path"},
+        {**skipped, "domains": [document["domains"][0]]},
+        {**skipped, "skip_reason_present": False},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_procedure_list_schema_is_versioned_metadata_only():
     schema = json.loads((SCHEMA_DIRECTORY / "procedure-list-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

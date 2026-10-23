@@ -712,6 +712,7 @@ func validateSnapshotRecord(record Record, file FileEntry, product Product, sour
 	aliasedMancodeCoordinationRecord := product == Mancode && isMancodeCoordinationRecordType(record.Type)
 	aliasedMancodeLegacyWorkflowRecord := product == Mancode && record.Type == "mancode_legacy_workflow_summary"
 	aliasedMancodeLegacyRequirementsRecord := product == Mancode && record.Type == "mancode_legacy_requirements"
+	aliasedMancodeLegacyReviewRecord := product == Mancode && record.Type == "mancode_legacy_review_summary"
 	wantMancodeAlias := ""
 	if aliasedMancodeCoordinationRecord {
 		wantMancodeAlias = mancodeCoordinationSourceAlias(file.Path, record.Type)
@@ -724,17 +725,22 @@ func validateSnapshotRecord(record Record, file FileEntry, product Product, sour
 	if aliasedMancodeLegacyRequirementsRecord {
 		wantLegacyRequirementsAlias = mancodeLegacyRequirementsSourceAlias(file.Path)
 	}
+	wantLegacyReviewAlias := ""
+	if aliasedMancodeLegacyReviewRecord {
+		wantLegacyReviewAlias = mancodeLegacyReviewSourceAlias(file.Path)
+	}
 	if !safeRelative(record.SourcePath) ||
-		(!aliasedRRSIRecord && !aliasedMancodeCoordinationRecord && !aliasedMancodeLegacyWorkflowRecord && !aliasedMancodeLegacyRequirementsRecord && record.SourcePath != file.Path) ||
+		(!aliasedRRSIRecord && !aliasedMancodeCoordinationRecord && !aliasedMancodeLegacyWorkflowRecord && !aliasedMancodeLegacyRequirementsRecord && !aliasedMancodeLegacyReviewRecord && record.SourcePath != file.Path) ||
 		(aliasedMancodeCoordinationRecord && record.SourcePath != wantMancodeAlias) ||
 		(aliasedMancodeLegacyWorkflowRecord && record.SourcePath != wantLegacyWorkflowAlias) ||
 		(aliasedMancodeLegacyRequirementsRecord && record.SourcePath != wantLegacyRequirementsAlias) ||
+		(aliasedMancodeLegacyReviewRecord && record.SourcePath != wantLegacyReviewAlias) ||
 		!json.Valid(record.Payload) || digest(record.Payload) != record.ContentSHA256 || privacy.ContainsCredential(record.Payload) ||
 		record.Scope != "local_pending_review" || !knownRecordType(record.Type) || !recordTypeMatchesSource(product, file.Path, record.Type, sourceRoot) {
 		return errors.New("record fields are not valid for this migration")
 	}
 	prefix := file.Path + "#"
-	if aliasedRRSIRecord || aliasedMancodeCoordinationRecord || aliasedMancodeLegacyWorkflowRecord || aliasedMancodeLegacyRequirementsRecord {
+	if aliasedRRSIRecord || aliasedMancodeCoordinationRecord || aliasedMancodeLegacyWorkflowRecord || aliasedMancodeLegacyRequirementsRecord || aliasedMancodeLegacyReviewRecord {
 		prefix = record.SourcePath + "#"
 	}
 	if !strings.HasPrefix(record.Key, prefix) {
@@ -764,7 +770,7 @@ func knownRecordType(value string) bool {
 		"mancode_git_ref_authority", "mancode_git_ref_receipt", "mancode_git_ref_task_bundle", "mancode_git_ref_authority_transition",
 		"mancode_progress_projection", "workflow_metadata", "workflow_requirements", "workflow_review",
 		"workflow_verification", "workflow_plan", "workflow_checkpoint",
-		"mancode_workflow_aggregate", "mancode_legacy_workflow_summary", "mancode_legacy_requirements",
+		"mancode_workflow_aggregate", "mancode_legacy_workflow_summary", "mancode_legacy_requirements", "mancode_legacy_review_summary",
 		"rrsi_evaluation_result", "rrsi_edit_history", "rrsi_attribution", "rrsi_selection_decision", "rrsi_trial_artifact",
 		"rrsi_trajectory_summary":
 		return true
@@ -780,6 +786,10 @@ func recordTypeMatchesSource(product Product, relative, recordType, sourceRoot s
 	}
 	if product == Mancode && recordType == "mancode_legacy_requirements" {
 		_, ok := isMancodeLegacyWorkflowRequirementsPath(relative, sourceRoot)
+		return ok
+	}
+	if product == Mancode && recordType == "mancode_legacy_review_summary" {
+		_, ok := isMancodeLegacyWorkflowReviewPath(relative, sourceRoot)
 		return ok
 	}
 	if product == Mancode && relative == mancodeGitRefVirtualPath {
@@ -1204,6 +1214,8 @@ func scanFileWithMancodeGitRef(product Product, sourceRoot, relative, fullPath s
 				recordPath = mancodeLegacyWorkflowSourceAlias(relative)
 			} else if product == Mancode && item.Type == "mancode_legacy_requirements" {
 				recordPath = mancodeLegacyRequirementsSourceAlias(relative)
+			} else if product == Mancode && item.Type == "mancode_legacy_review_summary" {
+				recordPath = mancodeLegacyReviewSourceAlias(relative)
 			}
 			file.records = append(file.records, Record{
 				Key: fmt.Sprintf("%s#%06d", recordPath, recordIndex), Type: item.Type, SourcePath: recordPath,

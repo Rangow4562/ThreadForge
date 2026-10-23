@@ -1,6 +1,7 @@
 package migrationcoverage
 
 import (
+	"sort"
 	"strings"
 	"testing"
 )
@@ -114,6 +115,65 @@ func TestValidateRequiresMancodePrivacyChecksToCoverClassifiedFiles(t *testing.T
 	missingCount.CrossFileChecks[0].PolicyFileCount = 0
 	if err := Validate(missingCount); err == nil {
 		t.Fatal("cross-file check omitting its policy source count was accepted")
+	}
+}
+
+func TestValidateMancodeLegacyWorkflowBindingsReconcileAndSurfaceConflicts(t *testing.T) {
+	report := validCoverageFixture("mancode")
+	setMancodePrivacyFileCounts(&report, 0, 0)
+	componentFormats := []string{
+		"mancode.legacy-workflow-metadata", "mancode.legacy-workflow-requirements",
+		"mancode.legacy-workflow-review", "mancode.legacy-workflow-verification", "mancode.legacy-workflow-plan",
+	}
+	check := MancodeLegacyWorkflowCheck{
+		SchemaVersion: MancodeLegacyWorkflowBindingSchemaVersion, Relationship: "mancode_legacy_workflow_ledgers",
+		WorkflowIDSHA256:  strings.Repeat("d", 64),
+		MetadataFileCount: 1, MetadataValid: true, MetadataSourceSetSHA256: strings.Repeat("e", 64),
+		RequirementsFileCount: 1, RequirementsValid: true, RequirementsSourceSetSHA256: strings.Repeat("f", 64),
+		ReviewFileCount: 1, ReviewValid: true, ReviewSourceSetSHA256: strings.Repeat("a", 64),
+		VerificationFileCount: 1, VerificationValid: true, VerificationSourceSetSHA256: strings.Repeat("b", 64),
+		PlanFileCount: 1, PlanValid: true, PlanSourceSetSHA256: strings.Repeat("c", 64),
+		MetadataRequirementsDigestPresent: true, MetadataRequirementsDigestBindingVerified: true,
+		WorkflowPathBindingVerified: true, RequirementsDigestBindingVerified: true,
+		AcceptanceCriteriaBindingVerified: true, PlanVersionBindingVerified: true,
+		ReviewRemediationBindingVerified: true, PlanPresenceVerified: true,
+		Status: "verified", Issues: []string{}, Authority: "local_pending_review",
+		HumanReviewRequired: true, ExecutionAuthorized: false,
+	}
+	for _, id := range componentFormats {
+		report.Formats = append(report.Formats, Format{ID: id, Files: 1, FileSetSHA256: strings.Repeat("c", 64)})
+	}
+	sort.Slice(report.Formats, func(i, j int) bool { return report.Formats[i].ID < report.Formats[j].ID })
+	report.FilesScanned = len(componentFormats)
+	report.MancodeLegacyWorkflowChecks = []MancodeLegacyWorkflowCheck{check}
+	if err := Validate(report); err != nil {
+		t.Fatalf("fully bound legacy workflow check rejected: %v", err)
+	}
+
+	conflict := report
+	conflict.MancodeLegacyWorkflowChecks = append([]MancodeLegacyWorkflowCheck(nil), report.MancodeLegacyWorkflowChecks...)
+	conflict.MancodeLegacyWorkflowChecks[0].Status = "conflicting"
+	conflict.MancodeLegacyWorkflowChecks[0].RequirementsDigestBindingVerified = false
+	conflict.MancodeLegacyWorkflowChecks[0].Issues = []string{"requirements_digest_mismatch"}
+	if err := Validate(conflict); err != nil {
+		t.Fatalf("explicitly conflicting workflow binding should remain reportable: %v", err)
+	}
+
+	contradictory := conflict
+	contradictory.MancodeLegacyWorkflowChecks = append([]MancodeLegacyWorkflowCheck(nil), conflict.MancodeLegacyWorkflowChecks...)
+	contradictory.MancodeLegacyWorkflowChecks[0].RequirementsDigestBindingVerified = true
+	if err := Validate(contradictory); err == nil {
+		t.Fatal("legacy workflow digest conflict with a verified flag was accepted")
+	}
+
+	uncovered := report
+	for index := range uncovered.Formats {
+		if uncovered.Formats[index].ID == componentFormats[0] {
+			uncovered.Formats[index].Files = 0
+		}
+	}
+	if err := Validate(uncovered); err == nil {
+		t.Fatal("legacy workflow check omitting its metadata source file was accepted")
 	}
 }
 

@@ -37,16 +37,17 @@ const (
 )
 
 type Manifest struct {
-	SchemaVersion     string                             `json:"schema_version"`
-	ID                string                             `json:"id"`
-	Product           Product                            `json:"product"`
-	SourceRoot        string                             `json:"source_root"`
-	SourceFingerprint string                             `json:"source_fingerprint"`
-	MancodeGitRef     *MancodeGitRefSource               `json:"mancode_git_ref,omitempty"`
-	CreatedAt         string                             `json:"created_at"`
-	Files             []FileEntry                        `json:"files"`
-	CrossFileChecks   []migrationcoverage.CrossFileCheck `json:"cross_file_checks,omitempty"`
-	Summary           Summary                            `json:"summary"`
+	SchemaVersion               string                                         `json:"schema_version"`
+	ID                          string                                         `json:"id"`
+	Product                     Product                                        `json:"product"`
+	SourceRoot                  string                                         `json:"source_root"`
+	SourceFingerprint           string                                         `json:"source_fingerprint"`
+	MancodeGitRef               *MancodeGitRefSource                           `json:"mancode_git_ref,omitempty"`
+	CreatedAt                   string                                         `json:"created_at"`
+	Files                       []FileEntry                                    `json:"files"`
+	CrossFileChecks             []migrationcoverage.CrossFileCheck             `json:"cross_file_checks,omitempty"`
+	MancodeLegacyWorkflowChecks []migrationcoverage.MancodeLegacyWorkflowCheck `json:"mancode_legacy_workflow_checks,omitempty"`
+	Summary                     Summary                                        `json:"summary"`
 }
 
 type FileEntry struct {
@@ -89,13 +90,15 @@ type Record struct {
 }
 
 type scannedFile struct {
-	entry             FileEntry
-	records           []Record
-	sourceData        []byte
-	joinedCompanion   *FileEntry
-	metadataReadBytes int64
-	privacyPolicy     *mancodePrivacyPolicyBindingSource
-	privacyExclusions *mancodePrivacyExclusionsBindingSource
+	entry                            FileEntry
+	records                          []Record
+	sourceData                       []byte
+	joinedCompanion                  *FileEntry
+	metadataReadBytes                int64
+	privacyPolicy                    *mancodePrivacyPolicyBindingSource
+	privacyExclusions                *mancodePrivacyExclusionsBindingSource
+	legacyRequirementsDigest         string
+	legacyMetadataRequirementsDigest string
 }
 
 const (
@@ -368,13 +371,14 @@ func inspectWithOptions(product Product, sourceRoot string, scannedSink *[]scann
 			return Manifest{}, errors.New("migration source exceeds 100000-record limit")
 		}
 		manifest.CrossFileChecks = bindMancodePrivacyPolicyExclusions(&scanned)
+		manifest.MancodeLegacyWorkflowChecks = bindMancodeLegacyWorkflows(root, &scanned)
 	}
 	sort.Slice(scanned, func(i, j int) bool { return scanned[i].entry.Path < scanned[j].entry.Path })
 	manifest.Files = make([]FileEntry, len(scanned))
 	for i := range scanned {
 		manifest.Files[i] = scanned[i].entry
 	}
-	manifest.SourceFingerprint = sourceFingerprint(manifest.Files, manifest.CrossFileChecks, manifest.MancodeGitRef)
+	manifest.SourceFingerprint = sourceFingerprint(manifest.Files, manifest.CrossFileChecks, manifest.MancodeLegacyWorkflowChecks, manifest.MancodeGitRef)
 	manifest.ID = string(product) + "-" + manifest.SourceFingerprint[:20]
 	if scannedSink != nil {
 		*scannedSink = append([]scannedFile(nil), scanned...)
@@ -515,6 +519,15 @@ func CreateSnapshotWithOptions(product Product, sourceRoot, dataRoot string, opt
 				return Manifest{}, fmt.Errorf("privacy binding changed during snapshot: %s", entry.Path)
 			}
 			records = append([]Record(nil), bound...)
+		}
+		if product == Mancode {
+			if _, legacyVerification := isMancodeLegacyWorkflowVerificationPath(entry.Path, manifest.SourceRoot); legacyVerification {
+				bound := inspectedByPath[entry.Path].records
+				if len(bound) != len(parsed.records) {
+					return Manifest{}, fmt.Errorf("legacy workflow verification binding changed during snapshot: %s", entry.Path)
+				}
+				records = append([]Record(nil), bound...)
+			}
 		}
 		encoded, err := encodeRecordLines(records)
 		if err != nil {
@@ -933,8 +946,10 @@ func VerifyManifest(manifest Manifest) error {
 	}
 	if !validDigest(manifest.SourceFingerprint) || len(manifest.Files) > maxFiles ||
 		migrationcoverage.ValidateCrossFileChecks(string(manifest.Product), manifest.CrossFileChecks) != nil ||
+		migrationcoverage.ValidateMancodeLegacyWorkflowChecks(string(manifest.Product), manifest.MancodeLegacyWorkflowChecks) != nil ||
 		validateMancodePrivacyManifestChecks(manifest) != nil ||
-		manifest.SourceFingerprint != sourceFingerprint(manifest.Files, manifest.CrossFileChecks, manifest.MancodeGitRef) {
+		validateMancodeLegacyWorkflowManifestChecks(manifest) != nil ||
+		manifest.SourceFingerprint != sourceFingerprint(manifest.Files, manifest.CrossFileChecks, manifest.MancodeLegacyWorkflowChecks, manifest.MancodeGitRef) {
 		return errors.New("migration source fingerprint is invalid")
 	}
 	if manifest.ID != string(manifest.Product)+"-"+manifest.SourceFingerprint[:20] {
@@ -1181,6 +1196,22 @@ func scanFileWithMancodeGitRef(product Product, sourceRoot, relative, fullPath s
 	for _, value := range items {
 		var normalized []normalizedItem
 		var err error
+		if product == Mancode {
+			if _, eligible := isMancodeLegacyWorkflowVerificationPath(relative, sourceRoot); eligible {
+				if object, ok := value.(map[string]any); ok {
+					if requirementsDigest, ok := object["requirementsDigest"].(string); ok {
+						file.legacyRequirementsDigest = requirementsDigest
+					}
+				}
+			}
+			if _, eligible := isMancodeLegacyWorkflowMetadataPath(relative, sourceRoot); eligible {
+				if object, ok := value.(map[string]any); ok {
+					if requirementsDigest, ok := object["requirementsDigest"].(string); ok {
+						file.legacyMetadataRequirementsDigest = requirementsDigest
+					}
+				}
+			}
+		}
 		if product == Mancode && relative == mancodeGitRefVirtualPath {
 			if gitRefSource == nil || gitRefWorkspaceID == "" {
 				return scannedFile{}, expandedBytes, errors.New("Mancode git-ref manifest requires an explicitly bound local ref")
@@ -1596,7 +1627,8 @@ func writePrivateFile(name string, data []byte) error {
 	return file.Close()
 }
 
-func sourceFingerprint(files []FileEntry, checks []migrationcoverage.CrossFileCheck, gitRefs ...*MancodeGitRefSource) string {
+func sourceFingerprint(files []FileEntry, checks []migrationcoverage.CrossFileCheck,
+	legacyWorkflowChecks []migrationcoverage.MancodeLegacyWorkflowCheck, gitRefs ...*MancodeGitRefSource) string {
 	var digestInput strings.Builder
 	for _, file := range files {
 		digestInput.WriteString(file.Path)
@@ -1609,6 +1641,12 @@ func sourceFingerprint(files []FileEntry, checks []migrationcoverage.CrossFileCh
 	if len(checks) > 0 {
 		encoded, _ := json.Marshal(checks)
 		digestInput.WriteString("cross-file-checks-v1\x00")
+		digestInput.Write(encoded)
+		digestInput.WriteByte('\n')
+	}
+	if len(legacyWorkflowChecks) > 0 {
+		encoded, _ := json.Marshal(legacyWorkflowChecks)
+		digestInput.WriteString("mancode-legacy-workflow-checks-v1\x00")
 		digestInput.Write(encoded)
 		digestInput.WriteByte('\n')
 	}

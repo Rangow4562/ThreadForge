@@ -128,7 +128,7 @@ func coverageTestManifest(product Product, files []FileEntry) Manifest {
 			manifest.Summary.FilesJoined++
 		}
 	}
-	manifest.SourceFingerprint = sourceFingerprint(manifest.Files, manifest.CrossFileChecks)
+	manifest.SourceFingerprint = sourceFingerprint(manifest.Files, manifest.CrossFileChecks, manifest.MancodeLegacyWorkflowChecks)
 	manifest.ID = string(product) + "-" + manifest.SourceFingerprint[:20]
 	return manifest
 }

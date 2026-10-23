@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -282,6 +283,58 @@ func TestAssessBlocksIncompleteMancodePrivacyBindingCoverage(t *testing.T) {
 	assessment, err = AssessWithTrust(report, root, trust)
 	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "cross-file privacy binding") {
 		t.Fatalf("incomplete Mancode privacy binding was not blocked: %#v, %v", assessment, err)
+	}
+}
+
+func TestAssessBlocksIncompleteMancodeLegacyWorkflowBinding(t *testing.T) {
+	root := t.TempDir()
+	report, _, trust := completeFixture(t, root)
+	var mancodeMigration *MigrationEvidence
+	for index := range report.Migrations {
+		if report.Migrations[index].Product == "mancode" {
+			mancodeMigration = &report.Migrations[index]
+			break
+		}
+	}
+	if mancodeMigration == nil {
+		t.Fatal("Mancode migration fixture is missing")
+	}
+	coveragePath := filepath.Join(root, mancodeMigration.FormatCoverage.Path)
+	content, err := os.ReadFile(coveragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var coverage migrationcoverage.Report
+	if err := json.Unmarshal(content, &coverage); err != nil {
+		t.Fatal(err)
+	}
+	coverage.Formats = append(coverage.Formats, migrationcoverage.Format{
+		ID: "mancode.legacy-workflow-requirements", Files: 1, FileSetSHA256: testDigest("legacy-workflow-requirements"),
+	})
+	sort.Slice(coverage.Formats, func(i, j int) bool { return coverage.Formats[i].ID < coverage.Formats[j].ID })
+	coverage.FilesScanned++
+	coverage.MancodeLegacyWorkflowChecks = []migrationcoverage.MancodeLegacyWorkflowCheck{{
+		SchemaVersion: migrationcoverage.MancodeLegacyWorkflowBindingSchemaVersion,
+		Relationship:  "mancode_legacy_workflow_ledgers", WorkflowIDSHA256: testDigest("legacy-workflow-task"),
+		RequirementsFileCount: 1, RequirementsSourceSetSHA256: testDigest("requirements"),
+		WorkflowPathBindingVerified: true, Status: "incomplete", Issues: []string{"legacy_unverified"},
+		Authority: "local_pending_review", HumanReviewRequired: true, ExecutionAuthorized: false,
+	}}
+	updated, err := json.Marshal(coverage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationcoverage.Validate(coverage); err != nil {
+		t.Fatalf("incomplete legacy workflow fixture is invalid: %v", err)
+	}
+	if err := os.WriteFile(coveragePath, updated, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(updated)
+	mancodeMigration.FormatCoverage.SHA256 = hex.EncodeToString(digest[:])
+	assessment, err := AssessWithTrust(report, root, trust)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "legacy workflow ledger binding") {
+		t.Fatalf("incomplete Mancode legacy workflow binding was not blocked: %#v, %v", assessment, err)
 	}
 }
 

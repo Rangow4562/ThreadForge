@@ -66,6 +66,10 @@ func BuildFormatCoverage(manifest Manifest) (migrationcoverage.Report, error) {
 		}
 		byFormat[id] = append(byFormat[id], commitment)
 		row := formats[id]
+		if row == nil {
+			row = &migrationcoverage.Format{ID: id}
+			formats[id] = row
+		}
 		row.Files++
 		row.SourceBytes += file.SourceBytes
 		row.RecordsFound += file.RecordCount
@@ -108,6 +112,11 @@ func BuildFormatCoverage(manifest Manifest) (migrationcoverage.Report, error) {
 		crossFileChecks = legacyMancodePrivacyBindingChecks(manifest.Files)
 	}
 	report.CrossFileChecks = append([]migrationcoverage.CrossFileCheck(nil), crossFileChecks...)
+	legacyWorkflowChecks := manifest.MancodeLegacyWorkflowChecks
+	if manifest.Product == Mancode && len(legacyWorkflowChecks) == 0 {
+		legacyWorkflowChecks = legacyMancodeWorkflowBindingChecks(manifest.Files, manifest.SourceRoot)
+	}
+	report.MancodeLegacyWorkflowChecks = append([]migrationcoverage.MancodeLegacyWorkflowCheck(nil), legacyWorkflowChecks...)
 	for _, file := range manifest.Files {
 		if file.SnapshotPath != "" {
 			report.SnapshotFiles++
@@ -179,6 +188,20 @@ func migrationFormatID(product Product, sourceRoot, relative string) string {
 			return "beacon.endpoint-generic"
 		}
 	case Mancode:
+		for _, workflow := range []struct {
+			name string
+			path func(string, string) (string, bool)
+		}{
+			{"metadata", isMancodeLegacyWorkflowMetadataPath},
+			{"requirements", isMancodeLegacyWorkflowRequirementsPath},
+			{"review", isMancodeLegacyWorkflowReviewPath},
+			{"verification", isMancodeLegacyWorkflowVerificationPath},
+			{"plan", isMancodeLegacyWorkflowPlanPath},
+		} {
+			if _, ok := workflow.path(relative, sourceRoot); ok {
+				return "mancode.legacy-workflow-" + workflow.name
+			}
+		}
 		if relative == mancodeGitRefVirtualPath {
 			return "mancode.git-ref-team-authority"
 		}

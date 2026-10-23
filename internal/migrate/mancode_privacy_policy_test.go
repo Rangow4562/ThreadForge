@@ -111,7 +111,7 @@ func TestMancodePrivacyPolicyIsHistoricalAndNeverEffective(t *testing.T) {
 	tampered := snapshot
 	tampered.CrossFileChecks = append([]migrationcoverage.CrossFileCheck(nil), snapshot.CrossFileChecks...)
 	tampered.CrossFileChecks[0].PolicySourceSetSHA256 = strings.Repeat("f", 64)
-	tampered.SourceFingerprint = sourceFingerprint(tampered.Files, tampered.CrossFileChecks)
+	tampered.SourceFingerprint = sourceFingerprint(tampered.Files, tampered.CrossFileChecks, tampered.MancodeLegacyWorkflowChecks)
 	tampered.ID = string(tampered.Product) + "-" + tampered.SourceFingerprint[:20]
 	if err := VerifyManifest(tampered); err == nil {
 		t.Fatal("privacy binding check detached from its source-file commitment was accepted")
@@ -119,7 +119,7 @@ func TestMancodePrivacyPolicyIsHistoricalAndNeverEffective(t *testing.T) {
 	tampered = snapshot
 	tampered.CrossFileChecks = append([]migrationcoverage.CrossFileCheck(nil), snapshot.CrossFileChecks...)
 	tampered.CrossFileChecks[0].PolicyFileCount++
-	tampered.SourceFingerprint = sourceFingerprint(tampered.Files, tampered.CrossFileChecks)
+	tampered.SourceFingerprint = sourceFingerprint(tampered.Files, tampered.CrossFileChecks, tampered.MancodeLegacyWorkflowChecks)
 	tampered.ID = string(tampered.Product) + "-" + tampered.SourceFingerprint[:20]
 	if err := VerifyManifest(tampered); err == nil {
 		t.Fatal("privacy source file count detached from manifest inventory was accepted")
@@ -193,7 +193,7 @@ func TestMancodeFormatCoverageMarksLegacyPrivacySnapshotUnverified(t *testing.T)
 	snapshot, _ := readMancodePrivacyPairSnapshot(t, mancodePrivacyPolicyFixture(), mancodePrivacyExclusionsFixture(), true, true)
 	legacy := snapshot
 	legacy.CrossFileChecks = nil
-	legacy.SourceFingerprint = sourceFingerprint(legacy.Files, nil)
+	legacy.SourceFingerprint = sourceFingerprint(legacy.Files, nil, nil)
 	legacy.ID = string(legacy.Product) + "-" + legacy.SourceFingerprint[:20]
 	coverage, err := BuildFormatCoverage(legacy)
 	if err != nil {

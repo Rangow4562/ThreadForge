@@ -12,6 +12,7 @@ const SchemaVersion = "threadforge.migration-format-coverage.v1"
 const UnclassifiedFormat = "unclassified"
 
 const MancodePrivacyBindingSchemaVersion = "threadforge.mancode-privacy-binding-check.v1"
+const MancodeLegacyWorkflowBindingSchemaVersion = "threadforge.mancode-legacy-workflow-binding.v1"
 
 const (
 	maxCoverageFiles   = 10000
@@ -22,23 +23,62 @@ const (
 var digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 type Report struct {
-	SchemaVersion             string           `json:"schema_version"`
-	Product                   string           `json:"product"`
-	SourceFingerprint         string           `json:"source_fingerprint"`
-	SnapshotSHA256            string           `json:"snapshot_sha256"`
-	FilesScanned              int              `json:"files_scanned"`
-	SourceBytes               int64            `json:"source_bytes"`
-	RecordsFound              int              `json:"records_found"`
-	RecordsImported           int              `json:"records_imported"`
-	CredentialExcludedRecords int              `json:"credential_excluded_records"`
-	RejectedRecords           int              `json:"rejected_records"`
-	SnapshotFiles             int              `json:"snapshot_files"`
-	JoinedFiles               int              `json:"joined_files"`
-	UnsupportedFiles          int              `json:"unsupported_files"`
-	UnconvertedFiles          int              `json:"unconverted_files"`
-	UnclassifiedFiles         int              `json:"unclassified_files"`
-	CrossFileChecks           []CrossFileCheck `json:"cross_file_checks,omitempty"`
-	Formats                   []Format         `json:"formats"`
+	SchemaVersion               string                       `json:"schema_version"`
+	Product                     string                       `json:"product"`
+	SourceFingerprint           string                       `json:"source_fingerprint"`
+	SnapshotSHA256              string                       `json:"snapshot_sha256"`
+	FilesScanned                int                          `json:"files_scanned"`
+	SourceBytes                 int64                        `json:"source_bytes"`
+	RecordsFound                int                          `json:"records_found"`
+	RecordsImported             int                          `json:"records_imported"`
+	CredentialExcludedRecords   int                          `json:"credential_excluded_records"`
+	RejectedRecords             int                          `json:"rejected_records"`
+	SnapshotFiles               int                          `json:"snapshot_files"`
+	JoinedFiles                 int                          `json:"joined_files"`
+	UnsupportedFiles            int                          `json:"unsupported_files"`
+	UnconvertedFiles            int                          `json:"unconverted_files"`
+	UnclassifiedFiles           int                          `json:"unclassified_files"`
+	CrossFileChecks             []CrossFileCheck             `json:"cross_file_checks,omitempty"`
+	MancodeLegacyWorkflowChecks []MancodeLegacyWorkflowCheck `json:"mancode_legacy_workflow_checks,omitempty"`
+	Formats                     []Format                     `json:"formats"`
+}
+
+// MancodeLegacyWorkflowCheck records path-redacted binding evidence for the
+// pre-v3 workflow files. It is continuity evidence only, never execution authority.
+type MancodeLegacyWorkflowCheck struct {
+	SchemaVersion                             string   `json:"schema_version"`
+	Relationship                              string   `json:"relationship"`
+	WorkflowIDSHA256                          string   `json:"workflow_id_sha256"`
+	MetadataFileCount                         int      `json:"metadata_file_count"`
+	MetadataValid                             bool     `json:"metadata_valid"`
+	MetadataSourceSetSHA256                   string   `json:"metadata_source_set_sha256,omitempty"`
+	RequirementsFileCount                     int      `json:"requirements_file_count"`
+	RequirementsValid                         bool     `json:"requirements_valid"`
+	RequirementsSourceSetSHA256               string   `json:"requirements_source_set_sha256,omitempty"`
+	ReviewFileCount                           int      `json:"review_file_count"`
+	ReviewValid                               bool     `json:"review_valid"`
+	ReviewSourceSetSHA256                     string   `json:"review_source_set_sha256,omitempty"`
+	VerificationFileCount                     int      `json:"verification_file_count"`
+	VerificationValid                         bool     `json:"verification_valid"`
+	VerificationSourceSetSHA256               string   `json:"verification_source_set_sha256,omitempty"`
+	PlanFileCount                             int      `json:"plan_file_count"`
+	PlanValid                                 bool     `json:"plan_valid"`
+	PlanSourceSetSHA256                       string   `json:"plan_source_set_sha256,omitempty"`
+	MetadataPlanVersionDefaulted              bool     `json:"metadata_plan_version_defaulted"`
+	MetadataRequirementsDigestPresent         bool     `json:"metadata_requirements_digest_present"`
+	MetadataRequirementsDigestBindingVerified bool     `json:"metadata_requirements_digest_binding_verified"`
+	WorkflowPathBindingVerified               bool     `json:"workflow_path_binding_verified"`
+	RequirementsDigestBindingVerified         bool     `json:"requirements_digest_binding_verified"`
+	AcceptanceCriteriaBindingVerified         bool     `json:"acceptance_criteria_binding_verified"`
+	PlanVersionBindingVerified                bool     `json:"plan_version_binding_verified"`
+	ReviewRemediationBindingVerified          bool     `json:"review_remediation_binding_verified"`
+	PlanPresenceVerified                      bool     `json:"plan_presence_verified"`
+	PlanContentBindingVerified                bool     `json:"plan_content_binding_verified"`
+	Status                                    string   `json:"status"`
+	Issues                                    []string `json:"issues"`
+	Authority                                 string   `json:"authority"`
+	HumanReviewRequired                       bool     `json:"human_review_required"`
+	ExecutionAuthorized                       bool     `json:"execution_authorized"`
 }
 
 // CrossFileCheck records a bounded, path-redacted relationship check between
@@ -147,6 +187,9 @@ func Validate(report Report) error {
 	if err := ValidateCrossFileChecks(report.Product, report.CrossFileChecks); err != nil {
 		return err
 	}
+	if err := ValidateMancodeLegacyWorkflowChecks(report.Product, report.MancodeLegacyWorkflowChecks); err != nil {
+		return err
+	}
 	for name, value := range map[string]int{
 		"files_scanned": report.FilesScanned, "records_found": report.RecordsFound,
 		"records_imported": report.RecordsImported, "credential_excluded_records": report.CredentialExcludedRecords,
@@ -167,6 +210,11 @@ func Validate(report Report) error {
 		return errors.New("migration format-coverage record totals do not reconcile")
 	}
 	expected := make(map[string]bool, len(requiredFormats[report.Product])+1)
+	optionalMancodeLegacyWorkflowFormats := map[string]bool{
+		"mancode.legacy-workflow-metadata": true, "mancode.legacy-workflow-requirements": true,
+		"mancode.legacy-workflow-review": true, "mancode.legacy-workflow-verification": true,
+		"mancode.legacy-workflow-plan": true,
+	}
 	for _, id := range requiredFormats[report.Product] {
 		expected[id] = true
 	}
@@ -179,6 +227,9 @@ func Validate(report Report) error {
 	var sourceBytes int64
 	previous := ""
 	for _, format := range report.Formats {
+		if !expected[format.ID] && report.Product == "mancode" && optionalMancodeLegacyWorkflowFormats[format.ID] && format.Files > 0 {
+			expected[format.ID] = true
+		}
 		if format.ID == "" || (previous != "" && format.ID <= previous) || seen[format.ID] || !expected[format.ID] {
 			return fmt.Errorf("migration format-coverage has duplicate, unordered, or unknown format %q", format.ID)
 		}
@@ -241,6 +292,21 @@ func Validate(report Report) error {
 		if policyFiles != formatFiles(report.Formats, "mancode.privacy-policy") ||
 			exclusionsFiles != formatFiles(report.Formats, "mancode.privacy-exclusions") {
 			return errors.New("Mancode privacy binding checks do not cover every policy and exclusions file")
+		}
+		var metadataFiles, requirementsFiles, reviewFiles, verificationFiles, planFiles int
+		for _, check := range report.MancodeLegacyWorkflowChecks {
+			metadataFiles += check.MetadataFileCount
+			requirementsFiles += check.RequirementsFileCount
+			reviewFiles += check.ReviewFileCount
+			verificationFiles += check.VerificationFileCount
+			planFiles += check.PlanFileCount
+		}
+		if metadataFiles != formatFiles(report.Formats, "mancode.legacy-workflow-metadata") ||
+			requirementsFiles != formatFiles(report.Formats, "mancode.legacy-workflow-requirements") ||
+			reviewFiles != formatFiles(report.Formats, "mancode.legacy-workflow-review") ||
+			verificationFiles != formatFiles(report.Formats, "mancode.legacy-workflow-verification") ||
+			planFiles != formatFiles(report.Formats, "mancode.legacy-workflow-plan") {
+			return errors.New("Mancode legacy workflow checks do not cover every legacy workflow component")
 		}
 	}
 	return nil
@@ -338,6 +404,130 @@ func ValidateCrossFileChecks(product string, checks []CrossFileCheck) error {
 			}
 		default:
 			return errors.New("migration Mancode privacy binding status is invalid")
+		}
+	}
+	return nil
+}
+
+// ValidateMancodeLegacyWorkflowChecks validates the pre-v3 Mancode workflow
+// binding ledger embedded in migration manifests and coverage receipts.
+func ValidateMancodeLegacyWorkflowChecks(product string, checks []MancodeLegacyWorkflowCheck) error {
+	if len(checks) > maxCoverageFiles || len(checks) > 0 && product != "mancode" {
+		return errors.New("Mancode legacy workflow checks are unsupported for this product or exceed bounds")
+	}
+	allowedIssues := map[string]bool{
+		"metadata_missing": true, "metadata_ambiguous": true, "metadata_invalid": true,
+		"requirements_missing": true, "requirements_ambiguous": true, "requirements_invalid": true,
+		"review_ambiguous": true, "review_invalid": true,
+		"verification_missing": true, "verification_ambiguous": true, "verification_invalid": true,
+		"plan_missing": true, "plan_ambiguous": true, "plan_invalid": true,
+		"requirements_digest_mismatch": true, "acceptance_criteria_mismatch": true,
+		"plan_version_mismatch": true, "remediation_round_mismatch": true,
+		"metadata_requirements_digest_mismatch": true,
+		"legacy_unverified":                     true,
+	}
+	previousID := ""
+	for _, check := range checks {
+		if check.SchemaVersion != MancodeLegacyWorkflowBindingSchemaVersion ||
+			check.Relationship != "mancode_legacy_workflow_ledgers" ||
+			!digestPattern.MatchString(check.WorkflowIDSHA256) ||
+			previousID != "" && check.WorkflowIDSHA256 <= previousID ||
+			check.Authority != "local_pending_review" || !check.HumanReviewRequired || check.ExecutionAuthorized {
+			return errors.New("Mancode legacy workflow check identity or authority is invalid")
+		}
+		previousID = check.WorkflowIDSHA256
+		components := []struct {
+			name   string
+			count  int
+			valid  bool
+			digest string
+		}{
+			{"metadata", check.MetadataFileCount, check.MetadataValid, check.MetadataSourceSetSHA256},
+			{"requirements", check.RequirementsFileCount, check.RequirementsValid, check.RequirementsSourceSetSHA256},
+			{"review", check.ReviewFileCount, check.ReviewValid, check.ReviewSourceSetSHA256},
+			{"verification", check.VerificationFileCount, check.VerificationValid, check.VerificationSourceSetSHA256},
+			{"plan", check.PlanFileCount, check.PlanValid, check.PlanSourceSetSHA256},
+		}
+		for _, component := range components {
+			if component.count < 0 || component.count > maxCoverageFiles ||
+				(component.count == 0) != (component.digest == "") ||
+				component.digest != "" && !digestPattern.MatchString(component.digest) ||
+				component.valid && component.count != 1 {
+				return fmt.Errorf("Mancode legacy workflow %s source commitment is invalid", component.name)
+			}
+		}
+		if check.PlanContentBindingVerified ||
+			(check.MetadataRequirementsDigestBindingVerified && (!check.MetadataRequirementsDigestPresent ||
+				!check.MetadataValid || !check.RequirementsValid)) ||
+			(check.RequirementsDigestBindingVerified && (!check.RequirementsValid || !check.VerificationValid)) ||
+			(check.AcceptanceCriteriaBindingVerified && (!check.RequirementsValid || !check.VerificationValid)) ||
+			(check.PlanVersionBindingVerified && (!check.VerificationValid || !check.PlanValid ||
+				check.MetadataFileCount == 1 && !check.MetadataValid)) ||
+			(check.ReviewRemediationBindingVerified && (!check.VerificationValid || check.ReviewFileCount > 0 && !check.ReviewValid)) ||
+			(check.PlanPresenceVerified && (!check.PlanValid || check.PlanFileCount != 1)) {
+			return errors.New("Mancode legacy workflow binding claims verification without valid inputs")
+		}
+		if check.WorkflowPathBindingVerified && check.MetadataFileCount+check.RequirementsFileCount+
+			check.ReviewFileCount+check.VerificationFileCount+check.PlanFileCount == 0 {
+			return errors.New("Mancode legacy workflow path binding has no source files")
+		}
+		if len(check.Issues) > 24 {
+			return errors.New("Mancode legacy workflow issue list exceeds bounds")
+		}
+		previousIssue := ""
+		conflicting := false
+		for _, issue := range check.Issues {
+			if !allowedIssues[issue] || issue <= previousIssue {
+				return errors.New("Mancode legacy workflow issue list is invalid")
+			}
+			previousIssue = issue
+			switch issue {
+			case "requirements_digest_mismatch":
+				conflicting = true
+				if check.RequirementsDigestBindingVerified {
+					return errors.New("Mancode legacy workflow digest mismatch contradicts its binding flag")
+				}
+			case "acceptance_criteria_mismatch":
+				conflicting = true
+				if check.AcceptanceCriteriaBindingVerified {
+					return errors.New("Mancode legacy workflow criteria mismatch contradicts its binding flag")
+				}
+			case "plan_version_mismatch":
+				conflicting = true
+				if check.PlanVersionBindingVerified {
+					return errors.New("Mancode legacy workflow plan mismatch contradicts its binding flag")
+				}
+			case "remediation_round_mismatch":
+				conflicting = true
+				if check.ReviewRemediationBindingVerified {
+					return errors.New("Mancode legacy workflow remediation mismatch contradicts its binding flag")
+				}
+			case "metadata_requirements_digest_mismatch":
+				conflicting = true
+				if check.MetadataRequirementsDigestBindingVerified {
+					return errors.New("Mancode metadata requirements digest conflict contradicts its binding flag")
+				}
+			}
+		}
+		switch check.Status {
+		case "verified":
+			if len(check.Issues) != 0 || !check.WorkflowPathBindingVerified || !check.MetadataValid ||
+				!check.RequirementsValid || !check.VerificationValid || !check.PlanValid ||
+				check.MetadataRequirementsDigestPresent && !check.MetadataRequirementsDigestBindingVerified ||
+				!check.RequirementsDigestBindingVerified || !check.AcceptanceCriteriaBindingVerified ||
+				!check.PlanVersionBindingVerified || !check.ReviewRemediationBindingVerified || !check.PlanPresenceVerified {
+				return errors.New("verified Mancode legacy workflow check is incomplete")
+			}
+		case "incomplete":
+			if len(check.Issues) == 0 || conflicting {
+				return errors.New("incomplete Mancode legacy workflow check has inconsistent issues")
+			}
+		case "conflicting":
+			if len(check.Issues) == 0 || !conflicting {
+				return errors.New("conflicting Mancode legacy workflow check has no binding mismatch")
+			}
+		default:
+			return errors.New("Mancode legacy workflow check status is invalid")
 		}
 	}
 	return nil

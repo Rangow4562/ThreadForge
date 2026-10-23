@@ -13,6 +13,19 @@ Merge the printed `threadforge` entry into the MCP configuration using the host'
 
 For a selected set of supported project MCP hosts, use the preservation-aware [project bootstrap](platform-bootstrap.md) to plan, install, update, or remove their Threadforge entries.
 
+## Cline user-level MCP entry
+
+Cline's MCP configuration is user-global. Threadforge provides a separate, explicit manager for that settings file; it does not add Cline to the project-scope installer because doing so would imply a project config path the host does not document. The installed entry launches `threadforge mcp serve` without `--project-root`, so it exposes the local SQLite-backed MCP surface only; it does not attach a version-controlled project's memory or procedures. Use project skill files or another verified project-scoped MCP host when project binding is required. The entry sets `autoApprove` to an empty list and never changes Cline permissions.
+
+```powershell
+npm.cmd --prefix adapters run adapter -- cline mcp install --command <absolute-threadforge-executable>
+npm.cmd --prefix adapters run adapter -- cline mcp status
+npm.cmd --prefix adapters run adapter -- cline mcp update --expected-command <current-threadforge-executable> --command <new-threadforge-executable>
+npm.cmd --prefix adapters run adapter -- cline mcp uninstall --expected-command <current-threadforge-executable>
+```
+
+The default file is `~/.cline/data/settings/cline_mcp_settings.json`. `--cline-dir` explicitly selects a Cline home, and `--config-path` or `CLINE_MCP_SETTINGS_PATH` selects an absolute local settings path. Installation merges only `mcpServers.threadforge`, preserves unrelated servers/settings, refuses unowned collisions, and uses a lock plus atomic replacement. `update` and `uninstall` require `--expected-command` as a compare-and-swap guard against replacing a user-edited executable. Status reports the current command only for an entry with the expected Threadforge shape. This is a configuration-manager fixture, not evidence that an installed Cline release loads the server or that project-scoped memory is available.
+
 The MCP `tools/call` envelope accepts the standard optional `_meta` object and continues to reject unrelated unknown fields. Metadata is ignored by the application and does not alter the requested tool or its authorization semantics.
 
 ## Read-only MCP resources

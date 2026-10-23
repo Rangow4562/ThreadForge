@@ -78,6 +78,7 @@
     "./goose-otel": "./src/goose-otel.ts",
     "./cline-plugin": "./src/cline-plugin.ts",
     "./cline-plugin-config": "./src/cline-plugin-config.ts",
+    "./cline-mcp-config": "./src/cline-mcp-config.ts",
     "./cline-history": "./src/cline-history.ts",
     "./cline-skill-config": "./src/cline-skill-config.ts",
     "./claude-skill-config": "./src/claude-skill-config.ts",

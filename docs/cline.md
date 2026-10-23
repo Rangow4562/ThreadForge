@@ -13,6 +13,10 @@ npm run adapter -- cline plugin uninstall [--cline-dir <absolute-path>]
 
 For project scope, supply `--scope project --project-root <absolute-path>`. The managed entry is `.cline/plugins/threadforge.ts`; user scope installs to `<cline-dir>/plugins/threadforge.ts`. The installer records a content digest in its ownership marker, refuses unmanaged collisions or local edits, and changes only this file. Restart Cline after registration changes. Installation does not grant the callbacks authorization: all captured signals remain observational and are delivered only to loopback intake.
 
+## Cline MCP server registration
+
+`cline mcp install|update|uninstall|status` separately manages the user-global `mcpServers.threadforge` entry in Cline's MCP settings file. This is independent of the plugin callback installer above. It starts `threadforge mcp serve` without a fixed project root and never adds tools to Cline's auto-approval list. Because the host config is user-global and the server is not bound to a workspace, this path exposes the local SQLite-backed MCP surface only; it does not load version-controlled project memory or procedures. Use project skills or another verified project-scoped MCP configuration for project-specific memory. The path honors `CLINE_MCP_SETTINGS_PATH`; see [MCP setup](mcp.md#cline-user-level-mcp-entry).
+
 ## Captured signals
 
 - `beforeRun` emits a session-start event and a prompt event when the run context contains a prompt.

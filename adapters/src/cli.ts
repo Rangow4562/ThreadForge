@@ -87,6 +87,12 @@ import { deepseekHookEvents, deepseekManagedMarker, runDeepSeekHook } from './de
 import { getDeepSeekHistoryStatus, syncDeepSeekHistory, watchDeepSeekHistory } from './deepseek-history.ts';
 import { getClineHistoryStatus, syncClineHistory, watchClineHistory } from './cline-history.ts';
 import { getClinePluginStatus, installClinePlugin, uninstallClinePlugin, updateClinePlugin } from './cline-plugin-config.ts';
+import {
+  getClineUserMcpServerStatus,
+  installClineUserMcpServer,
+  uninstallClineUserMcpServer,
+  updateClineUserMcpServer,
+} from './cline-mcp-config.ts';
 import { getGooseOtelStatus, parseGooseOtelDuration, renderGooseOtelConfig, validateGooseOtelStatus } from './goose-otel.ts';
 import { getGooseHistoryStatus, syncGooseHistory } from './goose-history.ts';
 import { getVSCodeOtelStatus, parseVSCodeOtelDuration, renderVSCodeOtelConfig, validateVSCodeOtelStatus } from './vscode-otel.ts';
@@ -150,7 +156,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   let piSubsystem: 'sessions' | undefined;
   let primeSubsystem: 'sessions' | undefined;
   let dshSubsystem: 'sessions' | undefined;
-  let clineSubsystem: 'sessions' | 'plugin' | undefined;
+  let clineSubsystem: 'sessions' | 'plugin' | 'mcp' | undefined;
   let projectSkillSubsystem: 'skills' | undefined;
   let qoderCommandSubsystem: 'commands' | undefined;
   let bootstrapSubsystem: 'mcp' | 'instructions' | undefined;
@@ -367,6 +373,15 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   }
   if (family === 'cline' && action === 'plugin') {
     clineSubsystem = 'plugin';
+    action = rest[0];
+    rest = rest.slice(1);
+    if (!action) {
+      stderr.write(`${usage()}\n`);
+      return 2;
+    }
+  }
+  if (family === 'cline' && action === 'mcp') {
+    clineSubsystem = 'mcp';
     action = rest[0];
     rest = rest.slice(1);
     if (!action) {
@@ -608,6 +623,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       (family === 'goose' && gooseSubsystem === 'sessions') ||
       (family === 'cline' && clineSubsystem === 'sessions') ||
       (family === 'cline' && clineSubsystem === 'plugin' && clinePluginScope === 'user') ||
+      (family === 'cline' && clineSubsystem === 'mcp') ||
       (family === 'goose' && gooseSubsystem === 'otel') ||
       (family === 'vscode' && vscodeSubsystem === 'otel') ||
       (family === 'claude' && claudeSubsystem === 'sessions') ||
@@ -664,6 +680,32 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
             : await getClinePluginStatus(pluginOptions);
       stdout.write(`${JSON.stringify(result)}\n`);
       return action === 'status' && ['unmanaged', 'modified', 'source-unavailable', 'source-changed'].includes(result.result) ? 1 : 0;
+    }
+    if (family === 'cline' && clineSubsystem === 'mcp' && ['install', 'update', 'uninstall', 'status'].includes(action)) {
+      rejectUnexpected(options, ['cline-dir', 'config-path', 'command', 'expected-command']);
+      if (options.values.has('cline-dir') && options.values.has('config-path')) {
+        throw new Error('use either --cline-dir or --config-path, not both');
+      }
+      if ((action === 'install' || action === 'status') && options.values.has('expected-command')) {
+        throw new Error(`--expected-command is not valid for Cline MCP ${action}`);
+      }
+      if ((action === 'status' || action === 'uninstall') && options.values.has('command')) {
+        throw new Error(`--command is not valid for Cline MCP ${action}`);
+      }
+      const pathOptions = {
+        ...(options.values.has('cline-dir') ? { clineDir: required(options, 'cline-dir') } : {}),
+        ...(options.values.has('config-path') ? { configPath: required(options, 'config-path') } : {}),
+      };
+      if (action === 'status') {
+        const status = await getClineUserMcpServerStatus(pathOptions);
+        stdout.write(`${JSON.stringify(status)}\n`);
+        return status.result === 'installed' ? 0 : 1;
+      }
+      const result = action === 'install' ? await installClineUserMcpServer(required(options, 'command'), pathOptions)
+        : action === 'update' ? await updateClineUserMcpServer(required(options, 'expected-command'), required(options, 'command'), pathOptions)
+          : await uninstallClineUserMcpServer(required(options, 'expected-command'), pathOptions);
+      stdout.write(`${JSON.stringify({ result })}\n`);
+      return 0;
     }
     if (family === 'cline' && clineSubsystem === 'sessions' && action === 'sync') {
       rejectUnexpected(options, ['cline-dir', 'vscode-storage-dir', 'state-path', 'endpoint', 'max-sessions', 'interval'], [], ['print', 'include-content', 'watch']);
@@ -1700,6 +1742,10 @@ function usage(): string {
     '  npm run adapter -- bootstrap instructions plan|install|update|uninstall --project-root <absolute-path> --hosts <claude-code|command-code|cursor|antigravity|gemini-cli|codex-cli|chatgpt-desktop-codex|codex-ide|opencode|qwen-code|github-copilot|zcode|kimi-code|qoder|deepseek-harness|goose,...>',
     '  npm run adapter -- cline skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- cline plugin install|update|uninstall|status [--scope user --cline-dir <absolute-path> | --scope project --project-root <absolute-path>]',
+    '  npm run adapter -- cline mcp install --command <threadforge-executable> [--cline-dir <absolute-path> | --config-path <absolute-path>]',
+    '  npm run adapter -- cline mcp update --expected-command <current-executable> --command <new-executable> [--cline-dir <absolute-path> | --config-path <absolute-path>]',
+    '  npm run adapter -- cline mcp uninstall --expected-command <current-executable> [--cline-dir <absolute-path> | --config-path <absolute-path>]',
+    '  npm run adapter -- cline mcp status [--cline-dir <absolute-path> | --config-path <absolute-path>]',
     '  npm run adapter -- cline sessions status [--cline-dir <absolute-path>] [--vscode-storage-dir <absolute-path>] [--state-path <absolute-path>] [--max-sessions <1-5000>]',
     '  npm run adapter -- cline sessions sync [--cline-dir <absolute-path>] [--vscode-storage-dir <absolute-path>] [--state-path <absolute-path>] [--endpoint <loopback-v1-events-url>] [--max-sessions <1-5000>] [--print] [--include-content] [--watch --interval <5s-168h>]',
     '  npm run adapter -- claude-code skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',

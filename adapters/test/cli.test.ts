@@ -2070,3 +2070,36 @@ test('Cline plugin CLI installs and removes explicit user and project registrati
     await assert.rejects(readFile(path.join(project, '.cline', 'settings.json')), /ENOENT/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('Cline MCP CLI manages only the user-global settings file', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-cline-mcp-cli-'));
+  const settings = path.join(root, 'data', 'settings', 'cline_mcp_settings.json');
+  try {
+    let result = await invoke(['cline', 'mcp', 'install', '--cline-dir', root, '--command', 'threadforge.exe']);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'installed');
+    let config = JSON.parse(await readFile(settings, 'utf8'));
+    assert.deepEqual(config.mcpServers.threadforge.args, ['mcp', 'serve', '--threadforge-managed-mcp=v1']);
+    assert.deepEqual(config.mcpServers.threadforge.autoApprove, []);
+
+    result = await invoke(['cline', 'mcp', 'status', '--cline-dir', root]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'installed');
+    result = await invoke(['cline', 'mcp', 'update', '--cline-dir', root, '--expected-command', 'threadforge.exe', '--command', 'threadforge-next.exe']);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'updated');
+    result = await invoke(['cline', 'mcp', 'uninstall', '--cline-dir', root, '--expected-command', 'threadforge-next.exe']);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'removed');
+    assert.deepEqual(JSON.parse(await readFile(settings, 'utf8')), {});
+
+    result = await invoke(['cline', 'mcp', 'install', '--cline-dir', root, '--project-root', root, '--command', 'threadforge.exe']);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /unexpected|unsupported/);
+    result = await invoke(['cline', 'mcp', 'install', '--cline-dir', root, '--command', 'threadforge.exe', '--config-path', settings]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /either --cline-dir or --config-path/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

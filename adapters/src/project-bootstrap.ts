@@ -19,6 +19,7 @@ import {
   updateManagedProjectMcpServer,
   type ProjectMcpHost,
 } from './mcp-config.ts';
+import { looksCredentialLikeMcpValue } from './mcp-contract.ts';
 
 export const projectBootstrapMcpTargets = {
   'claude-code': '.mcp.json',
@@ -148,7 +149,7 @@ async function canonicalProjectRoot(value: string): Promise<string> {
 }
 
 function validateCommand(value: string | undefined): string {
-  if (typeof value !== 'string' || !value.trim() || value !== value.trim() || value.length > 2048 || /[\r\n\0]/.test(value) || looksCredentialLike(value)) {
+  if (typeof value !== 'string' || !value.trim() || value !== value.trim() || value.length > 2048 || /[\r\n\0]/.test(value) || looksCredentialLikeMcpValue(value)) {
     throw new Error('MCP executable must be bounded and credential-free');
   }
   return value;
@@ -156,7 +157,7 @@ function validateCommand(value: string | undefined): string {
 
 async function normalizeMcpArgs(projectRoot: string, args: string[]): Promise<string[]> {
   if (!Array.isArray(args) || args.length < 4 || args.length > 5 ||
-      args.some((arg) => typeof arg !== 'string' || arg.length > 4096 || /[\r\n\0]/.test(arg) || looksCredentialLike(arg))) {
+      args.some((arg) => typeof arg !== 'string' || arg.length > 4096 || /[\r\n\0]/.test(arg) || looksCredentialLikeMcpValue(arg))) {
     throw new Error('bootstrap MCP arguments must be bounded, credential-free strings');
   }
   if (args[0] !== 'mcp' || args[1] !== 'serve' || args[2] !== '--project-root' ||
@@ -166,12 +167,6 @@ async function normalizeMcpArgs(projectRoot: string, args: string[]): Promise<st
   const configuredRoot = await canonicalProjectRoot(args[3]!);
   if (!await isSameRealPathWithoutLinks(projectRoot, configuredRoot)) throw new Error('MCP --project-root must match the selected project root');
   return ['mcp', 'serve', '--project-root', projectRoot, managedMcpArgument];
-}
-
-function looksCredentialLike(value: string): boolean {
-  return /\b(?:api[_ -]?(?:key|token)|access[_ -]?token|refresh[_ -]?token|id[_ -]?token|token|password|secret|authorization|cookie|private[_ -]?key)\b\s*[:=]\s*\S+/i.test(value) ||
-    /\bBearer\s+[A-Za-z0-9._~+/-]+=*/i.test(value) ||
-    /\b(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})\b/.test(value);
 }
 
 function sha256(value: string): string {

@@ -2104,7 +2104,8 @@ def test_cutover_v5_requires_format_coverage_and_source_backup_verification():
     })
 
     coverage_schema = json.loads((SCHEMA_DIRECTORY / "migration-format-coverage-v1.schema.json").read_text(encoding="utf-8"))
-    validator_for(coverage_schema)(coverage_schema).validate({
+    coverage_validator = validator_for(coverage_schema)(coverage_schema)
+    coverage_document = {
         "schema_version": "threadforge.migration-format-coverage.v1",
         "product": "mancode",
         "source_fingerprint": "b" * 64,
@@ -2166,6 +2167,10 @@ def test_cutover_v5_requires_format_coverage_and_source_backup_verification():
             "metadata_plan_version_defaulted": False,
             "metadata_requirements_digest_present": True,
             "metadata_requirements_digest_binding_verified": True,
+            "metadata_requirements_status_present": True,
+            "metadata_requirements_status_binding_verified": True,
+            "metadata_verification_status_present": True,
+            "metadata_verification_status_binding_verified": True,
             "workflow_path_binding_verified": True,
             "requirements_digest_binding_verified": True,
             "acceptance_criteria_binding_verified": True,
@@ -2219,7 +2224,24 @@ def test_cutover_v5_requires_format_coverage_and_source_backup_verification():
             "unconverted_files": 0,
             "file_set_sha256": "a" * 64,
         } for name in ("metadata", "requirements", "review", "verification", "plan")]],
-    })
+    }
+    coverage_validator.validate(coverage_document)
+
+    legacy_coverage_document = json.loads(json.dumps(coverage_document))
+    legacy_check = legacy_coverage_document["mancode_legacy_workflow_checks"][0]
+    for field in (
+        "metadata_requirements_status_present", "metadata_requirements_status_binding_verified",
+        "metadata_verification_status_present", "metadata_verification_status_binding_verified",
+    ):
+        legacy_check.pop(field)
+    coverage_validator.validate(legacy_coverage_document)
+
+    conflicting_coverage_document = json.loads(json.dumps(coverage_document))
+    conflicting_check = conflicting_coverage_document["mancode_legacy_workflow_checks"][0]
+    conflicting_check["status"] = "conflicting"
+    conflicting_check["issues"] = ["metadata_requirements_status_mismatch"]
+    conflicting_check.pop("metadata_requirements_status_binding_verified")
+    coverage_validator.validate(conflicting_coverage_document)
 
 
 def test_anyjev_synthetic_state_summary_is_bounded_and_review_only():

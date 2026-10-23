@@ -82,6 +82,8 @@ func TestMancodeLegacyWorkflowLedgersBindBeforeReviewOnlyImport(t *testing.T) {
 	check := manifest.MancodeLegacyWorkflowChecks[0]
 	if check.Status != "verified" || !check.WorkflowPathBindingVerified || !check.MetadataValid ||
 		!check.RequirementsValid || !check.ReviewValid || !check.VerificationValid || !check.PlanValid ||
+		!check.MetadataRequirementsStatusPresent || !check.MetadataRequirementsStatusBindingVerified ||
+		!check.MetadataVerificationStatusPresent || !check.MetadataVerificationStatusBindingVerified ||
 		!check.RequirementsDigestBindingVerified || !check.AcceptanceCriteriaBindingVerified ||
 		!check.PlanVersionBindingVerified || !check.ReviewRemediationBindingVerified || !check.PlanPresenceVerified ||
 		check.PlanContentBindingVerified {
@@ -164,6 +166,77 @@ func TestMancodeLegacyWorkflowBindingSurfacesSiblingMismatches(t *testing.T) {
 				t.Fatalf("mismatch was hidden or marked verified: %#v", check)
 			}
 		})
+	}
+}
+
+func TestMancodeLegacyWorkflowBindingSurfacesMetadataStatusMismatches(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		value string
+		issue string
+	}{
+		{"requirements_status", "requirementsStatus", "needs_clarification", "metadata_requirements_status_mismatch"},
+		{"verification_status", "verificationStatus", "pending", "metadata_verification_status_mismatch"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			taskID := writeMancodeLegacyBindingFixture(t, root, nil)
+			metadataPath := filepath.Join(root, ".mancode", "workflows", taskID, "metadata.json")
+			data, err := os.ReadFile(metadataPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var metadata map[string]any
+			if err := json.Unmarshal(data, &metadata); err != nil {
+				t.Fatal(err)
+			}
+			metadata[test.field] = test.value
+			writeMancodeJSONFixture(t, root, filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, "metadata.json")), metadata)
+
+			manifest, err := Inspect(Mancode, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			check := manifest.MancodeLegacyWorkflowChecks[0]
+			if check.Status != "conflicting" || !containsString(check.Issues, test.issue) {
+				t.Fatalf("metadata status mismatch was hidden: %#v", check)
+			}
+			if test.field == "requirementsStatus" && (!check.MetadataRequirementsStatusPresent || check.MetadataRequirementsStatusBindingVerified) {
+				t.Fatalf("requirements status mismatch flags are inconsistent: %#v", check)
+			}
+			if test.field == "verificationStatus" && (!check.MetadataVerificationStatusPresent || check.MetadataVerificationStatusBindingVerified) {
+				t.Fatalf("verification status mismatch flags are inconsistent: %#v", check)
+			}
+		})
+	}
+}
+
+func TestMancodeLegacyWorkflowStatusBindingsRemainOptional(t *testing.T) {
+	root := t.TempDir()
+	taskID := writeMancodeLegacyBindingFixture(t, root, nil)
+	metadataPath := filepath.Join(root, ".mancode", "workflows", taskID, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	delete(metadata, "requirementsStatus")
+	delete(metadata, "verificationStatus")
+	writeMancodeJSONFixture(t, root, filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, "metadata.json")), metadata)
+
+	manifest, err := Inspect(Mancode, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := manifest.MancodeLegacyWorkflowChecks[0]
+	if check.Status != "verified" || check.MetadataRequirementsStatusPresent || check.MetadataRequirementsStatusBindingVerified ||
+		check.MetadataVerificationStatusPresent || check.MetadataVerificationStatusBindingVerified {
+		t.Fatalf("absent optional status fields changed legacy workflow verification: %#v", check)
 	}
 }
 

@@ -67,6 +67,10 @@ type MancodeLegacyWorkflowCheck struct {
 	MetadataPlanVersionDefaulted              bool     `json:"metadata_plan_version_defaulted"`
 	MetadataRequirementsDigestPresent         bool     `json:"metadata_requirements_digest_present"`
 	MetadataRequirementsDigestBindingVerified bool     `json:"metadata_requirements_digest_binding_verified"`
+	MetadataRequirementsStatusPresent         bool     `json:"metadata_requirements_status_present,omitempty"`
+	MetadataRequirementsStatusBindingVerified bool     `json:"metadata_requirements_status_binding_verified,omitempty"`
+	MetadataVerificationStatusPresent         bool     `json:"metadata_verification_status_present,omitempty"`
+	MetadataVerificationStatusBindingVerified bool     `json:"metadata_verification_status_binding_verified,omitempty"`
 	WorkflowPathBindingVerified               bool     `json:"workflow_path_binding_verified"`
 	RequirementsDigestBindingVerified         bool     `json:"requirements_digest_binding_verified"`
 	AcceptanceCriteriaBindingVerified         bool     `json:"acceptance_criteria_binding_verified"`
@@ -424,7 +428,8 @@ func ValidateMancodeLegacyWorkflowChecks(product string, checks []MancodeLegacyW
 		"requirements_digest_mismatch": true, "acceptance_criteria_mismatch": true,
 		"plan_version_mismatch": true, "remediation_round_mismatch": true,
 		"metadata_requirements_digest_mismatch": true,
-		"legacy_unverified":                     true,
+		"metadata_requirements_status_mismatch": true, "metadata_verification_status_mismatch": true,
+		"legacy_unverified": true,
 	}
 	previousID := ""
 	for _, check := range checks {
@@ -459,6 +464,12 @@ func ValidateMancodeLegacyWorkflowChecks(product string, checks []MancodeLegacyW
 		if check.PlanContentBindingVerified ||
 			(check.MetadataRequirementsDigestBindingVerified && (!check.MetadataRequirementsDigestPresent ||
 				!check.MetadataValid || !check.RequirementsValid)) ||
+			(check.MetadataRequirementsStatusPresent && !check.MetadataValid) ||
+			(check.MetadataRequirementsStatusBindingVerified && (!check.MetadataRequirementsStatusPresent ||
+				!check.MetadataValid || !check.RequirementsValid)) ||
+			(check.MetadataVerificationStatusPresent && !check.MetadataValid) ||
+			(check.MetadataVerificationStatusBindingVerified && (!check.MetadataVerificationStatusPresent ||
+				!check.MetadataValid || !check.VerificationValid)) ||
 			(check.RequirementsDigestBindingVerified && (!check.RequirementsValid || !check.VerificationValid)) ||
 			(check.AcceptanceCriteriaBindingVerified && (!check.RequirementsValid || !check.VerificationValid)) ||
 			(check.PlanVersionBindingVerified && (!check.VerificationValid || !check.PlanValid ||
@@ -471,7 +482,7 @@ func ValidateMancodeLegacyWorkflowChecks(product string, checks []MancodeLegacyW
 			check.ReviewFileCount+check.VerificationFileCount+check.PlanFileCount == 0 {
 			return errors.New("Mancode legacy workflow path binding has no source files")
 		}
-		if len(check.Issues) > 24 {
+		if len(check.Issues) > 26 {
 			return errors.New("Mancode legacy workflow issue list exceeds bounds")
 		}
 		previousIssue := ""
@@ -507,6 +518,22 @@ func ValidateMancodeLegacyWorkflowChecks(product string, checks []MancodeLegacyW
 				if check.MetadataRequirementsDigestBindingVerified {
 					return errors.New("Mancode metadata requirements digest conflict contradicts its binding flag")
 				}
+			case "metadata_requirements_status_mismatch":
+				conflicting = true
+				if !check.MetadataRequirementsStatusPresent || !check.MetadataValid || !check.RequirementsValid {
+					return errors.New("Mancode metadata requirements status conflict lacks valid source inputs")
+				}
+				if check.MetadataRequirementsStatusBindingVerified {
+					return errors.New("Mancode metadata requirements status conflict contradicts its binding flag")
+				}
+			case "metadata_verification_status_mismatch":
+				conflicting = true
+				if !check.MetadataVerificationStatusPresent || !check.MetadataValid || !check.VerificationValid {
+					return errors.New("Mancode metadata verification status conflict lacks valid source inputs")
+				}
+				if check.MetadataVerificationStatusBindingVerified {
+					return errors.New("Mancode metadata verification status conflict contradicts its binding flag")
+				}
 			}
 		}
 		switch check.Status {
@@ -514,6 +541,8 @@ func ValidateMancodeLegacyWorkflowChecks(product string, checks []MancodeLegacyW
 			if len(check.Issues) != 0 || !check.WorkflowPathBindingVerified || !check.MetadataValid ||
 				!check.RequirementsValid || !check.VerificationValid || !check.PlanValid ||
 				check.MetadataRequirementsDigestPresent && !check.MetadataRequirementsDigestBindingVerified ||
+				check.MetadataRequirementsStatusPresent && !check.MetadataRequirementsStatusBindingVerified ||
+				check.MetadataVerificationStatusPresent && !check.MetadataVerificationStatusBindingVerified ||
 				!check.RequirementsDigestBindingVerified || !check.AcceptanceCriteriaBindingVerified ||
 				!check.PlanVersionBindingVerified || !check.ReviewRemediationBindingVerified || !check.PlanPresenceVerified {
 				return errors.New("verified Mancode legacy workflow check is incomplete")

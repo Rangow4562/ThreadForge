@@ -1,6 +1,7 @@
 package migrationcoverage
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 	"testing"
@@ -148,6 +149,25 @@ func TestValidateMancodeLegacyWorkflowBindingsReconcileAndSurfaceConflicts(t *te
 	report.MancodeLegacyWorkflowChecks = []MancodeLegacyWorkflowCheck{check}
 	if err := Validate(report); err != nil {
 		t.Fatalf("fully bound legacy workflow check rejected: %v", err)
+	}
+	legacyJSON, err := json.Marshal(check)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, optionalField := range []string{
+		"metadata_requirements_status_present", "metadata_requirements_status_binding_verified",
+		"metadata_verification_status_present", "metadata_verification_status_binding_verified",
+	} {
+		if strings.Contains(string(legacyJSON), optionalField) {
+			t.Fatalf("absent optional status field changed the legacy v1 JSON shape: %s", legacyJSON)
+		}
+	}
+	var oldCheck MancodeLegacyWorkflowCheck
+	if err := json.Unmarshal(legacyJSON, &oldCheck); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateMancodeLegacyWorkflowChecks("mancode", []MancodeLegacyWorkflowCheck{oldCheck}); err != nil {
+		t.Fatalf("previously verified v1 binding without optional status fields was rejected: %v", err)
 	}
 
 	conflict := report

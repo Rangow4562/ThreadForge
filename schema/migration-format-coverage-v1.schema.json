@@ -164,6 +164,10 @@
         "metadata_plan_version_defaulted": { "type": "boolean" },
         "metadata_requirements_digest_present": { "type": "boolean" },
         "metadata_requirements_digest_binding_verified": { "type": "boolean" },
+        "metadata_requirements_status_present": { "type": "boolean" },
+        "metadata_requirements_status_binding_verified": { "type": "boolean" },
+        "metadata_verification_status_present": { "type": "boolean" },
+        "metadata_verification_status_binding_verified": { "type": "boolean" },
         "workflow_path_binding_verified": { "type": "boolean" },
         "requirements_digest_binding_verified": { "type": "boolean" },
         "acceptance_criteria_binding_verified": { "type": "boolean" },
@@ -173,14 +177,15 @@
         "plan_content_binding_verified": { "const": false },
         "status": { "enum": ["verified", "incomplete", "conflicting"] },
         "issues": {
-          "type": "array", "maxItems": 24, "uniqueItems": true,
+          "type": "array", "maxItems": 26, "uniqueItems": true,
           "items": { "enum": [
             "metadata_missing", "metadata_ambiguous", "metadata_invalid",
             "requirements_missing", "requirements_ambiguous", "requirements_invalid",
             "review_ambiguous", "review_invalid", "verification_missing", "verification_ambiguous",
             "verification_invalid", "plan_missing", "plan_ambiguous", "plan_invalid",
             "requirements_digest_mismatch", "acceptance_criteria_mismatch", "plan_version_mismatch",
-            "remediation_round_mismatch", "metadata_requirements_digest_mismatch", "legacy_unverified"
+            "remediation_round_mismatch", "metadata_requirements_digest_mismatch",
+            "metadata_requirements_status_mismatch", "metadata_verification_status_mismatch", "legacy_unverified"
           ] }
         },
         "authority": { "const": "local_pending_review" },
@@ -193,6 +198,10 @@
         { "if": { "properties": { "review_file_count": { "minimum": 1 } } }, "then": { "required": ["review_source_set_sha256"] }, "else": { "not": { "required": ["review_source_set_sha256"] } } },
         { "if": { "properties": { "verification_file_count": { "minimum": 1 } } }, "then": { "required": ["verification_source_set_sha256"] }, "else": { "not": { "required": ["verification_source_set_sha256"] } } },
         { "if": { "properties": { "plan_file_count": { "minimum": 1 } } }, "then": { "required": ["plan_source_set_sha256"] }, "else": { "not": { "required": ["plan_source_set_sha256"] } } },
+        { "if": { "required": ["metadata_requirements_status_binding_verified"], "properties": { "metadata_requirements_status_binding_verified": { "const": true } } }, "then": { "required": ["metadata_requirements_status_present"], "properties": { "metadata_requirements_status_present": { "const": true }, "metadata_valid": { "const": true }, "requirements_valid": { "const": true } } } },
+        { "if": { "required": ["metadata_verification_status_binding_verified"], "properties": { "metadata_verification_status_binding_verified": { "const": true } } }, "then": { "required": ["metadata_verification_status_present"], "properties": { "metadata_verification_status_present": { "const": true }, "metadata_valid": { "const": true }, "verification_valid": { "const": true } } } },
+        { "if": { "required": ["metadata_requirements_status_present", "status"], "properties": { "metadata_requirements_status_present": { "const": true }, "status": { "const": "verified" } } }, "then": { "required": ["metadata_requirements_status_binding_verified"], "properties": { "metadata_requirements_status_binding_verified": { "const": true } } } },
+        { "if": { "required": ["metadata_verification_status_present", "status"], "properties": { "metadata_verification_status_present": { "const": true }, "status": { "const": "verified" } } }, "then": { "required": ["metadata_verification_status_binding_verified"], "properties": { "metadata_verification_status_binding_verified": { "const": true } } } },
         { "if": { "properties": { "status": { "const": "verified" } } }, "then": { "properties": { "metadata_valid": { "const": true }, "requirements_valid": { "const": true }, "verification_valid": { "const": true }, "plan_valid": { "const": true }, "requirements_digest_binding_verified": { "const": true }, "acceptance_criteria_binding_verified": { "const": true }, "plan_version_binding_verified": { "const": true }, "review_remediation_binding_verified": { "const": true }, "plan_presence_verified": { "const": true }, "issues": { "maxItems": 0 } } }, "else": { "properties": { "issues": { "minItems": 1 } } } }
       ]
     }

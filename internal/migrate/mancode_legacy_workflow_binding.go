@@ -118,6 +118,20 @@ func bindMancodeLegacyWorkflows(sourceRoot string, scanned *[]scannedFile) []mig
 					check.Issues = append(check.Issues, "metadata_requirements_digest_mismatch")
 				}
 			}
+			check.MetadataRequirementsStatusPresent = metadata.RequirementsStatus != ""
+			if check.MetadataRequirementsStatusPresent && check.RequirementsValid {
+				check.MetadataRequirementsStatusBindingVerified = metadata.RequirementsStatus == requirements.Readiness
+				if !check.MetadataRequirementsStatusBindingVerified {
+					check.Issues = append(check.Issues, "metadata_requirements_status_mismatch")
+				}
+			}
+			check.MetadataVerificationStatusPresent = metadata.VerificationStatus != ""
+			if check.MetadataVerificationStatusPresent && check.VerificationValid {
+				check.MetadataVerificationStatusBindingVerified = metadata.VerificationStatus == verification.SourceStatus
+				if !check.MetadataVerificationStatusBindingVerified {
+					check.Issues = append(check.Issues, "metadata_verification_status_mismatch")
+				}
+			}
 			if check.VerificationValid && check.PlanValid {
 				check.PlanVersionBindingVerified = planVersion == verification.PlanVersion
 				if !check.PlanVersionBindingVerified {
@@ -480,7 +494,8 @@ func mancodeLegacyWorkflowHasBindingMismatch(issues []string) bool {
 	for _, issue := range issues {
 		switch issue {
 		case "requirements_digest_mismatch", "acceptance_criteria_mismatch", "plan_version_mismatch",
-			"remediation_round_mismatch", "metadata_requirements_digest_mismatch":
+			"remediation_round_mismatch", "metadata_requirements_digest_mismatch",
+			"metadata_requirements_status_mismatch", "metadata_verification_status_mismatch":
 			return true
 		}
 	}

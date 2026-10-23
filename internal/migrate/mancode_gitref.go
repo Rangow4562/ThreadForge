@@ -526,6 +526,12 @@ func normalizeMancodeGitRefManifest(sourceRoot string, value any, source Mancode
 		return nil, err
 	}
 	items := make([]normalizedItem, 0, 1+len(collections["actorProfiles"].values)+len(collections["claims"].values)+len(collections["handoffs"].values)+len(collections["ownershipFences"].values)+len(collections["receipts"].values))
+	var privacyItems []normalizedItem
+	var privacyErr error
+	privacyExcludedDigests := map[string]bool{}
+	if privacyPolicyPresent {
+		privacyItems, privacyExcludedDigests, privacyErr = normalizeMancodeGitRefPrivacySnapshot(object["privacyPolicy"], manifestWorkspace)
+	}
 	summary := mancodeGitRefAuthorityImport{
 		SchemaVersion: mancodeGitRefSchema, Authority: "local_pending_review", HumanReviewRequired: true, ExecutionAuthorized: false,
 		SourceRef: source.Ref, SourceCommit: source.Commit, SourceManifestSHA256: source.ManifestSHA256,
@@ -545,6 +551,10 @@ func normalizeMancodeGitRefManifest(sourceRoot string, value any, source Mancode
 	}
 	items = append(items, normalizedItem{Type: "mancode_git_ref_authority", Payload: payload})
 	for _, profile := range collections["actorProfiles"].values {
+		if mancodeGitRefPrivacyExcluded(profile, privacyExcludedDigests) {
+			items = append(items, normalizedItem{Rejected: true, Issue: "Mancode git-ref actor profile did not match the supported review-only contract"})
+			continue
+		}
 		actorID, ok := profile.(map[string]any)["actorId"].(string)
 		if !ok || !mancodeOperationIDPattern.MatchString(actorID) {
 			items = append(items, normalizedItem{Rejected: true, Issue: "Mancode git-ref actor profile did not match the supported review-only contract"})
@@ -554,6 +564,10 @@ func normalizeMancodeGitRefManifest(sourceRoot string, value any, source Mancode
 		items = appendMancodeGitRefNormalized(items, normalized, err, "Mancode git-ref actor profile did not match the supported review-only contract")
 	}
 	for _, claim := range collections["claims"].values {
+		if mancodeGitRefPrivacyExcluded(claim, privacyExcludedDigests) {
+			items = append(items, normalizedItem{Rejected: true, Issue: "Mancode git-ref claim did not match the supported review-only contract"})
+			continue
+		}
 		claimID, ok := claim.(map[string]any)["claimId"].(string)
 		if !ok || !mancodeOperationIDPattern.MatchString(claimID) {
 			items = append(items, normalizedItem{Rejected: true, Issue: "Mancode git-ref claim did not match the supported review-only contract"})
@@ -568,6 +582,10 @@ func normalizeMancodeGitRefManifest(sourceRoot string, value any, source Mancode
 		}
 	}
 	for _, handoff := range collections["handoffs"].values {
+		if mancodeGitRefPrivacyExcluded(handoff, privacyExcludedDigests) {
+			items = append(items, normalizedItem{Rejected: true, Issue: "Mancode git-ref handoff did not match the supported review-only contract"})
+			continue
+		}
 		handoffID, ok := handoff.(map[string]any)["handoffId"].(string)
 		if !ok || !mancodeOperationIDPattern.MatchString(handoffID) {
 			items = append(items, normalizedItem{Rejected: true, Issue: "Mancode git-ref handoff did not match the supported review-only contract"})
@@ -608,7 +626,11 @@ func normalizeMancodeGitRefManifest(sourceRoot string, value any, source Mancode
 		}
 	}
 	for _, bundle := range collections["taskBundles"].values {
-		normalized, err := normalizeMancodeGitRefTaskBundle(bundle)
+		if privacyPolicyPresent && privacyErr != nil {
+			items = append(items, normalizedItem{Rejected: true, Issue: "Mancode git-ref task bundle did not match the supported review-only workflow contract"})
+			continue
+		}
+		normalized, err := normalizeMancodeGitRefTaskBundle(bundle, privacyExcludedDigests)
 		items = appendMancodeGitRefNormalized(items, normalized, err, "Mancode git-ref task bundle did not match the supported review-only workflow contract")
 	}
 	if freezePresent {
@@ -618,7 +640,7 @@ func normalizeMancodeGitRefManifest(sourceRoot string, value any, source Mancode
 		items = append(items, normalizedItem{Rejected: true, Issue: "Mancode git-ref authority tombstone detail requires a source-specific converter"})
 	}
 	if privacyPolicyPresent {
-		items = append(items, normalizedItem{Rejected: true, Issue: "Mancode git-ref privacy policy requires a source-specific converter"})
+		items = appendMancodeGitRefNormalized(items, privacyItems, privacyErr, "Mancode git-ref privacy policy did not match the supported review-only binding contract")
 	}
 	return items, nil
 }

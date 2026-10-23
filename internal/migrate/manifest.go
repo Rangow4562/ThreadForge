@@ -767,7 +767,7 @@ func recordTypeMatchesSource(product Product, relative, recordType, sourceRoot s
 		case "mancode_actor_identity", "mancode_actor_profile", "mancode_team_claim", "mancode_team_handoff",
 			"mancode_team_head_fence", "mancode_git_ref_authority", "mancode_git_ref_receipt", "mancode_git_ref_task_bundle",
 			"workflow_metadata", "workflow_requirements", "workflow_review", "workflow_verification", "workflow_plan",
-			"workflow_checkpoint", "workflow_document":
+			"workflow_checkpoint", "workflow_document", "project_policy":
 			return true
 		default:
 			return false

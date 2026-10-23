@@ -256,6 +256,9 @@ func normalizeMancodeItems(sourceRoot, relative string, value any) ([]normalized
 	if items, handled, err := normalizeMancodeLegacyVerification(relative, sourceRoot, value); handled || err != nil {
 		return items, handled, err
 	}
+	if items, handled, err := normalizeMancodeLegacyPlan(relative, sourceRoot, value); handled || err != nil {
+		return items, handled, err
+	}
 	recordType := classifyMancodeRecord(relative)
 	if recordType == "mancode_legacy_state" {
 		return normalizeMancodeLegacyState(value)

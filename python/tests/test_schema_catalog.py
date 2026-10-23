@@ -3712,3 +3712,64 @@ def test_cline_skill_inventory_smoke_does_not_claim_model_retrieval():
     ):
         with pytest.raises(ValidationError):
             validator.validate(invalid)
+
+
+def test_mancode_legacy_workflow_summary_is_inert_and_identity_reduced():
+    schema = json.loads((SCHEMA_DIRECTORY / "mancode-legacy-workflow-summary-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    summary = {
+        "schema_version": "threadforge.mancode-legacy-workflow-summary.v1",
+        "authority": "local_pending_review",
+        "human_review_required": True,
+        "execution_authorized": False,
+        "task_id_sha256": "a" * 64,
+        "workflow_mode": "man",
+        "workflow_status": "blocked",
+        "current_step": 4,
+        "skipped_step_count": 1,
+        "started_at": "2026-10-20T10:00:00Z",
+        "updated_at": "2026-10-20T10:05:00Z",
+        "task_present": True,
+        "blocking_reason_present": True,
+        "parent_task_present": False,
+        "plan_version": 2,
+        "review_policy_version": 2,
+        "planning_policy_version": 2,
+        "verification_policy_version": 1,
+        "requirements_status": "ready",
+        "requirements_digest_present": True,
+        "plan_decision": "plan_only",
+        "verification_status": "pending",
+        "raw_task_identity_omitted": True,
+        "raw_task_text_omitted": True,
+        "raw_blocking_reason_omitted": True,
+        "raw_parent_task_id_omitted": True,
+        "raw_skipped_steps_omitted": True,
+        "source_authority_omitted": True,
+    }
+    validator.validate(summary)
+    mamba = {
+        **summary,
+        "workflow_mode": "mamba",
+        "workflow_status": "completed",
+        "current_step": 5,
+        "blocking_reason_present": False,
+        "parent_task_present": True,
+        "requirements_digest_present": False,
+        "outcome": "verified",
+    }
+    for key in ("plan_version", "review_policy_version", "planning_policy_version", "verification_policy_version",
+                "requirements_status", "plan_decision", "verification_status"):
+        mamba.pop(key)
+    validator.validate(mamba)
+    for invalid in (
+        {**summary, "execution_authorized": True},
+        {**summary, "raw_task_text_omitted": False},
+        {**summary, "workflow_mode": "mamba", "current_step": 9},
+        {**summary, "workflow_status": "in_progress", "blocking_reason_present": True},
+        {**summary, "skipped_step_count": 65},
+        {**mamba, "outcome": None},
+        {**summary, "task_id": "private-task-id"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)

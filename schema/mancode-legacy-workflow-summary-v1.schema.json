@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-legacy-workflow-summary-v1.schema.json",
+  "title": "Threadforge Mancode Legacy Workflow Summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authority",
+    "human_review_required",
+    "execution_authorized",
+    "task_id_sha256",
+    "workflow_mode",
+    "workflow_status",
+    "current_step",
+    "skipped_step_count",
+    "started_at",
+    "updated_at",
+    "task_present",
+    "blocking_reason_present",
+    "parent_task_present",
+    "requirements_digest_present",
+    "raw_task_identity_omitted",
+    "raw_task_text_omitted",
+    "raw_blocking_reason_omitted",
+    "raw_parent_task_id_omitted",
+    "raw_skipped_steps_omitted",
+    "source_authority_omitted"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-legacy-workflow-summary.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "task_id_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "workflow_mode": { "enum": ["man", "mamba", "manteam"] },
+    "workflow_status": { "enum": ["in_progress", "planned", "completed", "blocked", "abandoned"] },
+    "current_step": { "type": "integer", "minimum": 1, "maximum": 9 },
+    "skipped_step_count": { "type": "integer", "minimum": 0, "maximum": 64 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "task_present": { "const": true },
+    "blocking_reason_present": { "type": "boolean" },
+    "parent_task_present": { "type": "boolean" },
+    "outcome": { "enum": ["fixed", "verified", "no_repro", "manual_test_required"] },
+    "plan_version": { "type": "integer", "minimum": 1 },
+    "review_policy_version": { "enum": [1, 2] },
+    "planning_policy_version": { "enum": [1, 2] },
+    "verification_policy_version": { "const": 1 },
+    "requirements_status": { "enum": ["ready", "needs_clarification"] },
+    "requirements_digest_present": { "type": "boolean" },
+    "plan_decision": { "enum": ["plan_only", "solo_handoff", "governed_execution"] },
+    "verification_status": { "enum": ["pending", "passed", "failed", "manual_required", "blocked"] },
+    "raw_task_identity_omitted": { "const": true },
+    "raw_task_text_omitted": { "const": true },
+    "raw_blocking_reason_omitted": { "const": true },
+    "raw_parent_task_id_omitted": { "const": true },
+    "raw_skipped_steps_omitted": { "const": true },
+    "source_authority_omitted": { "const": true }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "workflow_mode": { "const": "mamba" } }, "required": ["workflow_mode"] },
+      "then": {
+        "properties": {
+          "current_step": { "maximum": 5 },
+          "workflow_status": { "not": { "const": "planned" } },
+          "requirements_digest_present": { "const": false },
+          "parent_task_present": { "type": "boolean" }
+        },
+        "not": {
+          "anyOf": [
+            { "required": ["plan_version"] },
+            { "required": ["review_policy_version"] },
+            { "required": ["planning_policy_version"] },
+            { "required": ["verification_policy_version"] },
+            { "required": ["requirements_status"] },
+            { "required": ["plan_decision"] },
+            { "required": ["verification_status"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": { "properties": { "workflow_mode": { "enum": ["man", "manteam"] } }, "required": ["workflow_mode"] },
+      "then": {
+        "properties": {
+          "parent_task_present": { "const": false }
+        },
+        "not": { "required": ["outcome"] }
+      }
+    },
+    {
+      "if": { "properties": { "workflow_status": { "const": "blocked" } }, "required": ["workflow_status"] },
+      "then": { "properties": { "blocking_reason_present": { "const": true } } },
+      "else": { "properties": { "blocking_reason_present": { "const": false } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "workflow_mode": { "const": "mamba" },
+          "workflow_status": { "const": "completed" }
+        },
+        "required": ["workflow_mode", "workflow_status"]
+      },
+      "then": { "required": ["outcome"] }
+    }
+  ]
+}

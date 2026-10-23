@@ -710,19 +710,25 @@ func ReadSnapshotRecords(manifestPath string, manifest Manifest) ([]Record, erro
 func validateSnapshotRecord(record Record, file FileEntry, product Product, sourceRoot string) error {
 	aliasedRRSIRecord := product == RRSI && (record.Type == "rrsi_trial_artifact" || record.Type == "rrsi_trajectory_summary")
 	aliasedMancodeCoordinationRecord := product == Mancode && isMancodeCoordinationRecordType(record.Type)
+	aliasedMancodeLegacyWorkflowRecord := product == Mancode && record.Type == "mancode_legacy_workflow_summary"
 	wantMancodeAlias := ""
 	if aliasedMancodeCoordinationRecord {
 		wantMancodeAlias = mancodeCoordinationSourceAlias(file.Path, record.Type)
 	}
+	wantLegacyWorkflowAlias := ""
+	if aliasedMancodeLegacyWorkflowRecord {
+		wantLegacyWorkflowAlias = mancodeLegacyWorkflowSourceAlias(file.Path)
+	}
 	if !safeRelative(record.SourcePath) ||
-		(!aliasedRRSIRecord && !aliasedMancodeCoordinationRecord && record.SourcePath != file.Path) ||
+		(!aliasedRRSIRecord && !aliasedMancodeCoordinationRecord && !aliasedMancodeLegacyWorkflowRecord && record.SourcePath != file.Path) ||
 		(aliasedMancodeCoordinationRecord && record.SourcePath != wantMancodeAlias) ||
+		(aliasedMancodeLegacyWorkflowRecord && record.SourcePath != wantLegacyWorkflowAlias) ||
 		!json.Valid(record.Payload) || digest(record.Payload) != record.ContentSHA256 || privacy.ContainsCredential(record.Payload) ||
 		record.Scope != "local_pending_review" || !knownRecordType(record.Type) || !recordTypeMatchesSource(product, file.Path, record.Type, sourceRoot) {
 		return errors.New("record fields are not valid for this migration")
 	}
 	prefix := file.Path + "#"
-	if aliasedRRSIRecord || aliasedMancodeCoordinationRecord {
+	if aliasedRRSIRecord || aliasedMancodeCoordinationRecord || aliasedMancodeLegacyWorkflowRecord {
 		prefix = record.SourcePath + "#"
 	}
 	if !strings.HasPrefix(record.Key, prefix) {
@@ -752,7 +758,7 @@ func knownRecordType(value string) bool {
 		"mancode_git_ref_authority", "mancode_git_ref_receipt", "mancode_git_ref_task_bundle", "mancode_git_ref_authority_transition",
 		"mancode_progress_projection", "workflow_metadata", "workflow_requirements", "workflow_review",
 		"workflow_verification", "workflow_plan", "workflow_checkpoint",
-		"mancode_workflow_aggregate",
+		"mancode_workflow_aggregate", "mancode_legacy_workflow_summary",
 		"rrsi_evaluation_result", "rrsi_edit_history", "rrsi_attribution", "rrsi_selection_decision", "rrsi_trial_artifact",
 		"rrsi_trajectory_summary":
 		return true
@@ -762,6 +768,10 @@ func knownRecordType(value string) bool {
 }
 
 func recordTypeMatchesSource(product Product, relative, recordType, sourceRoot string) bool {
+	if product == Mancode && recordType == "mancode_legacy_workflow_summary" {
+		_, ok := isMancodeLegacyWorkflowMetadataPath(relative, sourceRoot)
+		return ok
+	}
 	if product == Mancode && relative == mancodeGitRefVirtualPath {
 		switch recordType {
 		case "mancode_actor_identity", "mancode_actor_profile", "mancode_team_claim", "mancode_team_handoff",
@@ -1180,6 +1190,8 @@ func scanFileWithMancodeGitRef(product Product, sourceRoot, relative, fullPath s
 			recordPath := relative
 			if product == Mancode && isMancodeCoordinationRecordType(item.Type) {
 				recordPath = mancodeCoordinationSourceAlias(relative, item.Type)
+			} else if product == Mancode && item.Type == "mancode_legacy_workflow_summary" {
+				recordPath = mancodeLegacyWorkflowSourceAlias(relative)
 			}
 			file.records = append(file.records, Record{
 				Key: fmt.Sprintf("%s#%06d", recordPath, recordIndex), Type: item.Type, SourcePath: recordPath,

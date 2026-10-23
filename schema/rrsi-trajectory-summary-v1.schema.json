@@ -80,7 +80,17 @@
             "assistant_message_count": { "$ref": "#/$defs/count" },
             "tool_message_count": { "$ref": "#/$defs/count" },
             "other_message_count": { "$ref": "#/$defs/count" },
-            "tool_call_count": { "$ref": "#/$defs/count" }
+            "tool_call_count": { "$ref": "#/$defs/count" },
+            "tool_call_name_hashes": {
+              "type": "array",
+              "maxItems": 256,
+              "items": { "$ref": "#/$defs/sha256" }
+            },
+            "tool_sequence_truncated": { "type": "boolean" }
+          },
+          "dependentRequired": {
+            "tool_call_name_hashes": ["tool_sequence_truncated"],
+            "tool_sequence_truncated": ["tool_call_name_hashes"]
           }
         }
       ],
@@ -111,7 +121,17 @@
             "assistant_message_count": { "$ref": "#/$defs/count" },
             "tool_message_count": { "$ref": "#/$defs/count" },
             "other_message_count": { "$ref": "#/$defs/count" },
-            "tool_call_count": { "$ref": "#/$defs/count" }
+            "tool_call_count": { "$ref": "#/$defs/count" },
+            "tool_call_name_hashes": {
+              "type": "array",
+              "maxItems": 256,
+              "items": { "$ref": "#/$defs/sha256" }
+            },
+            "tool_sequence_truncated": { "type": "boolean" }
+          },
+          "dependentRequired": {
+            "tool_call_name_hashes": ["tool_sequence_truncated"],
+            "tool_sequence_truncated": ["tool_call_name_hashes"]
           }
         }
       ],

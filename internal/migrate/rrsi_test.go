@@ -384,6 +384,11 @@ func TestRRSITrialImportSanitizesThreeDomainsAndJoinsEngineeringPair(t *testing.
 					payload["tool_call_count"] != float64(1) {
 					t.Fatalf("message trajectory structure counts changed: %#v", payload)
 				}
+				hashes, ok := rrsiArray(payload["tool_call_name_hashes"])
+				wantHash, hashErr := rrsiTrajectoryToolNameHash(map[string]any{"name": "private-tool"})
+				if !ok || len(hashes) != 1 || hashErr != nil || hashes[0] != wantHash || payload["tool_sequence_truncated"] != false {
+					t.Fatalf("message trajectory tool sequence was not hashed and retained in order: %#v", payload)
+				}
 			}
 			continue
 		}
@@ -408,6 +413,103 @@ func TestRRSITrialImportSanitizesThreeDomainsAndJoinsEngineeringPair(t *testing.
 		}
 		if !seenTrajectoryDomains[domain] {
 			t.Errorf("missing structure-only RRSI trajectory record for %s", domain)
+		}
+	}
+}
+
+func TestRRSITrajectoryToolSequenceIsOrderedHashedAndBounded(t *testing.T) {
+	source := rrsiTrialSource{
+		domain: "workspace", kind: "workspace_trajectory",
+		tail: []string{"jobs", "job", "s0", "task", "trajectory.json"},
+	}
+	sourcePath := "runs/workspace/jobs/job/s0/task/trajectory.json"
+	sourceDigest := digest([]byte("trajectory-source"))
+	calls := []any{
+		map[string]any{"type": "function", "function": map[string]any{
+			"name": "file_read", "arguments": `{"path":"/private/input.pdf"}`,
+		}},
+		map[string]any{"name": "file_write", "args": map[string]any{"content": "private-deliverable"}},
+	}
+	value := map[string]any{"messages": []any{map[string]any{"role": "assistant", "tool_calls": calls}}}
+	payloadBytes, err := normalizeRRSITrajectory(source, value, sourceDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		t.Fatal(err)
+	}
+	hashes, ok := rrsiArray(payload["tool_call_name_hashes"])
+	wantRead, _ := rrsiTrajectoryToolNameHash(calls[0])
+	wantWrite, _ := rrsiTrajectoryToolNameHash(calls[1])
+	if !ok || len(hashes) != 2 || hashes[0] != wantRead || hashes[1] != wantWrite ||
+		payload["tool_call_count"] != float64(2) || payload["tool_sequence_truncated"] != false {
+		t.Fatalf("tool call sequence order/count was not preserved: %#v", payload)
+	}
+	for _, forbidden := range []string{"file_read", "file_write", "/private/input.pdf", "private-deliverable"} {
+		if strings.Contains(string(payloadBytes), forbidden) {
+			t.Fatalf("normalized trajectory retained raw tool or argument data %q: %s", forbidden, payloadBytes)
+		}
+	}
+	jobHash, taskHash, trialHash := rrsiTrialHashes(source, "task")
+	entry := FileEntry{Path: sourcePath, SourceSHA256: sourceDigest}
+	record := Record{
+		Type: "rrsi_trajectory_summary", Scope: "local_pending_review",
+		SourcePath: rrsiTrajectorySourceAlias("workspace", jobHash, taskHash, trialHash), Payload: payloadBytes,
+	}
+	if err := validateRRSITrajectoryPayload(record, entry); err != nil {
+		t.Fatalf("valid tool-sequence summary did not pass readback validation: %v", err)
+	}
+	var mutated map[string]any
+	if err := json.Unmarshal(payloadBytes, &mutated); err != nil {
+		t.Fatal(err)
+	}
+	mutated["tool_call_name_hashes"] = []any{"not-a-sha256"}
+	mutatedBytes, err := json.Marshal(mutated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Payload = mutatedBytes
+	if err := validateRRSITrajectoryPayload(record, entry); err == nil {
+		t.Fatal("readback accepted a malformed tool-name digest")
+	}
+
+	tooManyCalls := make([]any, maxRRSIToolSequenceHashes+1)
+	for index := range tooManyCalls {
+		tooManyCalls[index] = map[string]any{"name": "custom_tool"}
+	}
+	truncatedBytes, err := normalizeRRSITrajectory(source, map[string]any{
+		"messages": []any{map[string]any{"role": "assistant", "tool_calls": tooManyCalls}},
+	}, sourceDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var truncated map[string]any
+	if err := json.Unmarshal(truncatedBytes, &truncated); err != nil {
+		t.Fatal(err)
+	}
+	truncatedHashes, ok := rrsiArray(truncated["tool_call_name_hashes"])
+	if !ok || len(truncatedHashes) != maxRRSIToolSequenceHashes ||
+		truncated["tool_call_count"] != float64(maxRRSIToolSequenceHashes+1) || truncated["tool_sequence_truncated"] != true {
+		t.Fatalf("tool sequence truncation was not explicit and bounded: %#v", truncated)
+	}
+}
+
+func TestRRSITrajectoryRejectsCredentialLikeOrAmbiguousToolNames(t *testing.T) {
+	source := rrsiTrialSource{
+		domain: "workspace", kind: "workspace_trajectory",
+		tail: []string{"jobs", "job", "s0", "task", "trajectory.json"},
+	}
+	for name, call := range map[string]any{
+		"credential-like": map[string]any{"name": "token=private-value"},
+		"ambiguous":       map[string]any{"name": "read_file", "function": map[string]any{"name": "write_file"}},
+		"missing":         map[string]any{"type": "function", "function": map[string]any{"arguments": "{}"}},
+	} {
+		_, err := normalizeRRSITrajectory(source, map[string]any{
+			"messages": []any{map[string]any{"role": "assistant", "tool_calls": []any{call}}},
+		}, digest([]byte("trajectory-source")))
+		if err == nil {
+			t.Errorf("trajectory accepted %s tool identity", name)
 		}
 	}
 }

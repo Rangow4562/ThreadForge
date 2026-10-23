@@ -735,6 +735,66 @@ def test_mancode_legacy_review_schema_is_content_reduced_and_non_authorizing():
             validator.validate(invalid)
 
 
+def test_mancode_legacy_verification_schema_withholds_unbound_evidence_authority():
+    schema = json.loads((SCHEMA_DIRECTORY / "mancode-legacy-verification-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    document = {
+        "schema_version": "threadforge.mancode-legacy-verification.v1",
+        "authority": "local_pending_review",
+        "human_review_required": True,
+        "execution_authorized": False,
+        "task_id_sha256": "a" * 64,
+        "source_plan_version": 3,
+        "requirements_digest_present": True,
+        "requirements_binding_verified": False,
+        "plan_binding_verified": False,
+        "remediation_round": 1,
+        "source_status": "manual_required",
+        "checks": [
+            {
+                "acceptance_id": "AC-CORE-1",
+                "required": True,
+                "automated": {
+                    "status": "failed", "evidence_present": True, "updated_at_present": True,
+                    "command_present": True, "exit_code": 2, "evidence_file_present": False,
+                },
+            },
+            {
+                "acceptance_id": "AC-UX-2",
+                "required": True,
+                "automated": {
+                    "status": "passed", "evidence_present": True, "updated_at_present": True,
+                    "command_present": True, "exit_code": 0, "evidence_file_present": True,
+                },
+                "manual": {
+                    "status": "manual_required", "evidence_present": True, "updated_at_present": True,
+                    "command_present": False, "evidence_file_present": False,
+                },
+            },
+        ],
+        "raw_task_identity_omitted": True,
+        "raw_evidence_omitted": True,
+        "raw_commands_omitted": True,
+        "raw_evidence_paths_omitted": True,
+        "raw_timestamps_omitted": True,
+        "raw_requirements_digest_omitted": True,
+        "source_authority_omitted": True,
+    }
+    validator.validate(document)
+    for invalid in (
+        {**document, "execution_authorized": True},
+        {**document, "requirements_binding_verified": True},
+        {**document, "checks": [{**document["checks"][0], "automated": {
+            **document["checks"][0]["automated"], "exit_code": 0,
+        }}]},
+        {**document, "checks": [{**document["checks"][1], "automated": {
+            **document["checks"][1]["automated"], "status": "manual_required",
+        }}]},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_procedure_list_schema_is_versioned_metadata_only():
     schema = json.loads((SCHEMA_DIRECTORY / "procedure-list-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-legacy-verification-v1.schema.json",
+  "title": "Threadforge Mancode Legacy Verification Summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "authority", "human_review_required", "execution_authorized", "task_id_sha256",
+    "source_plan_version", "requirements_digest_present", "requirements_binding_verified", "plan_binding_verified",
+    "remediation_round", "source_status", "checks", "raw_task_identity_omitted", "raw_evidence_omitted",
+    "raw_commands_omitted", "raw_evidence_paths_omitted", "raw_timestamps_omitted",
+    "raw_requirements_digest_omitted", "source_authority_omitted"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-legacy-verification.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "task_id_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "source_plan_version": { "type": "integer", "minimum": 1, "maximum": 9223372036854775807 },
+    "requirements_digest_present": { "const": true },
+    "requirements_binding_verified": { "const": false },
+    "plan_binding_verified": { "const": false },
+    "remediation_round": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
+    "source_status": { "enum": ["pending", "passed", "failed", "manual_required", "blocked"] },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/check" }
+    },
+    "raw_task_identity_omitted": { "const": true },
+    "raw_evidence_omitted": { "const": true },
+    "raw_commands_omitted": { "const": true },
+    "raw_evidence_paths_omitted": { "const": true },
+    "raw_timestamps_omitted": { "const": true },
+    "raw_requirements_digest_omitted": { "const": true },
+    "source_authority_omitted": { "const": true }
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["acceptance_id", "required"],
+      "properties": {
+        "acceptance_id": { "type": "string", "pattern": "^AC-[A-Z0-9][A-Z0-9-]{0,27}$" },
+        "required": { "type": "boolean" },
+        "automated": { "$ref": "#/$defs/automatedEvidence" },
+        "manual": { "$ref": "#/$defs/manualEvidence" }
+      },
+      "anyOf": [
+        { "required": ["automated"] },
+        { "required": ["manual"] }
+      ]
+    },
+    "automatedEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence_present", "updated_at_present", "command_present", "evidence_file_present"],
+      "properties": {
+        "status": { "enum": ["pending", "passed", "failed", "blocked"] },
+        "evidence_present": { "type": "boolean" },
+        "updated_at_present": { "type": "boolean" },
+        "command_present": { "type": "boolean" },
+        "exit_code": { "type": "integer", "minimum": -9223372036854775808, "maximum": 9223372036854775807 },
+        "evidence_file_present": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "pending" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "evidence_present": { "const": false },
+              "updated_at_present": { "const": false },
+              "command_present": { "const": false },
+              "evidence_file_present": { "const": false }
+            },
+            "not": { "required": ["exit_code"] }
+          },
+          "else": {
+            "properties": { "evidence_present": { "const": true }, "updated_at_present": { "const": true } }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "enum": ["passed", "failed"] } }, "required": ["status"] },
+          "then": { "properties": { "command_present": { "const": true } }, "required": ["exit_code"] }
+        },
+        {
+          "if": { "properties": { "status": { "const": "passed" } }, "required": ["status"] },
+          "then": { "properties": { "exit_code": { "const": 0 } } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "failed" } }, "required": ["status"] },
+          "then": { "properties": { "exit_code": { "not": { "const": 0 } } } }
+        }
+      ]
+    },
+    "manualEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence_present", "updated_at_present", "command_present", "evidence_file_present"],
+      "properties": {
+        "status": { "enum": ["pending", "passed", "failed", "manual_required", "blocked"] },
+        "evidence_present": { "type": "boolean" },
+        "updated_at_present": { "type": "boolean" },
+        "command_present": { "type": "boolean" },
+        "exit_code": { "type": "integer", "minimum": -9223372036854775808, "maximum": 9223372036854775807 },
+        "evidence_file_present": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "pending" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "evidence_present": { "const": false },
+              "updated_at_present": { "const": false },
+              "command_present": { "const": false },
+              "evidence_file_present": { "const": false }
+            },
+            "not": { "required": ["exit_code"] }
+          },
+          "else": {
+            "properties": { "evidence_present": { "const": true }, "updated_at_present": { "const": true } }
+          }
+        }
+      ]
+    }
+  }
+}

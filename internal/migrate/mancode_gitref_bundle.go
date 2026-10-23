@@ -56,13 +56,13 @@ type mancodeGitRefTaskBundleImport struct {
 	CreatedAt            string   `json:"created_at"`
 }
 
-func normalizeMancodeGitRefTaskBundle(value any, excludedEntityDigests ...map[string]bool) ([]normalizedItem, error) {
-	blockedDigests := map[string]bool{}
-	if len(excludedEntityDigests) > 1 {
+func normalizeMancodeGitRefTaskBundle(value any, privacyGuards ...mancodeGitRefPrivacyGuard) ([]normalizedItem, error) {
+	privacyGuard := mancodeGitRefPrivacyGuard{}
+	if len(privacyGuards) > 1 {
 		return nil, errors.New("task bundle privacy exclusion context is ambiguous")
 	}
-	if len(excludedEntityDigests) == 1 && excludedEntityDigests[0] != nil {
-		blockedDigests = excludedEntityDigests[0]
+	if len(privacyGuards) == 1 {
+		privacyGuard = privacyGuards[0]
 	}
 	bundle, ok := value.(map[string]any)
 	allowedBundleKeys := []string{
@@ -87,8 +87,8 @@ func normalizeMancodeGitRefTaskBundle(value any, excludedEntityDigests ...map[st
 	if err := validateMancodeGitRefBundleCodeRef(bundle["codeRef"]); err != nil {
 		return nil, err
 	}
-	if mancodeGitRefPrivacyExcluded(bundle["codeRef"], blockedDigests) {
-		return nil, errors.New("task bundle contains privacy-excluded content")
+	if err := mancodeGitRefPrivacyViolation(bundle["codeRef"], privacyGuard); err != nil {
+		return nil, errors.New("task bundle contains privacy-blocked or excluded content")
 	}
 	aggregate, ok := bundle["aggregate"].(map[string]any)
 	aggregateKeys := []string{
@@ -130,8 +130,8 @@ func normalizeMancodeGitRefTaskBundle(value any, excludedEntityDigests ...map[st
 		if err != nil || contentDigest != artifact["contentDigest"] {
 			return nil, errors.New("task bundle artifact content digest does not match")
 		}
-		if blockedDigests[contentDigest] {
-			return nil, errors.New("task bundle contains privacy-excluded content")
+		if err := mancodeGitRefPrivacyViolation(artifact["content"], privacyGuard); err != nil {
+			return nil, errors.New("task bundle contains privacy-blocked or excluded content")
 		}
 		if kind == "plan" || kind == "summary" {
 			if _, ok := artifact["content"].(string); !ok {

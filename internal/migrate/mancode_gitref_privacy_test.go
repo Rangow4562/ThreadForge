@@ -107,12 +107,84 @@ func TestMancodeGitRefV2PrivacySnapshotMismatchIsAVisibleRejection(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inspected.Summary.RecordsRejected != 1 {
-		t.Fatalf("mismatched privacy snapshot did not add one classified rejection: %#v", inspected.Summary)
+	if inspected.Summary.RecordsRejected != 2 {
+		t.Fatalf("mismatched privacy snapshot and covered actor were not both rejected: %#v", inspected.Summary)
 	}
 	for _, file := range inspected.Files {
-		if file.Path == mancodeGitRefVirtualPath && (file.Status != "partially_rejected" || file.RejectedCount != 1) {
+		if file.Path == mancodeGitRefVirtualPath && (file.Status != "partially_rejected" || file.RejectedCount != 2) {
 			t.Fatalf("mismatched privacy snapshot was not surfaced on the virtual source: %#v", file)
+		}
+	}
+}
+
+func TestMancodeGitRefV2ConfiguredSensitiveRuleRejectsProfileAtImport(t *testing.T) {
+	root, _, baseBytes := mancodeGitRefFixture(t, "git-ref", false)
+	manifestValue, err := decodeStrictMancodeGitRefJSON(baseBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := manifestValue.(map[string]any)
+	profiles := manifest["actorProfiles"].([]any)
+	profile := profiles[0].(map[string]any)
+	profile["displayName"] = "+86 138 1234 5678"
+	profileDigest, err := mancodeCanonicalDigest(profiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateActorProfileDigest := func(value any) {
+		receipt := value.(map[string]any)
+		entityDigests := receipt["entityDigests"].(map[string]any)
+		entityDigests["actorProfiles"] = profileDigest
+	}
+	for _, receipt := range manifest["receipts"].([]any) {
+		updateActorProfileDigest(receipt)
+	}
+	updateActorProfileDigest(manifest["lastMutation"])
+	policy := mancodePrivacyPolicyFixture()
+	policy["enabled"] = true
+	policy["enabledRuleIds"] = []any{"cn-mobile-phone"}
+	exclusions := mancodePrivacyExclusionsFixture()
+	policyDigest, err := mancodeGitRefPrivacyPolicyDigest(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest["schemaVersion"] = json.Number("2")
+	manifest["minReaderVersion"] = "0.6.5"
+	manifest["minWriterVersion"] = "0.6.5"
+	manifest["privacyPolicy"] = map[string]any{
+		"policy": policy, "exclusions": exclusions, "digest": policyDigest,
+	}
+	manifestBytes, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeMancodeGitRefCommit(t, root, manifestBytes)
+
+	inspected, err := InspectWithOptions(Mancode, root, InspectOptions{IncludeMancodeGitRef: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspected.Summary.RecordsRejected != 1 {
+		t.Fatalf("configured sensitive rule did not reject only the matching profile: %#v", inspected.Summary)
+	}
+	for _, file := range inspected.Files {
+		if file.Path == mancodeGitRefVirtualPath && file.RejectedCount != 1 {
+			t.Fatalf("configured-rule rejection was not visible in source coverage: %#v", file)
+		}
+	}
+	dataRoot := t.TempDir()
+	snapshot, err := CreateSnapshotWithOptions(Mancode, root, dataRoot, InspectOptions{IncludeMancodeGitRef: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dataRoot, "migrations", "snapshots", string(Mancode), snapshot.SourceFingerprint, "manifest.json")
+	records, err := ReadSnapshotRecords(manifestPath, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		if strings.Contains(string(record.Payload), "+86 138 1234 5678") {
+			t.Fatal("rejected source content leaked into the migration snapshot")
 		}
 	}
 }
@@ -150,20 +222,20 @@ func TestMancodeGitRefPrivacyExclusionBlocksMatchingBundleArtifact(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	privacyItems, blockedDigests, err := normalizeMancodeGitRefPrivacySnapshot(map[string]any{
+	privacyItems, privacyGuard, err := normalizeMancodeGitRefPrivacySnapshot(map[string]any{
 		"policy": policy, "exclusions": exclusions, "digest": policyDigest,
 	}, mancodeDecisionTestID("1"))
-	if err != nil || len(privacyItems) != 2 || !blockedDigests[excludedDigest] {
-		t.Fatalf("bound privacy exclusion was not retained: blocked=%v err=%v", blockedDigests, err)
+	if err != nil || len(privacyItems) != 2 || !privacyGuard.excludedDigests[excludedDigest] {
+		t.Fatalf("bound privacy exclusion was not retained: blocked=%v err=%v", privacyGuard.excludedDigests, err)
 	}
-	if _, err := normalizeMancodeGitRefTaskBundle(bundle, blockedDigests); err == nil || !strings.Contains(err.Error(), "privacy-excluded") {
+	if _, err := normalizeMancodeGitRefTaskBundle(bundle, privacyGuard); err == nil || !strings.Contains(err.Error(), "privacy-blocked or excluded") {
 		t.Fatalf("bundle carrying an excluded artifact was accepted: %v", err)
 	}
 	codeRefDigest, err := mancodeCanonicalDigest(bundle["codeRef"])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := normalizeMancodeGitRefTaskBundle(bundle, map[string]bool{codeRefDigest: true}); err == nil || !strings.Contains(err.Error(), "privacy-excluded") {
+	if _, err := normalizeMancodeGitRefTaskBundle(bundle, mancodeGitRefPrivacyGuard{excludedDigests: map[string]bool{codeRefDigest: true}}); err == nil || !strings.Contains(err.Error(), "privacy-blocked or excluded") {
 		t.Fatalf("bundle carrying an excluded code reference was accepted: %v", err)
 	}
 }

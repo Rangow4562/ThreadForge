@@ -100,6 +100,7 @@ var requiredFormats = map[string][]string{
 		"mancode.team-claim", "mancode.team-handoff", "mancode.team-head-fence",
 		"mancode.operation-audit", "mancode.decision-record", "mancode.project-glossary",
 		"mancode.privacy-exclusions", "mancode.privacy-policy", "mancode.project-policy",
+		"mancode.git-ref-team-authority",
 		"mancode.project-record", "mancode.workflow-checkpoint",
 		"mancode.workflow-metadata", "mancode.workflow-requirements", "mancode.workflow-review",
 		"mancode.workflow-verification", "mancode.workflow-plan", "mancode.workflow-document",

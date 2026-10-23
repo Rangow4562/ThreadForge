@@ -42,6 +42,7 @@ type Manifest struct {
 	Product           Product                            `json:"product"`
 	SourceRoot        string                             `json:"source_root"`
 	SourceFingerprint string                             `json:"source_fingerprint"`
+	MancodeGitRef     *MancodeGitRefSource               `json:"mancode_git_ref,omitempty"`
 	CreatedAt         string                             `json:"created_at"`
 	Files             []FileEntry                        `json:"files"`
 	CrossFileChecks   []migrationcoverage.CrossFileCheck `json:"cross_file_checks,omitempty"`
@@ -50,6 +51,7 @@ type Manifest struct {
 
 type FileEntry struct {
 	Path           string `json:"path"`
+	Virtual        bool   `json:"virtual,omitempty"`
 	SourceSHA256   string `json:"source_sha256"`
 	SourceBytes    int64  `json:"source_bytes"`
 	RecordCount    int    `json:"record_count"`
@@ -89,6 +91,7 @@ type Record struct {
 type scannedFile struct {
 	entry             FileEntry
 	records           []Record
+	sourceData        []byte
 	joinedCompanion   *FileEntry
 	metadataReadBytes int64
 	privacyPolicy     *mancodePrivacyPolicyBindingSource
@@ -117,7 +120,15 @@ func Inspect(product Product, sourceRoot string) (Manifest, error) {
 	return inspect(product, sourceRoot, nil)
 }
 
+func InspectWithOptions(product Product, sourceRoot string, options InspectOptions) (Manifest, error) {
+	return inspectWithOptions(product, sourceRoot, nil, options)
+}
+
 func inspect(product Product, sourceRoot string, scannedSink *[]scannedFile) (Manifest, error) {
+	return inspectWithOptions(product, sourceRoot, scannedSink, InspectOptions{})
+}
+
+func inspectWithOptions(product Product, sourceRoot string, scannedSink *[]scannedFile, options InspectOptions) (Manifest, error) {
 	if _, err := ParseProduct(string(product)); err != nil {
 		return Manifest{}, err
 	}
@@ -132,8 +143,21 @@ func inspect(product Product, sourceRoot string, scannedSink *[]scannedFile) (Ma
 	if !info.IsDir() {
 		return Manifest{}, errors.New("migration source root must be a directory")
 	}
+	var gitRefSource *MancodeGitRefSource
+	var gitRefData []byte
+	var gitRefWorkspaceID string
+	if options.IncludeMancodeGitRef {
+		if product != Mancode {
+			return Manifest{}, errors.New("--include-mancode-git-ref is valid only for Mancode")
+		}
+		source, data, workspaceID, err := readMancodeGitRef(root)
+		if err != nil {
+			return Manifest{}, err
+		}
+		gitRefSource, gitRefData, gitRefWorkspaceID = &source, data, workspaceID
+	}
 	manifest := Manifest{SchemaVersion: SchemaVersion, Product: product, SourceRoot: root,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Files: []FileEntry{}}
+		MancodeGitRef: gitRefSource, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Files: []FileEntry{}}
 	var scanned []scannedFile
 	var totalBytes, expandedTotalBytes int64
 	var rrsiTrialReadBytes int64
@@ -243,8 +267,8 @@ func inspect(product Product, sourceRoot string, scannedSink *[]scannedFile) (Ma
 				return err
 			}
 		}
-		file, expandedBytes, err := scanFile(product, root, rel, name, data,
-			maxTotalBytes-expandedTotalBytes, maxRRSITrialReadBytes-rrsiTrialReadBytes-int64(len(data)))
+		file, expandedBytes, err := scanFileWithMancodeGitRef(product, root, rel, name, data,
+			maxTotalBytes-expandedTotalBytes, maxRRSITrialReadBytes-rrsiTrialReadBytes-int64(len(data)), gitRefSource, gitRefWorkspaceID)
 		if product == RRSI && isRRSITrialMetadataPath(rel) {
 			rrsiTrialReadBytes += int64(len(data)) + file.metadataReadBytes
 			if rrsiTrialReadBytes > maxRRSITrialReadBytes {
@@ -294,6 +318,45 @@ func inspect(product Product, sourceRoot string, scannedSink *[]scannedFile) (Ma
 	if err != nil {
 		return Manifest{}, fmt.Errorf("scan migration source: %w", err)
 	}
+	if gitRefSource != nil {
+		virtualPath := filepath.Join(root, filepath.FromSlash(mancodeGitRefVirtualPath))
+		if _, err := os.Lstat(virtualPath); err == nil {
+			return Manifest{}, errors.New("migration source contains a reserved Mancode git-ref virtual path")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return Manifest{}, errors.New("reserved Mancode git-ref virtual path could not be checked safely")
+		}
+		if manifest.Summary.FilesScanned >= maxFiles || int64(len(gitRefData)) > maxTotalBytes-totalBytes {
+			return Manifest{}, errors.New("Mancode git-ref source exceeds migration source limits")
+		}
+		manifest.Summary.FilesScanned++
+		manifest.Summary.TotalSourceBytes += int64(len(gitRefData))
+		totalBytes += int64(len(gitRefData))
+		file, expandedBytes, err := scanFileWithMancodeGitRef(Mancode, root, mancodeGitRefVirtualPath, "", gitRefData,
+			maxTotalBytes-expandedTotalBytes, maxRRSITrialReadBytes-rrsiTrialReadBytes-int64(len(gitRefData)), gitRefSource, gitRefWorkspaceID)
+		if err != nil {
+			return Manifest{}, fmt.Errorf("inspect Mancode team ref manifest: %w", err)
+		}
+		if expandedBytes > maxTotalBytes-expandedTotalBytes {
+			return Manifest{}, errors.New("Mancode team ref manifest exceeds expanded-byte limits")
+		}
+		expandedTotalBytes += expandedBytes
+		file.entry.Virtual = true
+		file.sourceData = append([]byte(nil), gitRefData...)
+		manifest.Summary.RecordsFound += file.entry.RecordCount
+		manifest.Summary.RecordsImported += file.entry.ImportedCount
+		manifest.Summary.RecordsCredentialBlocked += file.entry.ExcludedCount
+		manifest.Summary.RecordsRejected += file.entry.RejectedCount
+		if manifest.Summary.RecordsFound > maxRecords {
+			return Manifest{}, errors.New("migration source exceeds 100000-record limit")
+		}
+		if file.entry.ImportedCount > 0 {
+			manifest.Summary.FilesReady++
+		}
+		if file.entry.Status == "unsupported" {
+			manifest.Summary.FilesUnsupported++
+		}
+		scanned = append(scanned, file)
+	}
 	if product == Mancode {
 		added, err := appendMancodeWorkflowAggregates(root, &scanned)
 		if err != nil {
@@ -311,7 +374,7 @@ func inspect(product Product, sourceRoot string, scannedSink *[]scannedFile) (Ma
 	for i := range scanned {
 		manifest.Files[i] = scanned[i].entry
 	}
-	manifest.SourceFingerprint = sourceFingerprint(manifest.Files, manifest.CrossFileChecks)
+	manifest.SourceFingerprint = sourceFingerprint(manifest.Files, manifest.CrossFileChecks, manifest.MancodeGitRef)
 	manifest.ID = string(product) + "-" + manifest.SourceFingerprint[:20]
 	if scannedSink != nil {
 		*scannedSink = append([]scannedFile(nil), scanned...)
@@ -320,8 +383,12 @@ func inspect(product Product, sourceRoot string, scannedSink *[]scannedFile) (Ma
 }
 
 func CreateSnapshot(product Product, sourceRoot, dataRoot string) (Manifest, error) {
+	return CreateSnapshotWithOptions(product, sourceRoot, dataRoot, InspectOptions{})
+}
+
+func CreateSnapshotWithOptions(product Product, sourceRoot, dataRoot string, options InspectOptions) (Manifest, error) {
 	var inspectedFiles []scannedFile
-	manifest, err := inspect(product, sourceRoot, &inspectedFiles)
+	manifest, err := inspectWithOptions(product, sourceRoot, &inspectedFiles, options)
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -362,6 +429,14 @@ func CreateSnapshot(product Product, sourceRoot, dataRoot string) (Manifest, err
 	}
 	var rrsiTrialReadBytes int64
 	var privateArtifacts []PrivateArtifactReference
+	gitRefWorkspaceID := ""
+	if manifest.MancodeGitRef != nil {
+		var mode string
+		gitRefWorkspaceID, mode, err = readMancodeGitRefProjectConfig(manifest.SourceRoot)
+		if err != nil || mode != "git-ref" {
+			return Manifest{}, errors.New("Mancode git-ref project binding changed during snapshot")
+		}
+	}
 	keepTemp := false
 	defer func() {
 		if !keepTemp {
@@ -375,7 +450,12 @@ func CreateSnapshot(product Product, sourceRoot, dataRoot string) (Manifest, err
 		}
 		fullPath := filepath.Join(manifest.SourceRoot, filepath.FromSlash(entry.Path))
 		var data []byte
-		if product == RRSI && isRRSITrialMetadataPath(entry.Path) {
+		if entry.Virtual {
+			data = inspectedByPath[entry.Path].sourceData
+			if int64(len(data)) != entry.SourceBytes || digest(data) != entry.SourceSHA256 {
+				return Manifest{}, fmt.Errorf("virtual migration source changed during snapshot: %s", entry.Path)
+			}
+		} else if product == RRSI && isRRSITrialMetadataPath(entry.Path) {
 			if entry.SourceBytes > maxRRSITrialFileBytes || entry.SourceBytes > maxRRSITrialReadBytes-rrsiTrialReadBytes {
 				return Manifest{}, errors.New("RRSI trial metadata exceeds bounded snapshot read limits")
 			}
@@ -394,8 +474,8 @@ func CreateSnapshot(product Product, sourceRoot, dataRoot string) (Manifest, err
 		if digest(data) != entry.SourceSHA256 {
 			return Manifest{}, fmt.Errorf("source changed during snapshot: %s; re-run inspect", entry.Path)
 		}
-		parsed, _, err := scanFile(product, manifest.SourceRoot, entry.Path, fullPath, data,
-			maxTotalBytes, maxRRSITrialReadBytes-rrsiTrialReadBytes)
+		parsed, _, err := scanFileWithMancodeGitRef(product, manifest.SourceRoot, entry.Path, fullPath, data,
+			maxTotalBytes, maxRRSITrialReadBytes-rrsiTrialReadBytes, manifest.MancodeGitRef, gitRefWorkspaceID)
 		if err != nil {
 			return Manifest{}, fmt.Errorf("re-read migration source %s: %w", entry.Path, err)
 		}
@@ -471,7 +551,7 @@ func CreateSnapshot(product Product, sourceRoot, dataRoot string) (Manifest, err
 			return Manifest{}, err
 		}
 	}
-	current, err := Inspect(product, manifest.SourceRoot)
+	current, err := InspectWithOptions(product, manifest.SourceRoot, options)
 	if err != nil || current.SourceFingerprint != manifest.SourceFingerprint {
 		return Manifest{}, errors.New("source changed during snapshot; re-run inspect and snapshot")
 	}
@@ -669,6 +749,7 @@ func knownRecordType(value string) bool {
 		"mancode_legacy_state", "mancode_project_profile", "mancode_legacy_config", "mancode_project_config", "mancode_schema_manifest",
 		"mancode_actor_identity", "mancode_actor_profile", "mancode_team_policy", "mancode_team_event",
 		"mancode_team_claim", "mancode_team_handoff", "mancode_team_head_fence", "mancode_operation_audit",
+		"mancode_git_ref_authority", "mancode_git_ref_receipt",
 		"mancode_progress_projection", "workflow_metadata", "workflow_requirements", "workflow_review",
 		"workflow_verification", "workflow_plan", "workflow_checkpoint",
 		"mancode_workflow_aggregate",
@@ -681,6 +762,15 @@ func knownRecordType(value string) bool {
 }
 
 func recordTypeMatchesSource(product Product, relative, recordType, sourceRoot string) bool {
+	if product == Mancode && relative == mancodeGitRefVirtualPath {
+		switch recordType {
+		case "mancode_actor_identity", "mancode_actor_profile", "mancode_team_claim", "mancode_team_handoff",
+			"mancode_team_head_fence", "mancode_git_ref_authority", "mancode_git_ref_receipt":
+			return true
+		default:
+			return false
+		}
+	}
 	if product == Beacon && recordType == "beacon_hook_log_summary" {
 		return isBeaconHookLogPath(relative, sourceRoot)
 	}
@@ -791,7 +881,7 @@ func VerifyManifest(manifest Manifest) error {
 	if !validDigest(manifest.SourceFingerprint) || len(manifest.Files) > maxFiles ||
 		migrationcoverage.ValidateCrossFileChecks(string(manifest.Product), manifest.CrossFileChecks) != nil ||
 		validateMancodePrivacyManifestChecks(manifest) != nil ||
-		manifest.SourceFingerprint != sourceFingerprint(manifest.Files, manifest.CrossFileChecks) {
+		manifest.SourceFingerprint != sourceFingerprint(manifest.Files, manifest.CrossFileChecks, manifest.MancodeGitRef) {
 		return errors.New("migration source fingerprint is invalid")
 	}
 	if manifest.ID != string(manifest.Product)+"-"+manifest.SourceFingerprint[:20] {
@@ -802,9 +892,18 @@ func VerifyManifest(manifest Manifest) error {
 	var totalBytes int64
 	seenPaths := make(map[string]bool, len(manifest.Files))
 	fileByPath := make(map[string]FileEntry, len(manifest.Files))
+	virtualGitRefFiles := 0
 	for _, file := range manifest.Files {
 		if !safeRelative(file.Path) || !validDigest(file.SourceSHA256) || seenPaths[file.Path] {
 			return fmt.Errorf("invalid source manifest entry %q", file.Path)
+		}
+		if file.Virtual {
+			if manifest.Product != Mancode || manifest.MancodeGitRef == nil || file.Path != mancodeGitRefVirtualPath {
+				return errors.New("migration manifest contains an unsupported virtual source file")
+			}
+			virtualGitRefFiles++
+		} else if file.Path == mancodeGitRefVirtualPath {
+			return errors.New("reserved Mancode git-ref virtual path is not marked virtual")
 		}
 		seenPaths[file.Path] = true
 		fileByPath[file.Path] = file
@@ -848,6 +947,21 @@ func VerifyManifest(manifest Manifest) error {
 			filesCredentialBlocked++
 		}
 	}
+	if manifest.MancodeGitRef != nil {
+		if manifest.Product != Mancode || manifest.MancodeGitRef.Ref != mancodeTeamGitRef ||
+			!mancodeGitRefObjectIDPattern.MatchString(manifest.MancodeGitRef.Commit) ||
+			!validDigest(manifest.MancodeGitRef.ManifestSHA256) || manifest.MancodeGitRef.ManifestBytes < 1 ||
+			manifest.MancodeGitRef.ManifestBytes > maxMancodeGitRefManifest || virtualGitRefFiles != 1 {
+			return errors.New("migration manifest Mancode git-ref binding is invalid")
+		}
+		virtual, ok := fileByPath[mancodeGitRefVirtualPath]
+		if !ok || !virtual.Virtual || virtual.SourceSHA256 != manifest.MancodeGitRef.ManifestSHA256 ||
+			virtual.SourceBytes != manifest.MancodeGitRef.ManifestBytes {
+			return errors.New("migration manifest Mancode git-ref blob does not match its source binding")
+		}
+	} else if virtualGitRefFiles != 0 {
+		return errors.New("migration manifest virtual source is missing its Mancode git-ref binding")
+	}
 	for _, file := range manifest.Files {
 		if file.Status != "joined_companion" {
 			continue
@@ -869,6 +983,11 @@ func VerifyManifest(manifest Manifest) error {
 }
 
 func scanFile(product Product, sourceRoot, relative, fullPath string, data []byte, expandedBudget, rrsiReadBudget int64) (scannedFile, int64, error) {
+	return scanFileWithMancodeGitRef(product, sourceRoot, relative, fullPath, data, expandedBudget, rrsiReadBudget, nil, "")
+}
+
+func scanFileWithMancodeGitRef(product Product, sourceRoot, relative, fullPath string, data []byte,
+	expandedBudget, rrsiReadBudget int64, gitRefSource *MancodeGitRefSource, gitRefWorkspaceID string) (scannedFile, int64, error) {
 	entry := FileEntry{Path: relative, SourceSHA256: digest(data), SourceBytes: int64(len(data)), Status: "ready"}
 	if product == Beacon && isBeaconLearningDBPath(relative) {
 		file, err := scanBeaconLearningDatabase(relative, fullPath, data)
@@ -1007,17 +1126,35 @@ func scanFile(product Product, sourceRoot, relative, fullPath string, data []byt
 	recordIndex := 0
 	unreconciledMancodeGitRef := false
 	for _, value := range items {
-		normalized, err := normalizeItems(product, sourceRoot, relative, value)
+		var normalized []normalizedItem
+		var err error
+		if product == Mancode && relative == mancodeGitRefVirtualPath {
+			if gitRefSource == nil || gitRefWorkspaceID == "" {
+				return scannedFile{}, expandedBytes, errors.New("Mancode git-ref manifest requires an explicitly bound local ref")
+			}
+			normalized, err = normalizeMancodeGitRefManifest(sourceRoot, value, *gitRefSource, gitRefWorkspaceID)
+		} else {
+			normalized, err = normalizeItems(product, sourceRoot, relative, value)
+		}
 		if err != nil {
 			file.entry.RecordCount++
 			recordIndex++
 			file.entry.RejectedCount++
 			continue
 		}
-		if product == Mancode && mancodeGitRefAuthorityNeedsReconciliation(sourceRoot, relative, value) {
+		if product == Mancode && gitRefSource == nil && mancodeGitRefAuthorityNeedsReconciliation(sourceRoot, relative, value) {
 			unreconciledMancodeGitRef = true
 		}
 		for _, item := range normalized {
+			if item.Rejected {
+				file.entry.RecordCount++
+				recordIndex++
+				file.entry.RejectedCount++
+				if file.entry.Issue == "" && item.Issue != "" {
+					file.entry.Issue = item.Issue
+				}
+				continue
+			}
 			if item.privacyPolicy != nil {
 				if file.privacyPolicy != nil {
 					return scannedFile{}, expandedBytes, errors.New("Mancode privacy policy source has multiple policy objects")
@@ -1076,6 +1213,8 @@ func finalizeScannedFile(file *scannedFile) {
 type normalizedItem struct {
 	Type              string
 	Payload           json.RawMessage
+	Rejected          bool
+	Issue             string
 	privacyPolicy     *mancodePrivacyPolicyBindingSource
 	privacyExclusions *mancodePrivacyExclusionsBindingSource
 }
@@ -1394,7 +1533,7 @@ func writePrivateFile(name string, data []byte) error {
 	return file.Close()
 }
 
-func sourceFingerprint(files []FileEntry, checks []migrationcoverage.CrossFileCheck) string {
+func sourceFingerprint(files []FileEntry, checks []migrationcoverage.CrossFileCheck, gitRefs ...*MancodeGitRefSource) string {
 	var digestInput strings.Builder
 	for _, file := range files {
 		digestInput.WriteString(file.Path)
@@ -1407,6 +1546,12 @@ func sourceFingerprint(files []FileEntry, checks []migrationcoverage.CrossFileCh
 	if len(checks) > 0 {
 		encoded, _ := json.Marshal(checks)
 		digestInput.WriteString("cross-file-checks-v1\x00")
+		digestInput.Write(encoded)
+		digestInput.WriteByte('\n')
+	}
+	if len(gitRefs) > 0 && gitRefs[0] != nil {
+		encoded, _ := json.Marshal(gitRefs[0])
+		digestInput.WriteString("mancode-git-ref-source-v1\x00")
 		digestInput.Write(encoded)
 		digestInput.WriteByte('\n')
 	}

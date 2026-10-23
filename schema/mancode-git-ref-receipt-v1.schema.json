@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-git-ref-receipt-v1.schema.json",
+  "title": "Threadforge Mancode git-ref mutation receipt migration summary v1",
+  "description": "Identity- and digest-value-reduced historical receipt for local human review only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "authority", "human_review_required", "execution_authorized", "kind",
+    "task_reference_present", "remote_revision", "ownership_epoch_present", "actor_profile_digest_present",
+    "ownership_fence_digest_present", "claim_digest_present", "handoff_digest_present",
+    "task_bundle_digest_present", "committed_at", "source_identity_omitted", "mutation_digest_values_omitted"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-git-ref-receipt.v1" },
+    "authority": { "const": "local_pending_review" },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "kind": { "enum": ["actor_profile", "coordination", "authority_establish", "authority_freeze", "authority_unfreeze", "authority_tombstone", "privacy_policy"] },
+    "task_reference_present": { "type": "boolean" },
+    "remote_revision": { "type": "integer", "minimum": 1 },
+    "ownership_epoch_present": { "type": "boolean" },
+    "actor_profile_digest_present": { "type": "boolean" },
+    "ownership_fence_digest_present": { "type": "boolean" },
+    "claim_digest_present": { "type": "boolean" },
+    "handoff_digest_present": { "type": "boolean" },
+    "task_bundle_digest_present": { "type": "boolean" },
+    "committed_at": { "type": "string", "format": "date-time" },
+    "source_identity_omitted": { "const": true },
+    "mutation_digest_values_omitted": { "const": true }
+  }
+}

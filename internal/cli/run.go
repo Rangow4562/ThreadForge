@@ -2608,11 +2608,12 @@ func inspectMigration(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	productName := fs.String("product", "", "legacy product: beacon, mancode, anyjev, or rrsi")
 	root := fs.String("root", "", "legacy data or project root")
+	includeMancodeGitRef := fs.Bool("include-mancode-git-ref", false, "read only the already-local refs/mancode/team authority; never fetch")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 0 || *productName == "" || *root == "" {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge migrate inspect --product <beacon|mancode|anyjev|rrsi> --root <path>")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge migrate inspect --product <beacon|mancode|anyjev|rrsi> --root <path> [--include-mancode-git-ref]")
 		return 2
 	}
 	product, err := migrate.ParseProduct(*productName)
@@ -2620,7 +2621,11 @@ func inspectMigration(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 2
 	}
-	manifest, err := migrate.Inspect(product, *root)
+	if *includeMancodeGitRef && product != migrate.Mancode {
+		_, _ = fmt.Fprintln(stderr, "--include-mancode-git-ref is valid only for Mancode")
+		return 2
+	}
+	manifest, err := migrate.InspectWithOptions(product, *root, migrate.InspectOptions{IncludeMancodeGitRef: *includeMancodeGitRef})
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
@@ -2633,11 +2638,12 @@ func snapshotMigration(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	productName := fs.String("product", "", "legacy product: beacon, mancode, anyjev, or rrsi")
 	root := fs.String("root", "", "legacy data or project root")
+	includeMancodeGitRef := fs.Bool("include-mancode-git-ref", false, "read only the already-local refs/mancode/team authority; never fetch")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 0 || *productName == "" || *root == "" {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge migrate snapshot --product <beacon|mancode|anyjev|rrsi> --root <path>")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge migrate snapshot --product <beacon|mancode|anyjev|rrsi> --root <path> [--include-mancode-git-ref]")
 		return 2
 	}
 	product, err := migrate.ParseProduct(*productName)
@@ -2645,12 +2651,16 @@ func snapshotMigration(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 2
 	}
+	if *includeMancodeGitRef && product != migrate.Mancode {
+		_, _ = fmt.Fprintln(stderr, "--include-mancode-git-ref is valid only for Mancode")
+		return 2
+	}
 	paths, err := appdata.Resolve("", "")
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	manifest, err := migrate.CreateSnapshot(product, *root, paths.Root)
+	manifest, err := migrate.CreateSnapshotWithOptions(product, *root, paths.Root, migrate.InspectOptions{IncludeMancodeGitRef: *includeMancodeGitRef})
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1

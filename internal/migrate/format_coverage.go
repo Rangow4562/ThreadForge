@@ -179,6 +179,9 @@ func migrationFormatID(product Product, sourceRoot, relative string) string {
 			return "beacon.endpoint-generic"
 		}
 	case Mancode:
+		if relative == mancodeGitRefVirtualPath {
+			return "mancode.git-ref-team-authority"
+		}
 		if isMancodePrivacyPolicyPath(relative) {
 			return "mancode.privacy-policy"
 		}

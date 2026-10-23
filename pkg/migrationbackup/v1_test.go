@@ -1,8 +1,12 @@
 package migrationbackup
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -89,6 +93,97 @@ func TestVerifySnapshotBindsCurrentSourceToSnapshot(t *testing.T) {
 	if report.Status != "mismatch" || report.SnapshotSourceMismatches != 1 || report.DifferentFiles != 0 {
 		t.Fatalf("backup identical to a changed source was accepted against the old snapshot: %#v", report)
 	}
+}
+
+func TestVerifySnapshotBindsMancodeGitRefInIndependentBackup(t *testing.T) {
+	sourceRoot, backupRoot := backupFixture(t)
+	workspaceID := "00000000000000000000000001"
+	writeBackupFixtureFile(t, filepath.Join(sourceRoot, ".mancode", "shared", "config.json"),
+		`{"schemaVersion":1,"revision":1,"workspaceId":"`+workspaceID+`","transport":{"mode":"git-ref","epoch":1},"lastOperationId":"`+workspaceID+`","updatedAt":"2026-10-08T12:00:00Z"}`)
+	for _, args := range [][]string{
+		{"init", "--quiet"}, {"config", "user.name", "Threadforge Test"},
+		{"config", "user.email", "threadforge-test@example.invalid"},
+	} {
+		runMigrationBackupGit(t, sourceRoot, "", args...)
+	}
+	refManifest, err := json.Marshal(map[string]any{
+		"schemaVersion": 1, "workspaceId": workspaceID, "schemaEpoch": workspaceID,
+		"minReaderVersion": "0.0.0", "minWriterVersion": "0.0.0", "transportEpoch": 1,
+		"configRevision": 1, "configDigest": "sha256:" + strings.Repeat("a", 64),
+		"authorityState": "active", "authorityFreeze": nil, "authorityTombstone": nil,
+		"revision": 1, "lastOperationId": workspaceID, "actorProfiles": []any{},
+		"ownershipFences": []any{}, "claims": []any{}, "handoffs": []any{},
+		"taskBundles": []any{}, "receipts": []any{map[string]any{
+			"schemaVersion": 1, "kind": "actor_profile", "operationId": workspaceID,
+			"actorId": "00000000000000000000000002", "taskRef": nil, "remoteRevision": 1, "ownershipEpoch": nil,
+			"entityDigests": map[string]any{
+				"actorProfiles": migrationBackupEmptyArrayDigest(), "ownershipFence": nil,
+				"claims": migrationBackupEmptyArrayDigest(), "handoffs": migrationBackupEmptyArrayDigest(), "taskBundle": nil,
+			},
+			"committedAt": "2026-10-08T12:00:00Z",
+		}},
+		"lastMutation": map[string]any{
+			"schemaVersion": 1, "kind": "actor_profile", "operationId": workspaceID,
+			"actorId": "00000000000000000000000002", "taskRef": nil, "remoteRevision": 1, "ownershipEpoch": nil,
+			"entityDigests": map[string]any{
+				"actorProfiles": migrationBackupEmptyArrayDigest(), "ownershipFence": nil,
+				"claims": migrationBackupEmptyArrayDigest(), "handoffs": migrationBackupEmptyArrayDigest(), "taskBundle": nil,
+			},
+			"committedAt": "2026-10-08T12:00:00Z",
+		},
+		"updatedAt": "2026-10-08T12:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob := runMigrationBackupGit(t, sourceRoot, string(refManifest), "hash-object", "-w", "--stdin")
+	tree := runMigrationBackupGit(t, sourceRoot, fmt.Sprintf("100644 blob %s\tmanifest.json\n", blob), "mktree")
+	commit := runMigrationBackupGit(t, sourceRoot, "", "commit-tree", tree, "-m", "fixture")
+	runMigrationBackupGit(t, sourceRoot, "", "update-ref", "refs/mancode/team", commit)
+
+	dataRoot := filepath.Join(t.TempDir(), "threadforge-data")
+	snapshot, err := migrate.CreateSnapshotWithOptions(migrate.Mancode, sourceRoot, dataRoot, migrate.InspectOptions{IncludeMancodeGitRef: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dataRoot, "migrations", "snapshots", string(migrate.Mancode), snapshot.SourceFingerprint, "manifest.json")
+	copyBackupFixtureTree(t, sourceRoot, backupRoot)
+	report, err := VerifySnapshot(manifestPath, backupRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Status != "verified" || report.SnapshotSourceMismatches != 0 || report.DifferentFiles != 0 {
+		t.Fatalf("independent backup with the captured local team ref did not verify: %#v", report)
+	}
+
+	refPath := filepath.Join(backupRoot, ".git", "refs", "mancode", "team")
+	if err := os.WriteFile(refPath, []byte(strings.Repeat("0", 40)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err = VerifySnapshot(manifestPath, backupRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Status != "mismatch" || report.SnapshotSourceMismatches == 0 {
+		t.Fatalf("backup with a missing Mancode team ref passed verification: %#v", report)
+	}
+}
+
+func migrationBackupEmptyArrayDigest() string {
+	digest := sha256.Sum256([]byte("[]"))
+	return "sha256:" + hex.EncodeToString(digest[:])
+}
+
+func runMigrationBackupGit(t *testing.T, root, stdin string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", root}, args...)...)
+	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1")
+	command.Stdin = strings.NewReader(stdin)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func TestVerifySnapshotDetectsNewEligibleSourceFiles(t *testing.T) {

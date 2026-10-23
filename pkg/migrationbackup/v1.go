@@ -92,9 +92,17 @@ func VerifySnapshot(manifestPath, backupRoot string) (Report, error) {
 	if err != nil {
 		return Report{}, fmt.Errorf("backup tree could not be read safely: %w", err)
 	}
-	currentInventory, err := migrate.Inspect(manifest.Product, sourcePath)
+	inspectOptions := migrate.InspectOptions{IncludeMancodeGitRef: manifest.MancodeGitRef != nil}
+	currentInventory, err := migrate.InspectWithOptions(manifest.Product, sourcePath, inspectOptions)
 	if err != nil {
 		return Report{}, errors.New("migration source inventory could not be revalidated")
+	}
+	externalSourceMismatches := 0
+	if manifest.MancodeGitRef != nil {
+		backupInventory, backupInspectErr := migrate.InspectWithOptions(manifest.Product, backupPath, inspectOptions)
+		if backupInspectErr != nil || backupInventory.SourceFingerprint != manifest.SourceFingerprint {
+			externalSourceMismatches = 1
+		}
 	}
 	sourceSecond, err := scanTree(sourcePath)
 	if err != nil || !sameTree(sourceFirst, sourceSecond) {
@@ -106,7 +114,7 @@ func VerifySnapshot(manifestPath, backupRoot string) (Report, error) {
 	}
 
 	different := differentFileCount(sourceSecond, backupSecond)
-	snapshotMismatches := snapshotSourceMismatchCount(sourceSecond, manifest, currentInventory)
+	snapshotMismatches := snapshotSourceMismatchCount(sourceSecond, manifest, currentInventory) + externalSourceMismatches
 	shared := sharedFileCount(sourceSecond, backupSecond)
 	status := "mismatch"
 	if different == 0 && snapshotMismatches == 0 && shared == 0 &&
@@ -378,6 +386,9 @@ func snapshotSourceMismatchCount(source treeState, snapshot, current migrate.Man
 		if !oldOK || !currentOK || !sameSourceEntry(old, currentEntry) {
 			mismatched[path] = struct{}{}
 		}
+		if (oldOK && old.Virtual) || (currentOK && currentEntry.Virtual) {
+			continue
+		}
 		expected, expectedOK := currentEntry, currentOK
 		if !expectedOK {
 			expected, expectedOK = old, oldOK
@@ -396,7 +407,7 @@ func snapshotSourceMismatchCount(source treeState, snapshot, current migrate.Man
 }
 
 func sameSourceEntry(left, right migrate.FileEntry) bool {
-	return left.Path == right.Path && left.SourceSHA256 == right.SourceSHA256 && left.SourceBytes == right.SourceBytes &&
+	return left.Path == right.Path && left.Virtual == right.Virtual && left.SourceSHA256 == right.SourceSHA256 && left.SourceBytes == right.SourceBytes &&
 		left.RecordCount == right.RecordCount && left.ImportedCount == right.ImportedCount &&
 		left.ExcludedCount == right.ExcludedCount && left.RejectedCount == right.RejectedCount &&
 		left.Status == right.Status && left.Issue == right.Issue && left.JoinedInto == right.JoinedInto

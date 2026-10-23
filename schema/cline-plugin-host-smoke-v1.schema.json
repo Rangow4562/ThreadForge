@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/cline-plugin-host-smoke-v1.schema.json",
+  "title": "Threadforge Cline CLI Plugin Host Smoke v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "host",
+    "host_version",
+    "package_install_status",
+    "package_entry_import_status",
+    "installed_adapter_callback_status",
+    "host_callback_dispatch_status",
+    "mcp_sync_failure_count",
+    "model_invocations",
+    "raw_prompt_retained",
+    "workspace_path_retained",
+    "task_id_retained"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.cline-plugin-host-smoke.v1" },
+    "host": { "const": "cline-cli" },
+    "host_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },
+    "package_install_status": { "const": "passed" },
+    "package_entry_import_status": { "const": "passed" },
+    "installed_adapter_callback_status": { "const": "passed" },
+    "host_callback_dispatch_status": { "const": "not_exercised" },
+    "mcp_sync_failure_count": { "const": 0 },
+    "model_invocations": { "const": 0 },
+    "raw_prompt_retained": { "const": false },
+    "workspace_path_retained": { "const": false },
+    "task_id_retained": { "const": false }
+  }
+}

@@ -3656,3 +3656,31 @@ def test_task_handoff_schemas_bind_owner_claim_checkpoint_and_advisory_status():
             "expected_revision": 2,
             "handoff": {**handoff, "transferred_task_revision": None},
         })
+
+
+def test_cline_plugin_host_smoke_separates_installed_import_from_host_dispatch():
+    schema = json.loads((SCHEMA_DIRECTORY / "cline-plugin-host-smoke-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    report = {
+        "schema_version": "threadforge.cline-plugin-host-smoke.v1",
+        "host": "cline-cli",
+        "host_version": "3.0.73",
+        "package_install_status": "passed",
+        "package_entry_import_status": "passed",
+        "installed_adapter_callback_status": "passed",
+        "host_callback_dispatch_status": "not_exercised",
+        "mcp_sync_failure_count": 0,
+        "model_invocations": 0,
+        "raw_prompt_retained": False,
+        "workspace_path_retained": False,
+        "task_id_retained": False,
+    }
+    validator.validate(report)
+    for invalid in (
+        {**report, "host_callback_dispatch_status": "passed"},
+        {**report, "model_invocations": 1},
+        {**report, "private_workspace_path": "C:/private/project"},
+        {**report, "mcp_sync_failure_count": 1},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)

@@ -1,6 +1,6 @@
 # Cline adapter and project skills
 
-Threadforge has a partial, observational adapter for Cline's plugin callback shape. The adapter exposes `createThreadforgeClinePlugin()` from `@threadforge/adapter-contracts/cline-plugin` and maps `beforeRun`, `beforeTool`, `afterTool`, and `afterRun` callbacks. `cline plugin install|update|uninstall|status` manages one owned auto-discovery wrapper in the selected user or project plugin directory. The wrapper imports the adapter from its current absolute local source path; keep the Threadforge checkout in place and rerun `update` after moving the checkout or changing the adapter. This is a local development registration, not a self-contained or signed distributable bundle. The installer does not edit Cline settings, MCP configuration, or other plugins. A separate `cline sessions status|sync` poller reads local task JSON, session-message JSON, Kanban state, and the VS Code extension task store; see [Cline local session history](cline-history.md).
+Threadforge has a partial, observational adapter for Cline CLI/SDK plugin callbacks. The adapter exposes `createThreadforgeClinePlugin()` from `@threadforge/adapter-contracts/cline-plugin` and maps `beforeRun`, `beforeTool`, `afterTool`, and `afterRun` callbacks. The Threadforge `cline plugin install|update|uninstall|status` adapter command manages one local-development wrapper in the selected user or project discovery directory; that wrapper imports the checkout by absolute file URL and is not the portable installation path. The manager does not edit Cline settings, MCP configuration, or neighboring plugins. A separate `cline sessions status|sync` poller reads local task JSON, session-message JSON, Kanban state, and the VS Code extension task store; see [Cline local session history](cline-history.md).
 
 Install for the current user (defaults to `~/.cline`, overridden by `CLINE_HOME` or `--cline-dir`):
 
@@ -12,6 +12,24 @@ npm run adapter -- cline plugin uninstall [--cline-dir <absolute-path>]
 ```
 
 For project scope, supply `--scope project --project-root <absolute-path>`. The managed entry is `.cline/plugins/threadforge.ts`; user scope installs to `<cline-dir>/plugins/threadforge.ts`. The installer records a content digest in its ownership marker, refuses unmanaged collisions or local edits, and changes only this file. Restart Cline after registration changes. Installation does not grant the callbacks authorization: all captured signals remain observational and are delivered only to loopback intake.
+
+## Portable Cline CLI package
+
+For a self-contained project plugin, build a new package directory from the current checkout and let Cline CLI install it. The builder transpiles the adapter and its local event helper into `index.js` and `emit.js`, rewrites the internal import to the package-local JavaScript file, records source/bundle SHA-256 digests, and includes `LICENSE`, `NOTICE`, and `THIRD_PARTY.md`. It refuses an existing output directory and has no external runtime package dependency.
+
+```powershell
+$bundle = Join-Path $env:TEMP ("threadforge-cline-plugin-" + [guid]::NewGuid())
+npm.cmd --prefix adapters run build:cline-plugin -- --output $bundle
+cline plugin install --cwd <project-root> $bundle
+```
+
+The optional installed-host smoke takes an exact Cline CLI version and absolute executable path. It installs into a disposable project with isolated Cline config/data directories, imports the installed entry, and exercises the observational callback with a stubbed local fetch; it makes no model request. It deliberately reports `host_callback_dispatch_status=not_exercised`: Cline's agent loop itself does not run in this smoke.
+
+```powershell
+npm.cmd --prefix adapters run test:cline-plugin-host -- --cline-path <absolute-cline-exe> --version <exact-version>
+```
+
+The generated package is unsigned and is not a public registry release. Review its manifest, hashes, and notices before installing. Use either the native portable package or the Threadforge checkout wrapper in a given scope, not both, to avoid duplicate callbacks. The project install and manual relocated-entry callback smoke were verified against Cline CLI `3.0.73` on October 23, 2026; this does not establish agent-triggered hook dispatch, model behavior, telemetry receiver availability, VS Code/JetBrains plugin support, or cross-harness task efficacy.
 
 ## Cline MCP server registration
 
@@ -28,7 +46,7 @@ Task/call identifiers and workspace/file paths are SHA-256 hashed. Prompt, tool 
 
 ## Integration limits
 
-The plugin API contract is not pinned against an installed Cline release in this environment. Fixture tests validate wrapper ownership and CLI lifecycle but do not prove Cline auto-discovery, module loading, or callback compatibility. This module does not claim support for the VS Code extension or JetBrains plugin surfaces. Verify the loader and callback types in the intended Cline SDK/CLI environment before enabling installation. On October 9, 2026, read-only history status parsed 2 records from the local Cline roots with no errors; no events were sent and no cursor was written. The Cline executable is absent, so this does not verify the live plugin callback, Cline version, or task outcomes. Self-contained packaging/signing, version-pinned host tests, full source-format reconciliation, and cross-harness retrieval remain open release gates.
+The installed smoke verifies one selected Cline CLI package-install path and can import the relocated module, but it does not run an agent turn or observe Cline invoking a hook. The adapter does not claim support for the VS Code extension or JetBrains plugin surfaces. On October 9, 2026, read-only history status parsed 2 records from the local Cline roots with no errors; no events were sent and no cursor was written. Full source-format reconciliation, signed/public distribution, live callback invocation, and cross-harness retrieval remain open release gates.
 
 ## Install an approved procedure as a project skill
 

@@ -95,7 +95,8 @@
     "./copilot-prompt-config": "./src/copilot-prompt-config.ts",
     "./cli": "./src/cli.ts",
     "./genai-sdk": "./src/genai-sdk.ts",
-    "./claude-agent-sdk": "./src/claude-agent-sdk.ts"
+    "./claude-agent-sdk": "./src/claude-agent-sdk.ts",
+    "./vercel-ai-sdk": "./src/vercel-ai-sdk.ts"
   },
   "scripts": {
     "adapter": "node --experimental-strip-types src/cli.ts",

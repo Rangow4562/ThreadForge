@@ -165,3 +165,46 @@ func TestMancodeLegacyVerificationRejectsInvalidStatusBindingsAndShapes(t *testi
 		}
 	}
 }
+
+func TestMancodeLegacyVerificationRequiresSafeRelativeEvidencePaths(t *testing.T) {
+	taskID := "20261024-evidence-paths"
+	path := filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, "verification-ledger.json"))
+	for _, unsafePath := range []string{
+		"",
+		"/absolute/evidence.txt",
+		`\\server\share\evidence.txt`,
+		`C:\private\evidence.txt`,
+		"https://example.invalid/evidence.txt",
+		"../outside.txt",
+		"reports/../outside.txt",
+		"reports//evidence.txt",
+		"reports/./evidence.txt",
+		"reports/evidence.txt/",
+		"reports/\x00evidence.txt",
+		strings.Repeat("x", maxMancodeLegacyEvidenceFilePath+1),
+	} {
+		value := legacyMancodeVerificationFixture()
+		checks := value["checks"].([]any)
+		automated := checks[0].(map[string]any)["automated"].(map[string]any)
+		automated["evidenceFile"] = unsafePath
+		if _, handled, err := normalizeMancodeItems("", path, value); !handled || err == nil {
+			t.Errorf("unsafe evidence path %q was accepted: handled=%v err=%v", unsafePath, handled, err)
+		}
+	}
+
+	value := legacyMancodeVerificationFixture()
+	checks := value["checks"].([]any)
+	automated := checks[0].(map[string]any)["automated"].(map[string]any)
+	automated["evidenceFile"] = `reports\private-output.txt`
+	items, handled, err := normalizeMancodeItems("", path, value)
+	if err != nil || !handled || len(items) != 1 {
+		t.Fatalf("safe relative evidence path using Windows separators was rejected: handled=%v err=%v", handled, err)
+	}
+	var projection mancodeLegacyVerificationProjection
+	if err := json.Unmarshal(items[0].Payload, &projection); err != nil {
+		t.Fatal(err)
+	}
+	if !projection.Checks[0].Automated.EvidenceFilePresent || strings.Contains(string(items[0].Payload), "private-output.txt") {
+		t.Fatalf("evidence reference presence or path omission is incorrect: %#v", projection)
+	}
+}

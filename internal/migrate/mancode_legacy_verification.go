@@ -3,6 +3,7 @@ package migrate
 import (
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -15,6 +16,8 @@ const (
 	maxMancodeLegacyVerificationCommand = 4 << 10
 	maxMancodeLegacyEvidenceFilePath    = 1 << 10
 )
+
+var mancodeLegacyArtifactPathScheme = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:`)
 
 type mancodeLegacyVerificationProjection struct {
 	SchemaVersion                string                           `json:"schema_version"`
@@ -186,7 +189,7 @@ func parseMancodeLegacyVerificationEvidence(check map[string]any, component stri
 	evidenceFilePresent := false
 	if rawPath, exists := evidence["evidenceFile"]; exists {
 		filePath, valid := rawPath.(string)
-		if !valid || !mancodeBoundedString(filePath, 1, maxMancodeLegacyEvidenceFilePath) || strings.TrimSpace(filePath) == "" {
+		if !valid || !mancodeLegacySafeArtifactPath(filePath, maxMancodeLegacyEvidenceFilePath) {
 			return nil, false
 		}
 		evidenceFilePresent = true
@@ -195,6 +198,25 @@ func parseMancodeLegacyVerificationEvidence(check map[string]any, component stri
 		Status: status, EvidencePresent: true, UpdatedAtPresent: true,
 		CommandPresent: commandPresent, ExitCode: exitCode, EvidenceFilePresent: evidenceFilePresent,
 	}, true
+}
+
+// Mancode artifact references are repository-relative paths. Match its
+// assertSafeSharedRelativePath contract while retaining no raw path in the
+// imported projection.
+func mancodeLegacySafeArtifactPath(value string, maxBytes int) bool {
+	if !mancodeBoundedString(value, 1, maxBytes) || strings.TrimSpace(value) == "" || strings.ContainsRune(value, '\x00') {
+		return false
+	}
+	normalized := strings.ReplaceAll(value, `\`, "/")
+	if strings.HasPrefix(normalized, "/") || mancodeLegacyArtifactPathScheme.MatchString(value) {
+		return false
+	}
+	for _, segment := range strings.Split(normalized, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func mancodeLegacyDerivedVerificationStatus(checks []mancodeLegacyVerificationCheck) string {

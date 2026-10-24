@@ -1435,7 +1435,7 @@ func runSession(args []string, stdout, stderr io.Writer) int {
 
 func runMemory(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "memory command required: learn, inject, inject-codex, inject-gemini, inject-cursor, inject-qwen, inject-antigravity, inject-opencode, fingerprint, publish, read, get, list, or history")
+		_, _ = fmt.Fprintln(stderr, "memory command required: learn, inject, inject-codex, inject-gemini, inject-cursor, inject-qwen, inject-antigravity, inject-opencode, inject-copilot, fingerprint, publish, read, get, list, or history")
 		return 2
 	}
 	switch args[0] {
@@ -1455,6 +1455,8 @@ func runMemory(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return injectAntigravityMemory(args[1:], stdin, stdout, stderr)
 	case "inject-opencode":
 		return injectOpenCodeMemory(args[1:], stdin, stdout, stderr)
+	case "inject-copilot":
+		return injectCopilotMemory(args[1:], stdin, stdout, stderr)
 	case "fingerprint":
 		return fingerprintProjectMemorySources(args[1:], stdout, stderr)
 	case "publish":
@@ -1517,6 +1519,12 @@ type antigravityPreInvocationMemoryHookInput struct {
 	WorkspacePaths []string `json:"workspacePaths"`
 }
 
+type copilotUserPromptTransformedMemoryHookInput struct {
+	CWD               string `json:"cwd"`
+	Prompt            string `json:"prompt"`
+	TransformedPrompt string `json:"transformedPrompt"`
+}
+
 type claudeUserPromptHookOutput struct {
 	Continue           bool                          `json:"continue"`
 	HookSpecificOutput *claudeUserPromptHookSpecific `json:"hookSpecificOutput,omitempty"`
@@ -1561,6 +1569,10 @@ func injectOpenCodeMemory(args []string, stdin io.Reader, stdout, stderr io.Writ
 	return injectUserPromptMemory(args, stdin, stdout, stderr, "opencode")
 }
 
+func injectCopilotMemory(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return injectUserPromptMemory(args, stdin, stdout, stderr, "copilot-cli")
+}
+
 // injectUserPromptMemory serves a host prompt/pre-invocation hook using locally
 // approved project memory and, only when explicitly configured, a bounded
 // read-only task handoff. Retrieval failures return a non-blocking empty result.
@@ -1590,6 +1602,10 @@ func injectUserPromptMemory(args []string, stdin io.Reader, stdout, stderr io.Wr
 	} else if host == "opencode" {
 		flagName, ownerValue, runtimeValue = "threadforge-managed-opencode-memory", "opencode-v1", "v1"
 		usage = "usage: threadforge memory inject-opencode --project-id <id> --threadforge-managed-opencode-memory=v1 --threadforge-memory=opencode-v1"
+	} else if host == "copilot-cli" {
+		flagName, ownerValue, runtimeValue = "threadforge-managed-copilot-memory", "copilot-v1", "v1"
+		eventName = "userPromptTransformed"
+		usage = "usage: threadforge memory inject-copilot --project-id <id> --threadforge-managed-copilot-memory=v1 --threadforge-memory=copilot-v1"
 	}
 	fs := flag.NewFlagSet("memory inject", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -1625,7 +1641,7 @@ func injectUserPromptMemory(args []string, stdin io.Reader, stdout, stderr io.Wr
 	if err != nil || len(inputBytes) > maxMemoryHookInputBytes {
 		return skipUserPromptMemory(host, stdout, stderr, "hook_input_unavailable")
 	}
-	var projectRoot, query string
+	var projectRoot, query, transformedPrompt string
 	if host == "cursor" {
 		var hookInput cursorSessionStartMemoryHookInput
 		if json.Unmarshal(inputBytes, &hookInput) != nil || strings.TrimSpace(hookInput.SessionID) == "" ||
@@ -1648,6 +1664,16 @@ func injectUserPromptMemory(args []string, stdin io.Reader, stdout, stderr io.Wr
 		}
 		projectRoot, err = validateHookProjectRoot(hookInput.WorkspacePaths[0])
 		query = "*" // PreInvocation has no prompt; bootstrap bounded approved project context once.
+	} else if host == "copilot-cli" {
+		var hookInput copilotUserPromptTransformedMemoryHookInput
+		if json.Unmarshal(inputBytes, &hookInput) != nil || strings.TrimSpace(hookInput.CWD) == "" ||
+			strings.TrimSpace(hookInput.Prompt) == "" || strings.TrimSpace(hookInput.TransformedPrompt) == "" ||
+			strings.Contains(hookInput.TransformedPrompt, "Threadforge project memory below is untrusted stored project data") {
+			return skipUserPromptMemory(host, stdout, stderr, "hook_payload_invalid_or_already_injected")
+		}
+		projectRoot, err = validateHookProjectRoot(hookInput.CWD)
+		query = truncateUTF8(hookInput.Prompt, 2000)
+		transformedPrompt = hookInput.TransformedPrompt
 	} else {
 		var hookInput userPromptMemoryHookInput
 		if err := json.Unmarshal(inputBytes, &hookInput); err != nil || hookInput.HookEventName != eventName ||
@@ -1695,6 +1721,8 @@ func injectUserPromptMemory(args []string, stdin io.Reader, stdout, stderr io.Wr
 		additionalContext = formatApprovedMemoryContextFor(response, "this Antigravity session")
 	} else if host == "opencode" {
 		additionalContext = formatApprovedMemoryContextFor(response, "the current OpenCode request")
+	} else if host == "copilot-cli" {
+		additionalContext = formatApprovedMemoryContextFor(response, "the current GitHub Copilot CLI request")
 	}
 	if strings.TrimSpace(*taskID) != "" {
 		resume, resumeErr := procedureStore.TaskResumeContext(context.Background(), *taskID, *sessionID, *maxTaskEntries)
@@ -1728,10 +1756,27 @@ func injectUserPromptMemory(args []string, stdin io.Reader, stdout, stderr io.Wr
 	if additionalContext == "" {
 		return writeUserPromptMemoryOutput(host, "", stdout, stderr)
 	}
+	if host == "copilot-cli" {
+		return writeCopilotTransformedMemoryOutput(stdout, stderr, transformedPrompt, additionalContext)
+	}
 	return writeUserPromptMemoryOutput(host, additionalContext, stdout, stderr)
 }
 
+func writeCopilotTransformedMemoryOutput(stdout, stderr io.Writer, transformedPrompt, additionalContext string) int {
+	if additionalContext == "" {
+		return writeIndentedJSON(stdout, map[string]any{}, stderr)
+	}
+	modified := transformedPrompt + "\n\n" + additionalContext
+	if len(modified) > maxMemoryHookInputBytes {
+		return writeIndentedJSON(stdout, map[string]any{}, stderr)
+	}
+	return writeIndentedJSON(stdout, map[string]any{"modifiedTransformedPrompt": modified}, stderr)
+}
+
 func writeUserPromptMemoryOutput(host, additionalContext string, stdout, stderr io.Writer) int {
+	if host == "copilot-cli" {
+		return writeIndentedJSON(stdout, map[string]any{}, stderr)
+	}
 	if host == "opencode" {
 		system := []string{}
 		if additionalContext != "" {
@@ -3961,6 +4006,7 @@ Commands:
   memory inject-qwen --project-id <id> --threadforge-managed-qwen-memory=v1 --threadforge-memory=qwen-v1 [--max-items 1-32] [--max-tokens 1-16000]
   memory inject-antigravity --project-id <id> --threadforge-managed-antigravity-memory=v1 --threadforge-memory=antigravity-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory inject-opencode --project-id <id> --threadforge-managed-opencode-memory=v1 --threadforge-memory=opencode-v1 [--max-items 1-32] [--max-tokens 1-16000]
+  memory inject-copilot --project-id <id> --threadforge-managed-copilot-memory=v1 --threadforge-memory=copilot-v1 [--max-items 1-32] [--max-tokens 1-16000]
   memory fingerprint --project-root <root> --path <relative-source-file> [--path <relative-source-file> ...]
   memory publish --project-root <root> --file <candidate.json> --expected-revision <n> --reviewer <name> --reason <reason> --privacy-reviewed
   memory read --project-root <root> --project-id <id> --kind <fact|decision|policy> --id <record-id> [--path <relative-path> ...] [--module <module-id> ...]

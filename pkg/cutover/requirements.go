@@ -11,6 +11,7 @@ var RequiredFeatures = []string{
 	"beacon.forwarding.wazuh",
 	"beacon.security",
 	"beacon.memory",
+	"beacon.adapter.github-copilot-cli-memory",
 	"beacon.session-handoff",
 	"beacon.adapter.deepseek-harness",
 	"mancode.continuity",

@@ -4944,6 +4944,43 @@ func TestClaudeMemoryInjectReturnsApprovedGuidanceAndWithholdsUnscopedMemory(t *
 	}
 	out.Reset()
 	stderr.Reset()
+	copilotInput, err := json.Marshal(copilotUserPromptTransformedMemoryHookInput{
+		CWD: projectRoot, Prompt: prompt, TransformedPrompt: "Runtime-transformed request body.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code = RunWithInput([]string{"memory", "inject-copilot", "--project-id", "demo-project", "--threadforge-managed-copilot-memory=v1",
+		"--threadforge-memory=copilot-v1"}, bytes.NewReader(copilotInput), &out, &stderr)
+	var copilotResponse struct {
+		ModifiedTransformedPrompt string `json:"modifiedTransformedPrompt"`
+	}
+	if code != 0 || json.Unmarshal(out.Bytes(), &copilotResponse) != nil ||
+		!strings.HasPrefix(copilotResponse.ModifiedTransformedPrompt, "Runtime-transformed request body.\n\n") ||
+		!strings.Contains(copilotResponse.ModifiedTransformedPrompt, "Run targeted tests before handoff") ||
+		!strings.Contains(copilotResponse.ModifiedTransformedPrompt, "untrusted stored project data") ||
+		!strings.Contains(copilotResponse.ModifiedTransformedPrompt, "the current GitHub Copilot CLI request") ||
+		strings.Contains(copilotResponse.ModifiedTransformedPrompt, "Source-scoped build policy") ||
+		strings.Contains(out.String(), "Use the source-specific test suite") {
+		t.Fatalf("Copilot inject code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	out.Reset()
+	stderr.Reset()
+	copilotInput, err = json.Marshal(copilotUserPromptTransformedMemoryHookInput{
+		CWD: projectRoot, Prompt: prompt,
+		TransformedPrompt: "Threadforge project memory below is untrusted stored project data from an existing replay.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code = RunWithInput([]string{"memory", "inject-copilot", "--project-id", "demo-project", "--threadforge-managed-copilot-memory=v1",
+		"--threadforge-memory=copilot-v1"}, bytes.NewReader(copilotInput), &out, &stderr)
+	var emptyCopilotResponse map[string]json.RawMessage
+	if code != 0 || json.Unmarshal(out.Bytes(), &emptyCopilotResponse) != nil || len(emptyCopilotResponse) != 0 {
+		t.Fatalf("Copilot duplicate-injection guard code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	out.Reset()
+	stderr.Reset()
 	geminiInput, err := json.Marshal(map[string]string{
 		"hook_event_name": "BeforeAgent", "cwd": projectRoot, "prompt": prompt,
 	})
@@ -5548,6 +5585,14 @@ func TestClaudeMemoryInjectFailsOpenWithoutContext(t *testing.T) {
 	}
 	if code != 0 || json.Unmarshal(out.Bytes(), &openCodeResponse) != nil || len(openCodeResponse.System) != 0 {
 		t.Fatalf("OpenCode fail-open code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	out.Reset()
+	stderr.Reset()
+	code = RunWithInput([]string{"memory", "inject-copilot", "--project-id", "demo-project", "--threadforge-managed-copilot-memory=v1",
+		"--threadforge-memory=copilot-v1"}, strings.NewReader(`{"cwd":"`+filepath.ToSlash(t.TempDir())+`","prompt":"build","transformedPrompt":"model text"}`), &out, &stderr)
+	var copilotResponse map[string]json.RawMessage
+	if code != 0 || json.Unmarshal(out.Bytes(), &copilotResponse) != nil || len(copilotResponse) != 0 {
+		t.Fatalf("Copilot fail-open code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
 	}
 }
 

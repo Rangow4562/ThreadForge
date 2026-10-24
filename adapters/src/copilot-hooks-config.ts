@@ -6,7 +6,11 @@ import path from 'node:path';
 export const copilotPlanGateManagedMarker = '--threadforge-plan-gate=copilot-v1';
 const copilotPlanGateRunnerMarker = '--threadforge-managed-copilot-plan-gate=v1';
 const configName = 'threadforge-plan-gate.json';
+export const copilotMemoryManagedMarker = '--threadforge-memory=copilot-v1';
+const copilotMemoryRunnerMarker = '--threadforge-managed-copilot-memory=v1';
+const memoryConfigName = 'threadforge-memory.json';
 const lockName = '.threadforge-plan-gate.lock';
+const memoryLockName = '.threadforge-memory.lock';
 const maxConfigBytes = 2 << 20;
 const planGateMatcher = '^(create|edit|apply_patch|str_replace_editor)$';
 
@@ -82,19 +86,75 @@ export async function removeCopilotProjectPlanGateHook(projectRoot: string): Pro
   });
 }
 
+/** Installs approved-memory retrieval on Copilot CLI's prompt-transform event. */
+export async function installCopilotProjectMemoryHook(options: {
+  bashCommand: string;
+  powershellCommand: string;
+  projectRoot: string;
+}): Promise<CopilotPlanGateChange> {
+  validateCommand(options.bashCommand, copilotMemoryRunnerMarker, copilotMemoryManagedMarker);
+  validateCommand(options.powershellCommand, copilotMemoryRunnerMarker, copilotMemoryManagedMarker);
+  const filePath = await hooksConfigPath(options.projectRoot, true, memoryConfigName);
+  if (!filePath) throw new Error('unable to resolve Copilot memory hooks path');
+  return withLock(filePath, async () => {
+    const read = await readConfig(filePath);
+    const settings = read.value;
+    if (settings.version !== undefined && settings.version !== 1) {
+      throw new Error('Copilot memory hooks file has an unsupported version; no changes were made');
+    }
+    const before = JSON.stringify(canonicalize(settings));
+    const hooks = readHookMap(settings);
+    const cleaned = removeManagedHooks(hooks, copilotMemoryManagedMarker);
+    const nextHooks: JsonObject = { ...cleaned.value };
+    const current = readEventHooks(nextHooks, 'userPromptTransformed');
+    nextHooks.userPromptTransformed = [...current, {
+      type: 'command',
+      bash: options.bashCommand,
+      powershell: options.powershellCommand,
+      timeoutSec: 3,
+    }];
+    settings.version = 1;
+    settings.hooks = nextHooks;
+    if (before === JSON.stringify(canonicalize(settings))) return 'unchanged';
+    await atomicWrite(filePath, read.snapshot, settings);
+    return cleaned.found ? 'updated' : 'installed';
+  }, memoryLockName);
+}
+
+/** Removes only Threadforge-owned Copilot prompt-memory hooks. */
+export async function removeCopilotProjectMemoryHook(projectRoot: string): Promise<CopilotPlanGateChange> {
+  const filePath = await hooksConfigPath(projectRoot, false, memoryConfigName);
+  if (!filePath) return 'absent';
+  return withLock(filePath, async () => {
+    const read = await readConfig(filePath);
+    const hooks = readHookMap(read.value);
+    const cleaned = removeManagedHooks(hooks, copilotMemoryManagedMarker);
+    if (!cleaned.found) return 'absent';
+    const next = { ...read.value };
+    if (Object.keys(cleaned.value).length === 0) delete next.hooks;
+    else next.hooks = cleaned.value;
+    await atomicWrite(filePath, read.snapshot, next);
+    return 'removed';
+  }, memoryLockName);
+}
+
 export function copilotProjectHooksConfigPath(projectRoot: string): string {
   return path.join(projectRoot, '.github', 'hooks', configName);
 }
 
-async function hooksConfigPath(projectRoot: string, create: boolean): Promise<string | undefined> {
-  if (!path.isAbsolute(projectRoot)) throw new Error('Copilot plan-gate project root must be absolute');
+export function copilotProjectMemoryHooksConfigPath(projectRoot: string): string {
+  return path.join(projectRoot, '.github', 'hooks', memoryConfigName);
+}
+
+async function hooksConfigPath(projectRoot: string, create: boolean, fileName = configName): Promise<string | undefined> {
+  if (!path.isAbsolute(projectRoot)) throw new Error('Copilot project root must be absolute');
   const suppliedRootStat = await lstat(projectRoot).catch(() => null);
   if (!suppliedRootStat?.isDirectory() || suppliedRootStat.isSymbolicLink()) {
-    throw new Error('Copilot plan-gate project root must be a real directory');
+    throw new Error('Copilot project root must be a real directory');
   }
-  const root = await realpath(projectRoot).catch(() => { throw new Error('Copilot plan-gate project root must exist'); });
+  const root = await realpath(projectRoot).catch(() => { throw new Error('Copilot project root must exist'); });
   const rootStat = await lstat(root);
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('Copilot plan-gate project root must be a real directory');
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('Copilot project root must be a real directory');
 
   let parent = root;
   for (const segment of ['.github', 'hooks']) {
@@ -114,18 +174,18 @@ async function hooksConfigPath(projectRoot: string, create: boolean): Promise<st
     parent = resolved;
   }
 
-  const filePath = path.join(parent, configName);
+  const filePath = path.join(parent, fileName);
   const stat = await lstat(filePath).catch((error: unknown) => {
     if (isCode(error, 'ENOENT')) return null;
     throw error;
   });
-  if (stat && (!stat.isFile() || stat.isSymbolicLink())) throw new Error('Copilot plan-gate hooks file must be regular and not a symbolic link');
-  if (stat && stat.size > maxConfigBytes) throw new Error('Copilot plan-gate hooks file exceeds the size limit');
+  if (stat && (!stat.isFile() || stat.isSymbolicLink())) throw new Error('Copilot hooks file must be regular and not a symbolic link');
+  if (stat && stat.size > maxConfigBytes) throw new Error('Copilot hooks file exceeds the size limit');
   return filePath;
 }
 
-async function withLock<T>(filePath: string, action: () => Promise<T>): Promise<T> {
-  const lockPath = path.join(path.dirname(filePath), lockName);
+async function withLock<T>(filePath: string, action: () => Promise<T>, lockFileName = lockName): Promise<T> {
+  const lockPath = path.join(path.dirname(filePath), lockFileName);
   let lock;
   try {
     lock = await open(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
@@ -144,8 +204,8 @@ async function withLock<T>(filePath: string, action: () => Promise<T>): Promise<
 async function readConfig(filePath: string): Promise<ReadConfig> {
   try {
     const stat = await lstat(filePath);
-    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Copilot plan-gate hooks file must be a regular file');
-    if (stat.size > maxConfigBytes) throw new Error('Copilot plan-gate hooks file exceeds the size limit');
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Copilot hooks file must be a regular file');
+    if (stat.size > maxConfigBytes) throw new Error('Copilot hooks file exceeds the size limit');
     const bytes = await readFile(filePath);
     let value: unknown;
     try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
@@ -186,7 +246,7 @@ function readEventHooks(hooks: JsonObject, event: string): JsonObject[] {
   return value;
 }
 
-function removeManagedHooks(hooks: JsonObject): { value: JsonObject; found: boolean } {
+function removeManagedHooks(hooks: JsonObject, marker = copilotPlanGateManagedMarker): { value: JsonObject; found: boolean } {
   const result: JsonObject = { ...hooks };
   let found = false;
   for (const [event, entries] of Object.entries(hooks)) {
@@ -196,7 +256,7 @@ function removeManagedHooks(hooks: JsonObject): { value: JsonObject; found: bool
       if (!isRecord(entry)) throw new Error(`Copilot hooks.${event} contains an unsupported hook; no changes were made`);
       const managed = entry.type === 'command' &&
         ['command', 'bash', 'powershell', 'exec'].some((key) =>
-          typeof entry[key] === 'string' && (entry[key] as string).includes(copilotPlanGateManagedMarker));
+          typeof entry[key] === 'string' && (entry[key] as string).includes(marker));
       found ||= managed;
       eventFound ||= managed;
       return !managed;
@@ -247,14 +307,14 @@ async function assertUnchanged(filePath: string, snapshot: FileSnapshot): Promis
   if (!snapshot.bytes?.equals(current)) throw new Error('Copilot hooks file changed during update');
 }
 
-function validateCommand(command: string): void {
+function validateCommand(command: string, runnerMarker = copilotPlanGateRunnerMarker, managedMarker = copilotPlanGateManagedMarker): void {
   if (typeof command !== 'string' || !command.trim() || command.length > 8192 || /[\r\n\0]/.test(command)) {
-    throw new Error('Copilot plan-gate command is invalid or too long');
+    throw new Error('Copilot hook command is invalid or too long');
   }
-  if (!command.includes(copilotPlanGateRunnerMarker) || !command.includes(copilotPlanGateManagedMarker)) {
-    throw new Error(`Copilot plan-gate command must include ${copilotPlanGateRunnerMarker} and ${copilotPlanGateManagedMarker}`);
+  if (!command.includes(runnerMarker) || !command.includes(managedMarker)) {
+    throw new Error(`Copilot hook command must include ${runnerMarker} and ${managedMarker}`);
   }
-  if (looksSecretLike(command)) throw new Error('Copilot plan-gate command must not contain credential-like values');
+  if (looksSecretLike(command)) throw new Error('Copilot hook command must not contain credential-like values');
 }
 
 function looksSecretLike(value: string): boolean {

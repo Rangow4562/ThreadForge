@@ -65,7 +65,12 @@ import { getOpenClawHistoryStatus, syncOpenClawHistory } from './openclaw-histor
 import { getOpenCodeHistoryStatus, syncOpenCodeHistory } from './opencode-history.ts';
 import { getClaudeHistoryStatus, syncClaudeHistory } from './claude-history.ts';
 import { getCopilotHistoryStatus, syncCopilotHistory } from './copilot-history.ts';
-import { installCopilotProjectPlanGateHook, removeCopilotProjectPlanGateHook } from './copilot-hooks-config.ts';
+import {
+  installCopilotProjectMemoryHook,
+  installCopilotProjectPlanGateHook,
+  removeCopilotProjectMemoryHook,
+  removeCopilotProjectPlanGateHook,
+} from './copilot-hooks-config.ts';
 import { getCursorHistoryStatus, syncCursorHistory } from './cursor-history.ts';
 import { getFactoryHistoryStatus, syncFactoryHistory } from './factory-history.ts';
 import { getFxHistoryStatus, syncFxHistory } from './fx-history.ts';
@@ -149,7 +154,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   let geminiSubsystem: 'memory' | 'plan-gate' | undefined;
   let qwenSubsystem: 'memory' | 'plan-gate' | undefined;
   let antigravitySubsystem: 'memory' | 'plan-gate' | undefined;
-  let copilotSubsystem: 'sessions' | 'plan-gate' | 'prompts' | undefined;
+  let copilotSubsystem: 'sessions' | 'memory' | 'plan-gate' | 'prompts' | undefined;
   let cursorSubsystem: 'sessions' | 'memory' | 'plan-gate' | undefined;
   let factorySubsystem: 'sessions' | undefined;
   let fxSubsystem: 'sessions' | undefined;
@@ -283,6 +288,15 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   }
   if (family === 'copilot' && action === 'plan-gate') {
     copilotSubsystem = 'plan-gate';
+    action = rest[0];
+    rest = rest.slice(1);
+    if (!action) {
+      stderr.write(`${usage()}\n`);
+      return 2;
+    }
+  }
+  if (family === 'copilot' && action === 'memory') {
+    copilotSubsystem = 'memory';
     action = rest[0];
     rest = rest.slice(1);
     if (!action) {
@@ -1497,6 +1511,14 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
     } else if (family === 'copilot' && copilotSubsystem === 'plan-gate' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
       result = await removeCopilotProjectPlanGateHook(projectRoot);
+    } else if (family === 'copilot' && copilotSubsystem === 'memory' && (action === 'install' || action === 'update')) {
+      rejectUnexpected(options, ['project-root', 'command', 'bash-command', 'powershell-command']);
+      const commands = copilotMemoryHookCommands(options);
+      result = await installCopilotProjectMemoryHook({ ...commands, projectRoot });
+      warning = 'Copilot CLI userPromptTransformed rewrites model-bound text and may persist in session history; the host may call it for preceding messages in a batched submission. Retrieval is advisory, and this installer does not change Copilot trust or permissions.';
+    } else if (family === 'copilot' && copilotSubsystem === 'memory' && action === 'uninstall') {
+      rejectUnexpected(options, ['project-root']);
+      result = await removeCopilotProjectMemoryHook(projectRoot);
     } else if (family === 'qwen' && (action === 'install' || action === 'update')) {
       rejectUnexpected(options, ['scope', 'project-root', 'command']);
       if (qwenScope !== 'user' && qwenScope !== 'project') throw new Error('Qwen --scope must be user or project');
@@ -1611,6 +1633,18 @@ function copilotPlanGateCommands(options: ParsedOptions): { bashCommand: string;
   throw new Error('Copilot plan-gate requires --command or both --bash-command and --powershell-command');
 }
 
+function copilotMemoryHookCommands(options: ParsedOptions): { bashCommand: string; powershellCommand: string } {
+  const shared = options.values.get('command');
+  const bashCommand = options.values.get('bash-command');
+  const powershellCommand = options.values.get('powershell-command');
+  if (shared && (bashCommand || powershellCommand)) {
+    throw new Error('use either --command or both --bash-command and --powershell-command');
+  }
+  if (shared) return { bashCommand: shared, powershellCommand: shared };
+  if (bashCommand && powershellCommand) return { bashCommand, powershellCommand };
+  throw new Error('Copilot memory requires --command or both --bash-command and --powershell-command');
+}
+
 function parseDeepSeekDuration(value: string): number {
   const match = /^(\d+)(ms|s|m|h)$/.exec(value.trim());
   if (!match) throw new Error('--interval must use a positive duration such as 30s, 5m, or 1h');
@@ -1682,6 +1716,8 @@ function usage(): string {
     '  npm run adapter -- qwen plan-gate uninstall --scope project --project-root <absolute-path>',
     '  npm run adapter -- copilot plan-gate install|update --project-root <absolute-path> (--command <shared-shell-command> | --bash-command <command> --powershell-command <command>)',
     '  npm run adapter -- copilot plan-gate uninstall --project-root <absolute-path>',
+    '  npm run adapter -- copilot memory install|update --project-root <absolute-path> (--command <shared-shell-command> | --bash-command <command> --powershell-command <command>)',
+    '  npm run adapter -- copilot memory uninstall --project-root <absolute-path>',
     '  npm run adapter -- kimi install|update --command <shell-command-with-marker> [--kimi-code-home <absolute-path>]',
     '  npm run adapter -- kimi uninstall [--kimi-code-home <absolute-path>]',
     '  npm run adapter -- kiro install|update --scope user|project --command <shell-command-with-marker> [--project-root <absolute-path>] [--kiro-home <absolute-path>]',

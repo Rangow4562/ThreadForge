@@ -190,6 +190,50 @@ test('adapter CLI installs only the explicit GitHub Copilot CLI deny-only plan-g
   }
 });
 
+test('adapter CLI explicitly installs and removes GitHub Copilot CLI approved-memory hooks', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-copilot-memory-cli-'));
+  try {
+    const runner = '--threadforge-managed-copilot-memory=v1';
+    const marker = '--threadforge-memory=copilot-v1';
+    const bashCommand = `threadforge memory inject-copilot --project-id demo-project ${runner} ${marker}`;
+    const powershellCommand = `threadforge.exe memory inject-copilot --project-id demo-project ${runner} ${marker}`;
+    let result = await invoke(['copilot', 'memory', 'install', '--project-root', root,
+      '--bash-command', bashCommand, '--powershell-command', powershellCommand]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'installed');
+    assert.match(JSON.parse(result.stdout).warning, /userPromptTransformed/);
+    assert.match(JSON.parse(result.stdout).warning, /session history/);
+    const configPath = path.join(root, '.github', 'hooks', 'threadforge-memory.json');
+    let config = JSON.parse(await readFile(configPath, 'utf8'));
+    assert.equal(config.version, 1);
+    assert.deepEqual(config.hooks.userPromptTransformed, [{
+      type: 'command', bash: bashCommand, powershell: powershellCommand, timeoutSec: 3,
+    }]);
+
+    result = await invoke(['copilot', 'memory', 'update', '--project-root', root,
+      '--bash-command', bashCommand, '--powershell-command', powershellCommand]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'unchanged');
+
+    result = await invoke(['copilot', 'memory', 'uninstall', '--project-root', root]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'removed');
+    config = JSON.parse(await readFile(configPath, 'utf8'));
+    assert.deepEqual(config, { version: 1 });
+
+    result = await invoke(['copilot', 'memory', 'install', '--project-root', root, '--command',
+      `threadforge memory inject-copilot --project-id demo ${marker}`]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /managed-copilot-memory/);
+
+    result = await invoke(['copilot', 'memory', 'install', '--project-root', root, '--bash-command', bashCommand]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /both --bash-command and --powershell-command/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('Claude transcript CLI exposes metadata-only status and non-mutating preview', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-claude-history-cli-'));
   const projects = path.join(root, 'projects', 'project');

@@ -13,6 +13,8 @@ Merge the printed `threadforge` entry into the MCP configuration using the host'
 
 For a selected set of supported project MCP hosts, use the preservation-aware [project bootstrap](platform-bootstrap.md) to plan, install, update, or remove their Threadforge entries.
 
+OpenCode can also opt into current-query approved project-memory injection through its project plugin; this is separate from MCP and remains advisory. See [OpenCode approved-memory injection](opencode-memory.md) for setup, bounds, and the tested-version limits.
+
 ## Cline user-level MCP entry
 
 Cline's MCP configuration is user-global. Threadforge provides a separate, explicit manager for that settings file; it does not add Cline to the project-scope installer because doing so would imply a project config path the host does not document. The installed entry launches `threadforge mcp serve` without `--project-root`, so it exposes the local SQLite-backed MCP surface only; it does not attach a version-controlled project's memory or procedures. Use project skill files or another verified project-scoped MCP host when project binding is required. The entry sets `autoApprove` to an empty list and never changes Cline permissions.

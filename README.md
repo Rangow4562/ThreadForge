@@ -97,7 +97,7 @@ Threadforge integrates with over 20 AI coding agent harnesses and runtimes, prov
 | **Cursor** | Extension + MCP | `sessionStart` Bootstrap | Deny-only `Write` plan gate | Composer DB & Transcripts | Verified Composer Sync ([`docs/cursor-history.md`](docs/cursor-history.md)) |
 | **Gemini CLI** | Project Hooks + MCP | `BeforeAgent` Hook | Deny-only `BeforeTool` guard | Loopback OTLP Intake | Verified Tool Guard ([`docs/gemini-cli.md`](docs/gemini-cli.md)) |
 | **Antigravity** | PreInvocation Hook | Invocation 0 Bootstrap | Scoped project-task context | Local Telemetry Slices | Verified Hook Transport ([`docs/antigravity-cli.md`](docs/antigravity-cli.md)) |
-| **OpenCode** | Plugin + Transform | `memory inject-opencode` | Project-scoped planning profile | Session CLI Poller | Verified Discovery ([`docs/opencode-history.md`](docs/opencode-history.md)) |
+| **OpenCode** | Plugin + Transform | Opt-in prompt-time project memory ([`docs/opencode-memory.md`](docs/opencode-memory.md)) | Project-scoped planning profile | Session CLI Poller | Verified Prompt-Memory Transport ([`docs/opencode-history.md`](docs/opencode-history.md)) |
 | **Cline** | Plugin + Global MCP | Gated `.github/skills/` | Task/Session/Kanban stores | Bounded History Poller | Verified Package Build ([`docs/cline.md`](docs/cline.md)) |
 | **Qwen Code** | Project Hooks + MCP | `UserPromptExpansion` | Best-effort deny-only file guard | Loopback OTLP Intake | Verified Settings Lock ([`docs/qwen-code.md`](docs/qwen-code.md)) |
 | **GitHub Copilot CLI** | Prompts + Skills + MCP | `.github/prompts/*.prompt.md` | Deny-only command hook | Events JSONL Poller | Verified Prompt Installer ([`docs/copilot-prompts.md`](docs/copilot-prompts.md)) |

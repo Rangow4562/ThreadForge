@@ -6,8 +6,8 @@
   "additionalProperties": false,
   "required": [
     "schema_version", "status", "host_cli_version", "provider", "tool", "tool_call_count",
-    "tool_result_observed", "completion_requests", "auxiliary_completion_requests", "system_context_injected",
-    "system_context_content_retained_in_report", "plugin_system_transform_observed", "approved_memory_readback_verified",
+    "tool_result_observed", "completion_requests", "auxiliary_completion_requests", "memory_context_injected",
+    "memory_content_retained_in_report", "plugin_messages_transform_observed", "approved_memory_readback_verified",
     "memory_freshness_verified", "action_ready", "guidance_only", "execution_authorized", "real_model_invocations"
   ],
   "properties": {
@@ -20,9 +20,9 @@
     "tool_result_observed": { "const": true },
     "completion_requests": { "type": "integer", "minimum": 2, "maximum": 12 },
     "auxiliary_completion_requests": { "type": "integer", "minimum": 0, "maximum": 10 },
-    "system_context_injected": { "const": true },
-    "system_context_content_retained_in_report": { "const": false },
-    "plugin_system_transform_observed": { "const": true },
+    "memory_context_injected": { "const": true },
+    "memory_content_retained_in_report": { "const": false },
+    "plugin_messages_transform_observed": { "const": true },
     "approved_memory_readback_verified": { "const": true },
     "memory_freshness_verified": { "const": true },
     "action_ready": { "const": false },

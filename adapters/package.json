@@ -108,6 +108,7 @@
     "test:cline-skill-host": "node --experimental-strip-types scripts/cline-skill-host-smoke.mjs",
     "test:package": "node scripts/package-smoke.mjs",
     "test:installed-skills": "node --experimental-strip-types scripts/live-skill-smoke.mjs",
+    "test:opencode-memory": "node --experimental-strip-types scripts/opencode-memory-smoke.mjs",
     "test:opencode-history-host": "node --experimental-strip-types scripts/opencode-history-host-smoke.mjs"
   },
   "devDependencies": {

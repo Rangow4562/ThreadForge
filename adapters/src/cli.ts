@@ -1408,7 +1408,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
         maxTokens: Number(options.values.get('memory-max-tokens') ?? 1600),
       } : undefined;
       result = await installOpenCodeProjectPlugin(projectRoot, required(options, 'module'), memory);
-      if (memory) warning = 'OpenCode approved-memory retrieval is opt-in and uses the experimental system-transform hook. User prompt text is held in memory only and sent to the local Threadforge CLI for ranking; retrieved records remain advisory and do not authorize actions.';
+      if (memory) warning = 'OpenCode approved-memory retrieval is opt-in and uses the experimental messages-transform hook. Bounded user text is sent to the local Threadforge CLI for ranking; retrieved records remain advisory and do not authorize actions.';
     } else if (family === 'opencode' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
       result = await removeOpenCodeProjectPlugin(projectRoot);

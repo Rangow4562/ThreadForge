@@ -661,7 +661,7 @@ test('adapter CLI installs and uninstalls the isolated OpenCode project plugin',
       '--memory-project-id', 'parser-project', '--memory-max-items', '4', '--memory-max-tokens', '900',
     ]);
     assert.equal(result.code, 0, result.stderr);
-    assert.match(result.stdout, /experimental system-transform hook/);
+    assert.match(result.stdout, /experimental messages-transform hook/);
     const configuredMemory = await readFile(pluginPath, 'utf8');
     assert.match(configuredMemory, /projectId":"parser-project"/);
     assert.match(configuredMemory, /maxItems":4/);

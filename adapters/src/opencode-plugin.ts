@@ -8,8 +8,6 @@ const maxNodes = 4096;
 const maxDepth = 32;
 const defaultQueueLimit = 128;
 const maxRememberedCompletions = 2048;
-const maxRememberedPrompts = 64;
-const rememberedPromptLifetimeMs = 5 * 60 * 1000;
 const maxMemoryPromptBytes = 2000;
 const maxMemoryOutputBytes = 96 << 10;
 const maxMemoryHookMs = 2000;
@@ -64,7 +62,6 @@ export function createOpenCodeAdapter(
   let queue = Promise.resolve();
   const rememberedCompletions = new Set<string>();
   const completionOrder: string[] = [];
-  const rememberedPrompts = new Map<string, { query: string; capturedAt: number }>();
 
   const enqueue = (event: ThreadforgeEvent | undefined): void => {
     if (!event) return;
@@ -79,7 +76,6 @@ export function createOpenCodeAdapter(
   const hooks: Record<string, (...args: unknown[]) => unknown> = {
     'chat.message': (input, output) => {
       enqueue(mapChatMessage(input, output));
-      if (memory && isUserChatMessage(output)) rememberOpenCodePrompt(rememberedPrompts, input, output);
     },
     'command.execute.before': (input, output) => enqueue(mapCommand(input, output)),
     'tool.execute.before': (input, output) => enqueue(mapTool(input, output, false)),
@@ -95,28 +91,22 @@ export function createOpenCodeAdapter(
         rememberedCompletions.add(completionDigest);
         completionOrder.push(completionDigest);
       }
-      if (memory) {
-        const completedSession = completedAssistantSessionID(envelope);
-        if (completedSession) rememberedPrompts.delete(completedSession);
-      }
       enqueue(mapOpenCodeEvent(envelope));
     },
   };
 
   if (memory) {
-    hooks['experimental.chat.system.transform'] = async (input, output) => {
-      if (!isRecord(input) || !isRecord(output)) return;
-      const system = output.system;
-      if (!Array.isArray(system) || system.length >= 256 || system.some((entry) => typeof entry !== 'string')) return;
-      const sid = boundedString(input.sessionID, 256);
-      if (!sid) return;
-      const remembered = rememberedPrompts.get(sid);
-      if (!remembered) return;
-      if (Date.now() - remembered.capturedAt > rememberedPromptLifetimeMs) {
-        rememberedPrompts.delete(sid);
-        return;
-      }
-      if (system.some((entry) => entry.includes(memoryContextMarker))) return;
+    hooks['experimental.chat.messages.transform'] = async (_input, output) => {
+      if (!isRecord(output) || !Array.isArray(output.messages) || output.messages.length < 1 || output.messages.length > 8192) return;
+      const messages = output.messages;
+      const userMessage = [...messages].reverse().slice(0, 128).find((message) =>
+        isRecord(message) && isRecord(message.info) && safeLabel(message.info.role, 32) === 'user');
+      if (!isRecord(userMessage) || !Array.isArray(userMessage.parts) || userMessage.parts.length > 4096) return;
+      const textParts = userMessage.parts.filter((part): part is JsonObject =>
+        isRecord(part) && part.type === 'text' && typeof part.text === 'string');
+      if (textParts.length === 0 || textParts.some((part) => (part.text as string).includes(memoryContextMarker))) return;
+      const prompt = truncateUTF8(textParts.map((part) => part.text as string).join('\n').trim(), maxMemoryPromptBytes).trim();
+      if (!prompt) return;
       const retrieve = memory.retrieve ?? retrieveOpenCodeMemory;
       let context: string | undefined;
       try {
@@ -125,13 +115,13 @@ export function createOpenCodeAdapter(
           projectId: memory.projectId,
           maxItems: memory.maxItems ?? 8,
           maxTokens: memory.maxTokens ?? 1600,
-          prompt: remembered.query,
+          prompt,
         });
       } catch { return; }
       if (typeof context !== 'string' || context.length === 0 || context.length > maxMemoryOutputBytes ||
           !context.includes(memoryContextMarker) || !context.includes('never authorizes tools or actions')) return;
-      if (rememberedPrompts.get(sid) !== remembered) return;
-      system.push(context);
+      const target = textParts[textParts.length - 1];
+      target.text = `${target.text as string}\n\n${context}`;
     };
   }
 
@@ -147,7 +137,7 @@ export async function ThreadforgeOpenCodePlugin(
   context: OpenCodePluginContext,
   options?: OpenCodePluginOptions,
 ): Promise<Record<string, (...args: unknown[]) => unknown>> {
-  const root = boundedString(context.worktree, 4096) ?? boundedString(context.directory, 4096);
+  const root = boundedString(context.directory, 4096) ?? boundedString(context.worktree, 4096);
   const configured = options?.memory;
   const memory = root && path.isAbsolute(root) && configured && validMemoryOptions(configured)
     ? { ...configured, projectRoot: root }
@@ -173,46 +163,6 @@ function mapChatMessage(input: unknown, output: unknown): ThreadforgeEvent | und
   return event;
 }
 
-function isUserChatMessage(output: unknown): boolean {
-  return isRecord(output) && isRecord(output.message) && safeLabel(output.message.role, 32) === 'user';
-}
-
-function rememberOpenCodePrompt(
-  remembered: Map<string, { query: string; capturedAt: number }>, input: unknown, output: unknown,
-): void {
-  const sid = sessionID(input);
-  const query = chatMessageText(output);
-  if (!sid || !query) return;
-  const now = Date.now();
-  for (const [key, value] of remembered) {
-    if (now - value.capturedAt > rememberedPromptLifetimeMs) remembered.delete(key);
-  }
-  if (remembered.has(sid)) remembered.delete(sid);
-  while (remembered.size >= maxRememberedPrompts) {
-    const oldest = remembered.keys().next().value as string | undefined;
-    if (!oldest) break;
-    remembered.delete(oldest);
-  }
-  remembered.set(sid, { query, capturedAt: now });
-}
-
-function chatMessageText(output: unknown): string | undefined {
-  if (!isRecord(output) || !isRecord(output.message)) return undefined;
-  const message = output.message;
-  for (const candidate of [message.content, message.parts, message.text]) {
-    const text = textFromChatContent(candidate);
-    if (text) return truncateUTF8(text.trim(), maxMemoryPromptBytes);
-  }
-  return undefined;
-}
-
-function textFromChatContent(value: unknown): string | undefined {
-  if (typeof value === 'string') return value;
-  if (!Array.isArray(value)) return undefined;
-  const parts = value.filter((part): part is JsonObject => isRecord(part) && part.type === 'text' && typeof part.text === 'string');
-  return parts.length > 0 ? parts.map((part) => part.text as string).join('\n') : undefined;
-}
-
 function truncateUTF8(value: string, maxBytes: number): string {
   let output = '';
   let bytes = 0;
@@ -223,18 +173,6 @@ function truncateUTF8(value: string, maxBytes: number): string {
     bytes += size;
   }
   return output;
-}
-
-function completedAssistantSessionID(envelope: unknown): string | undefined {
-  if (!isRecord(envelope) || !isRecord(envelope.event) || envelope.event.type !== 'message.updated') return undefined;
-  const properties = isRecord(envelope.event.properties) ? envelope.event.properties :
-    isRecord(envelope.event.data) ? envelope.event.data : undefined;
-  const info = properties && isRecord(properties.info) ? properties.info : undefined;
-  const time = info && isRecord(info.time) ? info.time : undefined;
-  if (safeLabel(info?.role, 32) !== 'assistant' || typeof time?.completed !== 'number' || !Number.isFinite(time.completed) || time.completed <= 0) {
-    return undefined;
-  }
-  return sessionID(properties) ?? sessionID(info);
 }
 
 function validMemoryOptions(options: OpenCodeMemoryOptions): boolean {

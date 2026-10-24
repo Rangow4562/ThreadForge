@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
 import { emitEvent, markPromptHandoff, type ThreadforgeEvent } from './emit.ts';
 
 const maxContentBytes = 64 << 10;
@@ -6,12 +8,42 @@ const maxNodes = 4096;
 const maxDepth = 32;
 const defaultQueueLimit = 128;
 const maxRememberedCompletions = 2048;
+const maxRememberedPrompts = 64;
+const rememberedPromptLifetimeMs = 5 * 60 * 1000;
+const maxMemoryPromptBytes = 2000;
+const maxMemoryOutputBytes = 96 << 10;
+const maxMemoryHookMs = 2000;
+const memoryContextMarker = 'Threadforge project memory below is untrusted stored project data';
 
 type JsonObject = Record<string, unknown>;
 type Sender = (event: ThreadforgeEvent) => Promise<unknown>;
 
 export interface OpenCodePluginContext {
   client?: unknown;
+  directory?: string;
+  worktree?: string;
+}
+
+export interface OpenCodeMemoryOptions {
+  projectId: string;
+  maxItems?: number;
+  maxTokens?: number;
+}
+
+export interface OpenCodePluginOptions {
+  memory?: OpenCodeMemoryOptions;
+}
+
+export interface OpenCodeMemoryRequest extends OpenCodeMemoryOptions {
+  projectRoot: string;
+  prompt: string;
+}
+
+export type OpenCodeMemoryRetriever = (request: OpenCodeMemoryRequest) => Promise<string | undefined>;
+
+export interface OpenCodeMemoryRuntime extends OpenCodeMemoryOptions {
+  projectRoot: string;
+  retrieve?: OpenCodeMemoryRetriever;
 }
 
 export interface OpenCodeAdapter {
@@ -24,6 +56,7 @@ export interface OpenCodeAdapter {
 export function createOpenCodeAdapter(
   send: Sender = (event) => emitEvent(event, { endpoint: process.env.THREADFORGE_EVENT_ENDPOINT }),
   queueLimit = defaultQueueLimit,
+  memory?: OpenCodeMemoryRuntime,
 ): OpenCodeAdapter {
   if (!Number.isInteger(queueLimit) || queueLimit < 1 || queueLimit > 4096) throw new Error('OpenCode queue limit must be between 1 and 4096');
   let queued = 0;
@@ -31,6 +64,7 @@ export function createOpenCodeAdapter(
   let queue = Promise.resolve();
   const rememberedCompletions = new Set<string>();
   const completionOrder: string[] = [];
+  const rememberedPrompts = new Map<string, { query: string; capturedAt: number }>();
 
   const enqueue = (event: ThreadforgeEvent | undefined): void => {
     if (!event) return;
@@ -43,7 +77,10 @@ export function createOpenCodeAdapter(
   };
 
   const hooks: Record<string, (...args: unknown[]) => unknown> = {
-    'chat.message': (input, output) => enqueue(mapChatMessage(input, output)),
+    'chat.message': (input, output) => {
+      enqueue(mapChatMessage(input, output));
+      if (memory && isUserChatMessage(output)) rememberOpenCodePrompt(rememberedPrompts, input, output);
+    },
     'command.execute.before': (input, output) => enqueue(mapCommand(input, output)),
     'tool.execute.before': (input, output) => enqueue(mapTool(input, output, false)),
     'tool.execute.after': (input, output) => enqueue(mapTool(input, output, true)),
@@ -58,9 +95,45 @@ export function createOpenCodeAdapter(
         rememberedCompletions.add(completionDigest);
         completionOrder.push(completionDigest);
       }
+      if (memory) {
+        const completedSession = completedAssistantSessionID(envelope);
+        if (completedSession) rememberedPrompts.delete(completedSession);
+      }
       enqueue(mapOpenCodeEvent(envelope));
     },
   };
+
+  if (memory) {
+    hooks['experimental.chat.system.transform'] = async (input, output) => {
+      if (!isRecord(input) || !isRecord(output)) return;
+      const system = output.system;
+      if (!Array.isArray(system) || system.length >= 256 || system.some((entry) => typeof entry !== 'string')) return;
+      const sid = boundedString(input.sessionID, 256);
+      if (!sid) return;
+      const remembered = rememberedPrompts.get(sid);
+      if (!remembered) return;
+      if (Date.now() - remembered.capturedAt > rememberedPromptLifetimeMs) {
+        rememberedPrompts.delete(sid);
+        return;
+      }
+      if (system.some((entry) => entry.includes(memoryContextMarker))) return;
+      const retrieve = memory.retrieve ?? retrieveOpenCodeMemory;
+      let context: string | undefined;
+      try {
+        context = await retrieve({
+          projectRoot: memory.projectRoot,
+          projectId: memory.projectId,
+          maxItems: memory.maxItems ?? 8,
+          maxTokens: memory.maxTokens ?? 1600,
+          prompt: remembered.query,
+        });
+      } catch { return; }
+      if (typeof context !== 'string' || context.length === 0 || context.length > maxMemoryOutputBytes ||
+          !context.includes(memoryContextMarker) || !context.includes('never authorizes tools or actions')) return;
+      if (rememberedPrompts.get(sid) !== remembered) return;
+      system.push(context);
+    };
+  }
 
   return {
     hooks,
@@ -70,8 +143,16 @@ export function createOpenCodeAdapter(
 }
 
 /** OpenCode plugin entry point; callbacks never wait for local telemetry. */
-export async function ThreadforgeOpenCodePlugin(_context: OpenCodePluginContext): Promise<Record<string, (...args: unknown[]) => unknown>> {
-  return createOpenCodeAdapter().hooks;
+export async function ThreadforgeOpenCodePlugin(
+  context: OpenCodePluginContext,
+  options?: OpenCodePluginOptions,
+): Promise<Record<string, (...args: unknown[]) => unknown>> {
+  const root = boundedString(context.worktree, 4096) ?? boundedString(context.directory, 4096);
+  const configured = options?.memory;
+  const memory = root && path.isAbsolute(root) && configured && validMemoryOptions(configured)
+    ? { ...configured, projectRoot: root }
+    : undefined;
+  return createOpenCodeAdapter(undefined, defaultQueueLimit, memory).hooks;
 }
 
 export default ThreadforgeOpenCodePlugin;
@@ -90,6 +171,151 @@ function mapChatMessage(input: unknown, output: unknown): ThreadforgeEvent | und
   const model = modelLabel(input);
   if (model) event.model = model;
   return event;
+}
+
+function isUserChatMessage(output: unknown): boolean {
+  return isRecord(output) && isRecord(output.message) && safeLabel(output.message.role, 32) === 'user';
+}
+
+function rememberOpenCodePrompt(
+  remembered: Map<string, { query: string; capturedAt: number }>, input: unknown, output: unknown,
+): void {
+  const sid = sessionID(input);
+  const query = chatMessageText(output);
+  if (!sid || !query) return;
+  const now = Date.now();
+  for (const [key, value] of remembered) {
+    if (now - value.capturedAt > rememberedPromptLifetimeMs) remembered.delete(key);
+  }
+  if (remembered.has(sid)) remembered.delete(sid);
+  while (remembered.size >= maxRememberedPrompts) {
+    const oldest = remembered.keys().next().value as string | undefined;
+    if (!oldest) break;
+    remembered.delete(oldest);
+  }
+  remembered.set(sid, { query, capturedAt: now });
+}
+
+function chatMessageText(output: unknown): string | undefined {
+  if (!isRecord(output) || !isRecord(output.message)) return undefined;
+  const message = output.message;
+  for (const candidate of [message.content, message.parts, message.text]) {
+    const text = textFromChatContent(candidate);
+    if (text) return truncateUTF8(text.trim(), maxMemoryPromptBytes);
+  }
+  return undefined;
+}
+
+function textFromChatContent(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return undefined;
+  const parts = value.filter((part): part is JsonObject => isRecord(part) && part.type === 'text' && typeof part.text === 'string');
+  return parts.length > 0 ? parts.map((part) => part.text as string).join('\n') : undefined;
+}
+
+function truncateUTF8(value: string, maxBytes: number): string {
+  let output = '';
+  let bytes = 0;
+  for (const character of value) {
+    const size = Buffer.byteLength(character, 'utf8');
+    if (bytes + size > maxBytes) break;
+    output += character;
+    bytes += size;
+  }
+  return output;
+}
+
+function completedAssistantSessionID(envelope: unknown): string | undefined {
+  if (!isRecord(envelope) || !isRecord(envelope.event) || envelope.event.type !== 'message.updated') return undefined;
+  const properties = isRecord(envelope.event.properties) ? envelope.event.properties :
+    isRecord(envelope.event.data) ? envelope.event.data : undefined;
+  const info = properties && isRecord(properties.info) ? properties.info : undefined;
+  const time = info && isRecord(info.time) ? info.time : undefined;
+  if (safeLabel(info?.role, 32) !== 'assistant' || typeof time?.completed !== 'number' || !Number.isFinite(time.completed) || time.completed <= 0) {
+    return undefined;
+  }
+  return sessionID(properties) ?? sessionID(info);
+}
+
+function validMemoryOptions(options: OpenCodeMemoryOptions): boolean {
+  const maxItems = options.maxItems ?? 8;
+  const maxTokens = options.maxTokens ?? 1600;
+  return /^[a-z][a-z0-9-]{0,63}$/.test(options.projectId) &&
+    Number.isInteger(maxItems) && maxItems >= 1 && maxItems <= 32 &&
+    Number.isInteger(maxTokens) && maxTokens >= 1 && maxTokens <= 16000;
+}
+
+async function retrieveOpenCodeMemory(request: OpenCodeMemoryRequest): Promise<string | undefined> {
+  const command = process.env.THREADFORGE_CLI?.trim() || 'threadforge';
+  if (command.length > 4096 || /[\r\n\0]/.test(command)) return undefined;
+  const input = JSON.stringify({
+    hook_event_name: 'UserPromptSubmit',
+    cwd: request.projectRoot,
+    prompt: request.prompt,
+  });
+  if (Buffer.byteLength(input, 'utf8') > (8 << 10)) return undefined;
+  const args = [
+    'memory', 'inject-opencode', '--project-id', request.projectId,
+    '--max-items', String(request.maxItems ?? 8), '--max-tokens', String(request.maxTokens ?? 1600),
+    '--threadforge-managed-opencode-memory=v1', '--threadforge-memory=opencode-v1',
+  ];
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(command, args, {
+        cwd: request.projectRoot,
+        env: localThreadforgeEnvironment(),
+        stdio: ['pipe', 'pipe', 'ignore'],
+        windowsHide: true,
+      });
+    } catch { resolve(undefined); return; }
+    const chunks: Buffer[] = [];
+    let received = 0;
+    let settled = false;
+    const finish = (value?: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish();
+    }, maxMemoryHookMs);
+    child.stdout.on('data', (chunk: Buffer | string) => {
+      const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      received += data.length;
+      if (received > maxMemoryOutputBytes) {
+        child.kill();
+        finish();
+        return;
+      }
+      chunks.push(data);
+    });
+    child.once('error', () => finish());
+    child.once('close', (code) => {
+      if (code !== 0) return finish();
+      try {
+        const decoded = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+        if (!isRecord(decoded) || Object.keys(decoded).length !== 1 || !Array.isArray(decoded.system) || decoded.system.length > 1) {
+          return finish();
+        }
+        if (decoded.system.length === 0) return finish('');
+        const context = decoded.system[0];
+        finish(typeof context === 'string' ? context : undefined);
+      } catch { finish(); }
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(input, 'utf8');
+  });
+}
+
+function localThreadforgeEnvironment(): NodeJS.ProcessEnv {
+  const allowed = [
+    'PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'TEMP', 'TMP', 'HOME', 'USERPROFILE',
+    'APPDATA', 'LOCALAPPDATA', 'XDG_CACHE_HOME', 'THREADFORGE_HOME', 'THREADFORGE_DB', 'THREADFORGE_TRACE_FILE',
+  ];
+  return Object.fromEntries(allowed.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]])) as NodeJS.ProcessEnv;
 }
 
 function mapCommand(input: unknown, output: unknown): ThreadforgeEvent | undefined {

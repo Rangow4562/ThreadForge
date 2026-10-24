@@ -31,6 +31,19 @@ test('installs and idempotently updates an isolated OpenCode plugin file', async
   });
 });
 
+test('renders explicitly configured bounded project-memory retrieval without enabling it by default', () => {
+  const defaultPlugin = renderOpenCodePlugin(packageSpecifier);
+  const memoryPlugin = renderOpenCodePlugin(packageSpecifier, { projectId: 'parser-project', maxItems: 4, maxTokens: 900 });
+  assert.doesNotMatch(defaultPlugin, /experimental\.chat\.system\.transform|memory:/);
+  assert.match(memoryPlugin, /projectId":"parser-project"/);
+  assert.match(memoryPlugin, /maxItems":4/);
+  assert.match(memoryPlugin, /maxTokens":900/);
+  assert.match(memoryPlugin, /ThreadforgeOpenCodePlugin\(context/);
+  assert.throws(() => renderOpenCodePlugin(packageSpecifier, { projectId: 'API_KEY=secret' }), /project ID/);
+  assert.throws(() => renderOpenCodePlugin(packageSpecifier, { projectId: 'parser-project', maxItems: 33 }), /limits/);
+  assert.throws(() => renderOpenCodePlugin(packageSpecifier, { projectId: 'parser-project', maxTokens: 0 }), /limits/);
+});
+
 test('refuses to overwrite an unmanaged plugin and leaves its bytes unchanged', async () => {
   await withProject(async (root) => {
     const file = pluginPath(root);

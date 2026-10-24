@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/opencode-memory-injection-smoke-v1.schema.json",
+  "title": "Threadforge installed OpenCode approved-memory injection smoke",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "host_cli_version", "provider", "tool", "tool_call_count",
+    "tool_result_observed", "completion_requests", "auxiliary_completion_requests", "system_context_injected",
+    "system_context_content_retained_in_report", "plugin_system_transform_observed", "approved_memory_readback_verified",
+    "memory_freshness_verified", "action_ready", "guidance_only", "execution_authorized", "real_model_invocations"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.opencode-memory-injection-smoke.v1" },
+    "status": { "const": "verified" },
+    "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "provider": { "const": "deterministic-loopback-fixture" },
+    "tool": { "const": "threadforge_procedure_get" },
+    "tool_call_count": { "const": 1 },
+    "tool_result_observed": { "const": true },
+    "completion_requests": { "type": "integer", "minimum": 2, "maximum": 12 },
+    "auxiliary_completion_requests": { "type": "integer", "minimum": 0, "maximum": 10 },
+    "system_context_injected": { "const": true },
+    "system_context_content_retained_in_report": { "const": false },
+    "plugin_system_transform_observed": { "const": true },
+    "approved_memory_readback_verified": { "const": true },
+    "memory_freshness_verified": { "const": true },
+    "action_ready": { "const": false },
+    "guidance_only": { "const": true },
+    "execution_authorized": { "const": false },
+    "real_model_invocations": { "const": 0 }
+  }
+}

@@ -653,6 +653,19 @@ test('adapter CLI installs and uninstalls the isolated OpenCode project plugin',
     let result = await invoke(['opencode', 'install', '--project-root', root, '--module', moduleSpecifier]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'installed');
+    const pluginPath = path.join(root, '.opencode', 'plugins', 'threadforge.ts');
+    const telemetryOnly = await readFile(pluginPath, 'utf8');
+    assert.doesNotMatch(telemetryOnly, /memory:/);
+    result = await invoke([
+      'opencode', 'update', '--project-root', root, '--module', moduleSpecifier,
+      '--memory-project-id', 'parser-project', '--memory-max-items', '4', '--memory-max-tokens', '900',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /experimental system-transform hook/);
+    const configuredMemory = await readFile(pluginPath, 'utf8');
+    assert.match(configuredMemory, /projectId":"parser-project"/);
+    assert.match(configuredMemory, /maxItems":4/);
+    assert.match(configuredMemory, /maxTokens":900/);
     result = await invoke(['opencode', 'uninstall', '--project-root', root]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'removed');

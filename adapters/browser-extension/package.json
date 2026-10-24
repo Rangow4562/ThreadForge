@@ -1,6 +1,6 @@
 {
   "name": "@threadforge/browser-extension",
-  "version": "0.1.0",
+  "version": "0.3.5",
   "private": true,
   "type": "module",
   "description": "Opt-in local browser chat telemetry for Claude.ai and ChatGPT Web.",

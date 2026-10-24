@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "threadforge-python"
-version = "0.1.0"
+version = "0.3.5"
 description = "Threadforge decision and offline evolution integrations"
 requires-python = ">=3.10"
 license = "Apache-2.0"

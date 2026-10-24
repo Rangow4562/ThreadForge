@@ -1398,8 +1398,17 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       rejectUnexpected(options, ['project-root']);
       result = await removeOpenCodeProjectPlanAgent(required(options, 'project-root'));
     } else if (family === 'opencode' && (action === 'install' || action === 'update')) {
-      rejectUnexpected(options, ['project-root', 'module']);
-      result = await installOpenCodeProjectPlugin(projectRoot, required(options, 'module'));
+      rejectUnexpected(options, ['project-root', 'module', 'memory-project-id', 'memory-max-items', 'memory-max-tokens']);
+      const memoryProjectId = options.values.get('memory-project-id');
+      const hasMemoryLimits = options.values.has('memory-max-items') || options.values.has('memory-max-tokens');
+      if (!memoryProjectId && hasMemoryLimits) throw new Error('OpenCode memory limits require --memory-project-id');
+      const memory = memoryProjectId ? {
+        projectId: memoryProjectId,
+        maxItems: Number(options.values.get('memory-max-items') ?? 8),
+        maxTokens: Number(options.values.get('memory-max-tokens') ?? 1600),
+      } : undefined;
+      result = await installOpenCodeProjectPlugin(projectRoot, required(options, 'module'), memory);
+      if (memory) warning = 'OpenCode approved-memory retrieval is opt-in and uses the experimental system-transform hook. User prompt text is held in memory only and sent to the local Threadforge CLI for ranking; retrieved records remain advisory and do not authorize actions.';
     } else if (family === 'opencode' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
       result = await removeOpenCodeProjectPlugin(projectRoot);

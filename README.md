@@ -11,6 +11,7 @@
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white)](python/pyproject.toml)
 [![Node](https://img.shields.io/badge/Node.js-22.19%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](adapters/package.json)
 [![Posture](https://img.shields.io/badge/Runtime-Loopback--Only%20%7C%20Local--First-00b4d8?style=flat-square)](docs/architecture.md)
+[![M8ven Score](https://m8ven.ai/badge/mcp/rangow4562-threadforge-ttitus?v=4415896eb36fd22220c57d19da032065)](https://m8ven.ai/mcp/rangow4562-threadforge-ttitus?s=readme)
 
 [Architecture](docs/architecture.md) ·
 [Feature Parity Ledger](docs/feature-parity.md) ·

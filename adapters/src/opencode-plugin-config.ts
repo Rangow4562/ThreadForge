@@ -6,11 +6,22 @@ import path from 'node:path';
 export const opencodeManagedMarker = 'threadforge-managed-opencode-plugin:v1';
 const maxPluginBytes = 256 << 10;
 
+export interface OpenCodeMemoryPluginSettings {
+  projectId: string;
+  maxItems?: number;
+  maxTokens?: number;
+}
+
 export type OpenCodePluginChange = 'installed' | 'updated' | 'unchanged' | 'removed' | 'absent';
 
 /** Installs Threadforge as a separate project plugin file, leaving other plugins untouched. */
-export async function installOpenCodeProjectPlugin(projectRoot: string, moduleSpecifier: string): Promise<OpenCodePluginChange> {
+export async function installOpenCodeProjectPlugin(
+  projectRoot: string,
+  moduleSpecifier: string,
+  memory?: OpenCodeMemoryPluginSettings,
+): Promise<OpenCodePluginChange> {
   validateModuleSpecifier(moduleSpecifier);
+  if (memory) validateMemorySettings(memory);
   const filePath = await pluginPath(projectRoot, true);
   if (!filePath) throw new Error('unable to resolve OpenCode project plugin path');
   return withLock(filePath, async () => {
@@ -26,7 +37,7 @@ export async function installOpenCodeProjectPlugin(projectRoot: string, moduleSp
     if (existing !== undefined && !existing.includes(opencodeManagedMarker)) {
       throw new Error('refusing to overwrite unmanaged OpenCode plugin file');
     }
-    const next = renderOpenCodePlugin(moduleSpecifier);
+    const next = renderOpenCodePlugin(moduleSpecifier, memory);
     if (existing === next) return 'unchanged';
     await atomicWrite(filePath, next);
     return existing === undefined ? 'installed' : 'updated';
@@ -54,9 +65,24 @@ export async function removeOpenCodeProjectPlugin(projectRoot: string): Promise<
   });
 }
 
-export function renderOpenCodePlugin(moduleSpecifier: string): string {
+export function renderOpenCodePlugin(moduleSpecifier: string, memory?: OpenCodeMemoryPluginSettings): string {
   validateModuleSpecifier(moduleSpecifier);
+  if (memory) validateMemorySettings(memory);
   const quoted = JSON.stringify(moduleSpecifier);
+  if (memory) {
+    const options = JSON.stringify({ memory: {
+      projectId: memory.projectId,
+      maxItems: memory.maxItems ?? 8,
+      maxTokens: memory.maxTokens ?? 1600,
+    } });
+    return [
+      `// ${opencodeManagedMarker}`,
+      'import { ThreadforgeOpenCodePlugin } from ' + quoted + ';',
+      'export const ThreadforgeOpenCode = (context) => ThreadforgeOpenCodePlugin(context, ' + options + ');',
+      'export default ThreadforgeOpenCode;',
+      '',
+    ].join('\n');
+  }
   return [
     `// ${opencodeManagedMarker}`,
     'import { ThreadforgeOpenCodePlugin } from ' + quoted + ';',
@@ -64,6 +90,18 @@ export function renderOpenCodePlugin(moduleSpecifier: string): string {
     'export default ThreadforgeOpenCodePlugin;',
     '',
   ].join('\n');
+}
+
+function validateMemorySettings(memory: OpenCodeMemoryPluginSettings): void {
+  if (!/^[a-z][a-z0-9-]{0,63}$/.test(memory.projectId)) {
+    throw new Error('OpenCode memory project ID must match [a-z][a-z0-9-]{0,63}');
+  }
+  const maxItems = memory.maxItems ?? 8;
+  const maxTokens = memory.maxTokens ?? 1600;
+  if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 32 ||
+      !Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 16000) {
+    throw new Error('OpenCode memory limits must be maxItems 1-32 and maxTokens 1-16000');
+  }
 }
 
 async function pluginPath(projectRoot: string, createDirectory: boolean): Promise<string | undefined> {

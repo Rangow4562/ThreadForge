@@ -37,7 +37,7 @@ import (
 	"github.com/threadforge-ai/threadforge/pkg/teamauth"
 )
 
-const version = "0.1.0-dev"
+const version = "0.3.5"
 const maxGraphBytes = 2 << 20
 
 func Run(args []string, stdout, stderr io.Writer) int {
@@ -1435,7 +1435,7 @@ func runSession(args []string, stdout, stderr io.Writer) int {
 
 func runMemory(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "memory command required: learn, inject, inject-codex, inject-gemini, inject-cursor, inject-qwen, inject-antigravity, fingerprint, publish, read, get, list, or history")
+		_, _ = fmt.Fprintln(stderr, "memory command required: learn, inject, inject-codex, inject-gemini, inject-cursor, inject-qwen, inject-antigravity, inject-opencode, fingerprint, publish, read, get, list, or history")
 		return 2
 	}
 	switch args[0] {
@@ -1453,6 +1453,8 @@ func runMemory(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return injectQwenMemory(args[1:], stdin, stdout, stderr)
 	case "inject-antigravity":
 		return injectAntigravityMemory(args[1:], stdin, stdout, stderr)
+	case "inject-opencode":
+		return injectOpenCodeMemory(args[1:], stdin, stdout, stderr)
 	case "fingerprint":
 		return fingerprintProjectMemorySources(args[1:], stdout, stderr)
 	case "publish":
@@ -1555,6 +1557,10 @@ func injectAntigravityMemory(args []string, stdin io.Reader, stdout, stderr io.W
 	return injectUserPromptMemory(args, stdin, stdout, stderr, "antigravity")
 }
 
+func injectOpenCodeMemory(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return injectUserPromptMemory(args, stdin, stdout, stderr, "opencode")
+}
+
 // injectUserPromptMemory serves a host prompt/pre-invocation hook using locally
 // approved project memory and, only when explicitly configured, a bounded
 // read-only task handoff. Retrieval failures return a non-blocking empty result.
@@ -1581,6 +1587,9 @@ func injectUserPromptMemory(args []string, stdin io.Reader, stdout, stderr io.Wr
 		flagName, ownerValue, runtimeValue = "threadforge-managed-antigravity-memory", "antigravity-v1", "v1"
 		eventName = "PreInvocation"
 		usage = "usage: threadforge memory inject-antigravity --project-id <id> --threadforge-managed-antigravity-memory=v1 --threadforge-memory=antigravity-v1"
+	} else if host == "opencode" {
+		flagName, ownerValue, runtimeValue = "threadforge-managed-opencode-memory", "opencode-v1", "v1"
+		usage = "usage: threadforge memory inject-opencode --project-id <id> --threadforge-managed-opencode-memory=v1 --threadforge-memory=opencode-v1"
 	}
 	fs := flag.NewFlagSet("memory inject", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -1684,6 +1693,8 @@ func injectUserPromptMemory(args []string, stdin io.Reader, stdout, stderr io.Wr
 		additionalContext = formatApprovedMemoryContextFor(response, "the current model invocation")
 	} else if host == "antigravity" {
 		additionalContext = formatApprovedMemoryContextFor(response, "this Antigravity session")
+	} else if host == "opencode" {
+		additionalContext = formatApprovedMemoryContextFor(response, "the current OpenCode request")
 	}
 	if strings.TrimSpace(*taskID) != "" {
 		resume, resumeErr := procedureStore.TaskResumeContext(context.Background(), *taskID, *sessionID, *maxTaskEntries)
@@ -1721,6 +1732,13 @@ func injectUserPromptMemory(args []string, stdin io.Reader, stdout, stderr io.Wr
 }
 
 func writeUserPromptMemoryOutput(host, additionalContext string, stdout, stderr io.Writer) int {
+	if host == "opencode" {
+		system := []string{}
+		if additionalContext != "" {
+			system = append(system, additionalContext)
+		}
+		return writeIndentedJSON(stdout, map[string]any{"system": system}, stderr)
+	}
 	if host == "antigravity" {
 		if additionalContext == "" {
 			return writeIndentedJSON(stdout, map[string]any{}, stderr)
@@ -3942,6 +3960,7 @@ Commands:
   memory inject-cursor --project-id <id> --threadforge-managed-cursor-memory=v1 --threadforge-memory=cursor-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory inject-qwen --project-id <id> --threadforge-managed-qwen-memory=v1 --threadforge-memory=qwen-v1 [--max-items 1-32] [--max-tokens 1-16000]
   memory inject-antigravity --project-id <id> --threadforge-managed-antigravity-memory=v1 --threadforge-memory=antigravity-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
+  memory inject-opencode --project-id <id> --threadforge-managed-opencode-memory=v1 --threadforge-memory=opencode-v1 [--max-items 1-32] [--max-tokens 1-16000]
   memory fingerprint --project-root <root> --path <relative-source-file> [--path <relative-source-file> ...]
   memory publish --project-root <root> --file <candidate.json> --expected-revision <n> --reviewer <name> --reason <reason> --privacy-reviewed
   memory read --project-root <root> --project-id <id> --kind <fact|decision|policy> --id <record-id> [--path <relative-path> ...] [--module <module-id> ...]

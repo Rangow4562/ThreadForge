@@ -11,7 +11,7 @@ test('instruction bootstrap plans shared host targets without reading or writing
   try {
     const result = await runProjectInstructionBootstrap('plan', root, [
       'claude-code', 'command-code', 'cursor', 'antigravity', 'gemini-cli', 'codex-cli', 'chatgpt-desktop-codex', 'codex-ide', 'opencode', 'qwen-code',
-      'github-copilot', 'zcode', 'kimi-code', 'qoder', 'deepseek-harness', 'goose',
+      'github-copilot', 'zcode', 'kimi-code', 'qoder', 'deepseek-harness', 'goose', 'cline',
     ]);
     assert.equal(result.schema_version, 'threadforge.project-instructions-plan.v1');
     assert.equal(result.mutates_files, false);
@@ -23,8 +23,9 @@ test('instruction bootstrap plans shared host targets without reading or writing
       { hosts: ['qwen-code'], path: 'QWEN.md', action: 'append_or_match' },
       { hosts: ['github-copilot'], path: '.github/copilot-instructions.md', action: 'append_or_match' },
       { hosts: ['goose'], path: '.goosehints', action: 'append_or_match' },
+      { hosts: ['cline'], path: '.cline/rules/threadforge-memory.md', action: 'append_or_match' },
     ]);
-    for (const name of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', 'QWEN.md', '.github/copilot-instructions.md', '.goosehints']) {
+    for (const name of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', 'QWEN.md', '.github/copilot-instructions.md', '.goosehints', '.cline/rules/threadforge-memory.md']) {
       await assert.rejects(readFile(path.join(root, name)));
     }
   } finally {
@@ -50,6 +51,34 @@ test('Goose uses its project .goosehints file and preserves existing advisory te
     const repeated = await runProjectInstructionBootstrap('install', root, ['goose']);
     assert.equal((repeated.targets as Array<{ result: string }>)[0]?.result, 'unchanged');
     const removed = await runProjectInstructionBootstrap('uninstall', root, ['goose']);
+    assert.equal((removed.targets as Array<{ result: string }>)[0]?.result, 'removed');
+    assert.deepEqual(await readFile(file), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Cline uses a project rule file and preserves user-owned rule content', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-instructions-cline-'));
+  const file = path.join(root, '.cline', 'rules', 'threadforge-memory.md');
+  const original = Buffer.from('# Cline project rules\r\nKeep this user-owned rule.', 'utf8');
+  try {
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, original);
+
+    const installed = await runProjectInstructionBootstrap('install', root, ['cline']);
+    assert.deepEqual((installed.targets as Array<{ hosts: string[]; path: string; result: string }>)[0], {
+      hosts: ['cline'], path: '.cline/rules/threadforge-memory.md', result: 'installed',
+    });
+    let content = await readFile(file);
+    assert.equal(content.subarray(0, original.length).equals(original), true);
+    assert.match(content.toString('utf8'), /freshness-aware v2 exact read/);
+    assert.match(content.toString('utf8'), /Never guess a project_id/);
+    assert.match(content.toString('utf8'), /guidance, not permission or authorization/);
+
+    const repeated = await runProjectInstructionBootstrap('install', root, ['cline']);
+    assert.equal((repeated.targets as Array<{ result: string }>)[0]?.result, 'unchanged');
+    const removed = await runProjectInstructionBootstrap('uninstall', root, ['cline']);
     assert.equal((removed.targets as Array<{ result: string }>)[0]?.result, 'removed');
     assert.deepEqual(await readFile(file), original);
   } finally {

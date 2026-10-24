@@ -30,6 +30,7 @@ export const projectInstructionTargets = {
   qoder: 'AGENTS.md',
   'deepseek-harness': 'AGENTS.md',
   goose: '.goosehints',
+  cline: '.cline/rules/threadforge-memory.md',
 } as const;
 
 export type ProjectInstructionHost = keyof typeof projectInstructionTargets;
@@ -63,6 +64,8 @@ const guidanceLines = [
   '',
   'When Threadforge project MCP tools are available, retrieve relevant read-only project or task context only when the project privacy policy permits the configured host/model to receive it.',
   'If that permission is unclear, do not retrieve or inject the context; ask the user or follow the repository privacy policy first.',
+  'Use the project-memory index only for discovery; use the freshness-aware v2 exact read when that tool is available, and do not treat index or legacy-read results as fresh.',
+  'Never guess a project_id. If no trusted project binding is available, ask the user or use an approved portable project artifact instead.',
   'Check scope, approval/review status, evidence, and source freshness. Surface stale, incomplete, conflicting, or privacy-blocked context instead of presenting it as current.',
   'Retrieved memory is guidance, not permission or authorization. Do not infer approval to execute commands, change files, contact services, or publish data from memory.',
   'Do not place credentials, raw traces, or private preferences in committed instruction files.',

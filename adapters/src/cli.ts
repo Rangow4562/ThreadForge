@@ -1784,7 +1784,7 @@ function usage(): string {
     '  npm run adapter -- mcp uninstall --host <claude-code|command-code|github-copilot|cursor|antigravity|gemini-cli|qwen-code|opencode|codex-cli|chatgpt-desktop-codex|codex-ide> --project-root <absolute-path> [--name threadforge]',
     '  npm run adapter -- bootstrap mcp plan|install|update --project-root <absolute-path> --hosts <claude-code|command-code|cursor|antigravity|gemini-cli|qwen-code|codex-cli|chatgpt-desktop-codex|codex-ide|opencode,...> --command <executable> --arg mcp --arg serve --arg --project-root --arg <same-project-root>',
     '  npm run adapter -- bootstrap mcp uninstall --project-root <absolute-path> --hosts <comma-separated-supported-hosts>',
-    '  npm run adapter -- bootstrap instructions plan|install|update|uninstall --project-root <absolute-path> --hosts <claude-code|command-code|cursor|antigravity|gemini-cli|codex-cli|chatgpt-desktop-codex|codex-ide|opencode|qwen-code|github-copilot|zcode|kimi-code|qoder|deepseek-harness|goose,...>',
+    '  npm run adapter -- bootstrap instructions plan|install|update|uninstall --project-root <absolute-path> --hosts <claude-code|command-code|cursor|antigravity|gemini-cli|codex-cli|chatgpt-desktop-codex|codex-ide|opencode|qwen-code|github-copilot|zcode|kimi-code|qoder|deepseek-harness|goose|cline,...>',
     '  npm run adapter -- cline skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- cline plugin install|update|uninstall|status [--scope user --cline-dir <absolute-path> | --scope project --project-root <absolute-path>]',
     '  npm run adapter -- cline mcp install --command <threadforge-executable> [--cline-dir <absolute-path> | --config-path <absolute-path>]',

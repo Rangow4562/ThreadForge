@@ -2026,7 +2026,7 @@ test('project MCP bootstrap plans without writes, installs eleven host IDs acros
 
 test('project instruction bootstrap plans, installs shared advisory files, and removes managed blocks', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-bootstrap-instructions-'));
-  const hosts = 'claude-code,command-code,cursor,antigravity,gemini-cli,codex-cli,chatgpt-desktop-codex,codex-ide,opencode,qwen-code,github-copilot,zcode,kimi-code,qoder,deepseek-harness,goose';
+  const hosts = 'claude-code,command-code,cursor,antigravity,gemini-cli,codex-cli,chatgpt-desktop-codex,codex-ide,opencode,qwen-code,github-copilot,zcode,kimi-code,qoder,deepseek-harness,goose,cline';
   const args = ['--project-root', root, '--hosts', hosts];
   try {
     const plan = await invoke(['bootstrap', 'instructions', 'plan', ...args]);
@@ -2035,7 +2035,7 @@ test('project instruction bootstrap plans, installs shared advisory files, and r
     assert.equal(planValue.mutates_files, false);
     assert.deepEqual(planValue.targets.map((target) => target.path), [
       'CLAUDE.md', 'AGENTS.md', 'GEMINI.md', 'QWEN.md', '.github/copilot-instructions.md',
-      '.goosehints',
+      '.goosehints', '.cline/rules/threadforge-memory.md',
     ]);
 
     const install = await invoke(['bootstrap', 'instructions', 'install', ...args]);
@@ -2047,18 +2047,19 @@ test('project instruction bootstrap plans, installs shared advisory files, and r
     assert.equal(result.status, 'complete');
     assert.equal(result.host_trust_changed, false);
     assert.equal(result.execution_authorized, false);
-    assert.deepEqual(result.targets.map((target) => target.result), ['installed', 'installed', 'installed', 'installed', 'installed', 'installed']);
+    assert.deepEqual(result.targets.map((target) => target.result), ['installed', 'installed', 'installed', 'installed', 'installed', 'installed', 'installed']);
     assert.equal(result.targets.find((target) => target.path === 'AGENTS.md')?.hosts.length, 11);
     assert.match(await readFile(path.join(root, 'GEMINI.md'), 'utf8'), /guidance, not permission or authorization/);
     assert.match(await readFile(path.join(root, 'GEMINI.md'), 'utf8'), /If that permission is unclear, do not retrieve or inject the context/);
     assert.match(await readFile(path.join(root, 'QWEN.md'), 'utf8'), /guidance, not permission or authorization/);
     assert.match(await readFile(path.join(root, '.github', 'copilot-instructions.md'), 'utf8'), /guidance, not permission or authorization/);
     assert.match(await readFile(path.join(root, '.goosehints'), 'utf8'), /guidance, not permission or authorization/);
+    assert.match(await readFile(path.join(root, '.cline', 'rules', 'threadforge-memory.md'), 'utf8'), /Never guess a project_id/);
 
     const removed = await invoke(['bootstrap', 'instructions', 'uninstall', ...args]);
     assert.equal(removed.code, 0, removed.stderr);
-    assert.deepEqual((JSON.parse(removed.stdout) as { targets: { result: string }[] }).targets.map((target) => target.result), Array(6).fill('removed'));
-    for (const filename of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', 'QWEN.md', '.github/copilot-instructions.md', '.goosehints']) {
+    assert.deepEqual((JSON.parse(removed.stdout) as { targets: { result: string }[] }).targets.map((target) => target.result), Array(7).fill('removed'));
+    for (const filename of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', 'QWEN.md', '.github/copilot-instructions.md', '.goosehints', '.cline/rules/threadforge-memory.md']) {
       await assert.rejects(readFile(path.join(root, filename)));
     }
   } finally {

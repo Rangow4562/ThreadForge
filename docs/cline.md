@@ -79,3 +79,14 @@ Each exported revision is immutable and has a revision-specific skill name. Inst
 On Windows with Cline CLI `3.0.73`, the separate `cline skill list --agent cline` wrapper failed because `skills@latest` was not recognized; it is not used as inventory evidence. An exploratory local-provider agent attempt was stopped after Cline sent a request toward the public OpenAI service instead of the configured loopback fixture. It used only a dummy key and synthetic prompt/procedure; the loopback fixture received zero requests. No real workspace data or credential was configured, but the request may have carried the synthetic test content. Do not treat this as successful retrieval, and do not retry model-bound Cline tests until provider routing is independently verified in a restricted environment.
 
 The project-skill path has automated fixture/CLI coverage and selected-version inventory discovery, but model-bound retrieval, agent use, project/global name-collision behavior, skill-setting behavior, VS Code/JetBrains surfaces, and cross-harness outcomes remain unverified. Do not treat inventory discovery as task efficacy or full Beacon/Mancode parity.
+
+## Advisory project-memory rule
+
+The shared project-instruction bootstrap can install a Threadforge continuity rule into `.cline/rules/threadforge-memory.md`:
+
+```powershell
+npm.cmd --prefix adapters run adapter -- bootstrap instructions plan --project-root <project> --hosts cline
+npm.cmd --prefix adapters run adapter -- bootstrap instructions install --project-root <project> --hosts cline
+```
+
+Use the same command family with `update` or `uninstall` to manage the Threadforge-marked block. The rule is advisory and tells the agent to prefer freshness-aware project-memory v2 exact reads, require an explicit trusted `project_id`, and ask or use an approved portable artifact when the required MCP tool or project binding is unavailable. This does not configure Cline's user-global MCP server, set trust, change approvals, or install a skill. Fixture tests verify that unrelated file content is preserved; Cline rule discovery, prompt behavior, actual MCP retrieval, and efficacy have not been tested.

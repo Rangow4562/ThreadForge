@@ -108,6 +108,8 @@ The separate `bootstrap instructions plan|install|update|uninstall` command targ
 
 The optional `@threadforge/adapter-contracts/otel-span-processor` projects a narrow allowlist of GenAI span metadata into the local event contract for applications that manage their own OpenTelemetry provider. It does not initialize or export through an OpenTelemetry SDK itself, and does not replace Beacon's documented provider-specific instrumentation.
 
+Cline project-memory rule update: the shared `bootstrap instructions --hosts cline` command manages `.cline/rules/threadforge-memory.md` as an advisory project file. Fixture preservation/lifecycle is covered; host rule discovery, project MCP binding, prompt retrieval, and actual model use are not verified.
+
 ## Release gate
 
 For every row, record supported event coverage, install/update/uninstall behavior, unrelated-configuration preservation, rollback, host-version contract, and end-to-end capture evidence. Prefer MCP or portable skill/file access where automatic injection is unsupported. No adapter may enable context injection until its host contract is verified, and no host is marked complete based only on a shared schema or a successful compile.

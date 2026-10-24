@@ -106,6 +106,8 @@ The separate `bootstrap instructions plan|install|update|uninstall` command targ
 | `sdk/integrations-claude-agent-sdk.mdx` | Partial: `@threadforge/adapter-contracts/claude-agent-sdk` observes a query's async result stream while preserving yielded messages and query controls; it records duration, terminal status, and result count only, omitting prompt/output, identifiers, usage snapshots, and token/cost attribution. Structural fixtures pass; no live SDK process or model run. |
 | `sdk/integrations-vercel-ai-sdk.mdx` | Partial: `@threadforge/adapter-contracts/vercel-ai-sdk` creates the native `experimental_telemetry` settings with required caller tracer, `isEnabled=true`, `recordInputs=false`, and `recordOutputs=false`; it does not create exporters or global providers. Fixtures pass; per-call span delivery, span-field privacy, packaging, and live-version compatibility remain unverified. |
 
+The optional `@threadforge/adapter-contracts/otel-span-processor` projects a narrow allowlist of GenAI span metadata into the local event contract for applications that manage their own OpenTelemetry provider. It does not initialize or export through an OpenTelemetry SDK itself, and does not replace Beacon's documented provider-specific instrumentation.
+
 ## Release gate
 
 For every row, record supported event coverage, install/update/uninstall behavior, unrelated-configuration preservation, rollback, host-version contract, and end-to-end capture evidence. Prefer MCP or portable skill/file access where automatic injection is unsupported. No adapter may enable context injection until its host contract is verified, and no host is marked complete based only on a shared schema or a successful compile.

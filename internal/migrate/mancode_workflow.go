@@ -69,8 +69,8 @@ type mancodeWorkflowLocation struct {
 }
 
 func decodeMancodeSourceItems(relative string, data []byte) ([]any, error) {
-	switch strings.ToLower(filepath.Ext(relative)) {
-	case ".json":
+	switch {
+	case strings.EqualFold(filepath.Ext(relative), ".json"):
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.UseNumber()
 		var value any
@@ -85,9 +85,9 @@ func decodeMancodeSourceItems(relative string, data []byte) ([]any, error) {
 			return values, nil
 		}
 		return []any{value}, nil
-	case ".md", ".mdx", ".txt", ".log":
-		if !utf8.Valid(data) {
-			return nil, errors.New("invalid UTF-8 Mancode workflow document")
+	case isMancodeWorkflowDocumentExtension(relative):
+		if !utf8.Valid(data) || bytes.ContainsRune(data, 0) {
+			return nil, errors.New("invalid UTF-8 or binary Mancode workflow document")
 		}
 		return []any{map[string]any{"content": string(data)}}, nil
 	default:

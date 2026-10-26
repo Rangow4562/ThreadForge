@@ -68,7 +68,6 @@ type mancodeProjectFactImport struct {
 func eligibleMancodePath(relative, sourceRoot string) bool {
 	lower := mancodePath(relative, sourceRoot)
 	base := strings.ToLower(filepath.Base(relative))
-	isDocument := extIs(relative, ".json", ".md", ".mdx", ".txt", ".log")
 	if isMancodeProgressHTMLPath(relative) {
 		return extIs(relative, ".html")
 	}
@@ -85,11 +84,15 @@ func eligibleMancodePath(relative, sourceRoot string) bool {
 
 	for _, prefix := range []string{
 		"/workflows/", "/.mancode/workflows/",
-		"/memory/", "/.mancode/memory/",
 		"/.mancode/local/workflows/", "/.mancode/shared/workflows/",
 	} {
 		if strings.HasPrefix(lower, prefix) {
-			return isDocument
+			return extIs(relative, ".json") || isMancodeWorkflowDocumentExtension(relative)
+		}
+	}
+	for _, prefix := range []string{"/memory/", "/.mancode/memory/"} {
+		if strings.HasPrefix(lower, prefix) {
+			return extIs(relative, ".json", ".md", ".mdx", ".txt", ".log")
 		}
 	}
 	for _, prefix := range []string{
@@ -117,6 +120,12 @@ func eligibleMancodePath(relative, sourceRoot string) bool {
 		}
 	}
 	return false
+}
+
+func isMancodeWorkflowDocumentExtension(relative string) bool {
+	return extIs(relative, ".md", ".mdx", ".txt", ".log", ".yaml", ".yml", ".toml", ".csv", ".tsv",
+		".xml", ".html", ".htm", ".ini", ".conf", ".cfg", ".properties", ".rst", ".adoc", ".diff", ".patch",
+		".sh", ".ps1", ".sql", ".jsonl", ".ndjson")
 }
 
 func mancodePath(relative, sourceRoot string) string {
@@ -234,8 +243,7 @@ func classifyMancodeRecord(relative string) string {
 		case "checkpoint.json":
 			return "workflow_checkpoint"
 		default:
-			if strings.HasSuffix(base, ".md") || strings.HasSuffix(base, ".mdx") ||
-				strings.HasSuffix(base, ".txt") || strings.HasSuffix(base, ".log") {
+			if isMancodeWorkflowDocumentExtension(relative) {
 				return "workflow_document"
 			}
 			return "workflow_state"

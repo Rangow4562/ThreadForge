@@ -266,6 +266,75 @@ func TestMancodeLegacySensitiveReferenceDoesNotInvokeContentHasher(t *testing.T)
 	}
 }
 
+func TestMancodeLegacyWorkflowReferencedTextFormatsImportAsReviewOnlyDocuments(t *testing.T) {
+	if eligibleMancodePath(".mancode/memory/project.yaml", t.TempDir()) {
+		t.Fatal("workflow-only text extensions broadened Mancode memory-file eligibility")
+	}
+	formats := []struct {
+		extension string
+		content   string
+	}{
+		{".yaml", "result: passed\n"},
+		{".toml", "result = 'passed'\n"},
+		{".csv", "check,result\nunit,passed\n"},
+		{".xml", "<result>passed</result>\n"},
+		{".html", "<p>result: passed</p>\n"},
+		{".sql", "-- verification evidence\nSELECT 1;\n"},
+	}
+	for _, format := range formats {
+		t.Run(format.extension, func(t *testing.T) {
+			root := t.TempDir()
+			reference := "reports/evidence" + format.extension
+			taskID := writeMancodeLegacyBindingFixture(t, root, map[string]func(map[string]any){
+				"artifact_reference": func(ledger map[string]any) {
+					checks := ledger["checks"].([]any)
+					automated := checks[0].(map[string]any)["automated"].(map[string]any)
+					automated["evidenceFile"] = reference
+				},
+			})
+			relative := filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, filepath.FromSlash(reference)))
+			writeMancodeFixture(t, root, relative, []byte(format.content))
+
+			if !eligibleMancodePath(relative, root) || classifyMancodeRecord(relative) != "workflow_document" {
+				t.Fatalf("referenced text extension was not classified as a workflow document: %s", relative)
+			}
+			items, err := decodeMancodeSourceItems(relative, []byte(format.content))
+			if err != nil || len(items) != 1 || items[0].(map[string]any)["content"] != format.content {
+				t.Fatalf("referenced text content was not preserved: items=%#v err=%v", items, err)
+			}
+			scanned, _, err := scanFile(Mancode, root, relative, filepath.Join(root, filepath.FromSlash(relative)),
+				[]byte(format.content), maxTotalBytes, 0)
+			if err != nil || len(scanned.records) != 1 || scanned.records[0].Type != "workflow_document" ||
+				scanned.records[0].Scope != "local_pending_review" {
+				t.Fatalf("referenced text was not staged as inert review-only content: records=%#v err=%v", scanned.records, err)
+			}
+			manifest, err := Inspect(Mancode, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(manifest.MancodeLegacyWorkflowChecks) != 1 {
+				t.Fatalf("expected one legacy workflow check, got %#v", manifest.MancodeLegacyWorkflowChecks)
+			}
+			check := manifest.MancodeLegacyWorkflowChecks[0]
+			if check.Status != "verified" || check.ArtifactReferences == nil || !check.ArtifactReferences.BindingVerified {
+				t.Fatalf("referenced text document did not bind as imported review-only data: %#v", check)
+			}
+			for _, entry := range manifest.Files {
+				if entry.Path == relative {
+					if entry.Status != "ready" || entry.RecordCount != 1 || entry.ImportedCount != 1 {
+						t.Fatalf("referenced text document did not produce one staged record: %#v", entry)
+					}
+					return
+				}
+			}
+			t.Fatalf("referenced text document is absent from the source inventory: %s", relative)
+		})
+	}
+	if _, err := decodeMancodeSourceItems("evidence.yaml", []byte("unsafe\x00content")); err == nil {
+		t.Fatal("binary Mancode workflow document was accepted as text")
+	}
+}
+
 func TestMancodeLegacyWorkflowBindingSurfacesSiblingMismatches(t *testing.T) {
 	tests := []struct {
 		name   string

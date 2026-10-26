@@ -82,6 +82,7 @@
     "./cline-history": "./src/cline-history.ts",
     "./cline-skill-config": "./src/cline-skill-config.ts",
     "./claude-skill-config": "./src/claude-skill-config.ts",
+    "./aider-skill-config": "./src/aider-skill-config.ts",
     "./command-code-skill-config": "./src/command-code-skill-config.ts",
     "./cursor-skill-config": "./src/cursor-skill-config.ts",
     "./devin-skill-config": "./src/devin-skill-config.ts",

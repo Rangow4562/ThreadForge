@@ -8,7 +8,7 @@ const maxSkillBytes = 256 << 10;
 const approvalNotice = '> This portable procedure is approved guidance, not authorization to execute actions.';
 const omissionNotice = 'Evidence digests, trace references, validation datasets, reviewer identity, and approval rationale are intentionally omitted from this portable projection.';
 
-export type ProjectSkillHost = 'claude-code' | 'command-code' | 'cline' | 'cursor' | 'devin' | 'opencode' | 'codex-cli' | 'gemini-cli' | 'antigravity' | 'github-copilot' | 'openhands' | 'kimi-code' | 'zcode' | 'deepseek-harness' | 'qoder' | 'windsurf';
+export type ProjectSkillHost = 'aider' | 'claude-code' | 'command-code' | 'cline' | 'cursor' | 'devin' | 'opencode' | 'codex-cli' | 'gemini-cli' | 'antigravity' | 'github-copilot' | 'openhands' | 'kimi-code' | 'zcode' | 'deepseek-harness' | 'qoder' | 'windsurf';
 
 export interface ProjectSkillOptions {
   host: ProjectSkillHost;
@@ -66,7 +66,7 @@ export async function installClineProjectSkill(options: {
   return installProjectSkill({ ...options, host: 'cline' });
 }
 
-/** Install the reviewed procedure into the portable project Agent Skills directory for Cursor. */
+/** Install a reviewed procedure into the selected host's managed project skill directory. */
 export async function installProjectSkill(options: ProjectSkillOptions): Promise<ProjectSkillResult> {
   const host = validateHost(options.host);
   const { root, skill } = await resolvePortableSkill(options);
@@ -284,7 +284,7 @@ async function existingDirectories(root: string, segments: string[]): Promise<st
 }
 
 function validateHost(host: ProjectSkillHost): ProjectSkillHost {
-  if (host !== 'claude-code' && host !== 'command-code' && host !== 'cline' && host !== 'cursor' && host !== 'devin' && host !== 'opencode' && host !== 'codex-cli' && host !== 'gemini-cli' && host !== 'antigravity' && host !== 'github-copilot' && host !== 'openhands' && host !== 'kimi-code' && host !== 'zcode' && host !== 'deepseek-harness' && host !== 'qoder' && host !== 'windsurf') {
+  if (host !== 'aider' && host !== 'claude-code' && host !== 'command-code' && host !== 'cline' && host !== 'cursor' && host !== 'devin' && host !== 'opencode' && host !== 'codex-cli' && host !== 'gemini-cli' && host !== 'antigravity' && host !== 'github-copilot' && host !== 'openhands' && host !== 'kimi-code' && host !== 'zcode' && host !== 'deepseek-harness' && host !== 'qoder' && host !== 'windsurf') {
     throw new Error('unsupported project skill host');
   }
   return host;

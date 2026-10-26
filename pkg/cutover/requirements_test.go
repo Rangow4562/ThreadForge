@@ -23,6 +23,7 @@ var parityRowRequirements = map[string][]string{
 	"Beacon security":                             {"beacon.security"},
 	"Beacon memory":                               {"beacon.memory"},
 	"GitHub Copilot CLI memory injection":         {"beacon.adapter.github-copilot-cli-memory"},
+	"Aider approved procedure access":              {"harness.aider.approved-procedure"},
 	"Beacon session handoff":                      {"beacon.session-handoff"},
 	"Mancode continuity":                          {"mancode.continuity"},
 	"Mancode task plans":                          {"mancode.task-plans"},

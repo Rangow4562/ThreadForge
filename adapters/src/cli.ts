@@ -103,6 +103,7 @@ import { getGooseHistoryStatus, syncGooseHistory } from './goose-history.ts';
 import { getVSCodeOtelStatus, parseVSCodeOtelDuration, renderVSCodeOtelConfig, validateVSCodeOtelStatus } from './vscode-otel.ts';
 import { renderClaudeCoworkOtelGuidance } from './claude-cowork-otel.ts';
 import { installProjectSkill, uninstallProjectSkill, type ProjectSkillHost } from './project-skill-config.ts';
+import { installAiderProjectSkill, uninstallAiderProjectSkill } from './aider-skill-config.ts';
 import { installCopilotProjectPrompt, uninstallCopilotProjectPrompt } from './copilot-prompt-config.ts';
 import { installQoderProjectCommand, uninstallQoderProjectCommand } from './qoder-command-config.ts';
 import {
@@ -178,7 +179,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       return 2;
     }
   }
-  if ((family === 'claude-code' || family === 'command-code' || family === 'cline' || family === 'cursor' || family === 'devin' || family === 'opencode' || family === 'codex' || family === 'gemini' || family === 'antigravity' || family === 'copilot' || family === 'openhands' || family === 'kimi' || family === 'zcode' || family === 'dsh' || family === 'qoder' || family === 'windsurf' || family === 'devin-desktop') && action === 'skills') {
+  if ((family === 'aider' || family === 'claude-code' || family === 'command-code' || family === 'cline' || family === 'cursor' || family === 'devin' || family === 'opencode' || family === 'codex' || family === 'gemini' || family === 'antigravity' || family === 'copilot' || family === 'openhands' || family === 'kimi' || family === 'zcode' || family === 'dsh' || family === 'qoder' || family === 'windsurf' || family === 'devin-desktop') && action === 'skills') {
     projectSkillSubsystem = 'skills';
     action = rest[0];
     rest = rest.slice(1);
@@ -872,6 +873,20 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
         : await uninstallCopilotProjectPrompt(promptOptions);
       if (action === 'install') {
         warning = 'Copilot prompt files are manually invoked IDE customizations; discovery and use depend on the selected IDE/version. This command does not configure prompt-file settings, change trust, or enable Copilot CLI prompt-file support.';
+      }
+    } else if (family === 'aider' && projectSkillSubsystem === 'skills' && (action === 'install' || action === 'uninstall')) {
+      rejectUnexpected(options, ['project-root', 'skill-file', 'sha256']);
+      const skillOptions = {
+        projectRoot,
+        skillFile: required(options, 'skill-file'),
+        sha256: required(options, 'sha256'),
+      };
+      result = action === 'install'
+        ? await installAiderProjectSkill(skillOptions)
+        : await uninstallAiderProjectSkill(skillOptions);
+      if (action === 'install') {
+        const skillPath = (result as { path: string }).path;
+        warning = `Threadforge does not configure Aider to auto-read this skill. From the project root, explicitly load the read-only guidance with: aider --read "${skillPath}". Aider configuration was not edited.`;
       }
     } else if ((family === 'claude-code' || family === 'command-code' || family === 'cline' || family === 'cursor' || family === 'devin' || family === 'opencode' || family === 'codex' || family === 'gemini' || family === 'antigravity' || family === 'copilot' || family === 'openhands' || family === 'kimi' || family === 'zcode' || family === 'dsh' || family === 'qoder' || family === 'windsurf' || family === 'devin-desktop') && projectSkillSubsystem === 'skills' && (action === 'install' || action === 'uninstall')) {
       rejectUnexpected(options, ['project-root', 'skill-file', 'sha256']);
@@ -1794,6 +1809,7 @@ function usage(): string {
     '  npm run adapter -- cline sessions status [--cline-dir <absolute-path>] [--vscode-storage-dir <absolute-path>] [--state-path <absolute-path>] [--max-sessions <1-5000>]',
     '  npm run adapter -- cline sessions sync [--cline-dir <absolute-path>] [--vscode-storage-dir <absolute-path>] [--state-path <absolute-path>] [--endpoint <loopback-v1-events-url>] [--max-sessions <1-5000>] [--print] [--include-content] [--watch --interval <5s-168h>]',
     '  npm run adapter -- claude-code skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
+    '  npm run adapter -- aider skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- command-code skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- claude-code memory install|update --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers>',
     '  npm run adapter -- claude-code memory uninstall --project-root <absolute-path>',

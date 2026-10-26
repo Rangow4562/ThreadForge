@@ -12,6 +12,7 @@ var RequiredFeatures = []string{
 	"beacon.security",
 	"beacon.memory",
 	"beacon.adapter.github-copilot-cli-memory",
+	"harness.aider.approved-procedure",
 	"beacon.session-handoff",
 	"beacon.adapter.deepseek-harness",
 	"mancode.continuity",

@@ -92,6 +92,7 @@ Threadforge integrates with over 20 AI coding agent harnesses and runtimes, prov
 
 | Harness / Runtime | Integration Type | Approved Memory Retrieval | Task Continuity / Plan Guard | Local History Poller | Status & Documentation |
 | :--- | :--- | :---: | :---: | :---: | :--- |
+| **Aider** | Portable approved procedure file | Explicit read-only `--read` argument | None | None | Manual retrieval path ([`docs/aider.md`](docs/aider.md)) |
 | **Claude Code** | Native Hooks + MCP | `UserPromptSubmit` (local) | Deny-only `PreToolUse` file guard | JSONL Transcript Poller | Verified Local Smoke ([`docs/claude-history.md`](docs/claude-history.md)) |
 | **Codex CLI** | Hooks + OTLP + MCP | `UserPromptSubmit` (local) | Advisory continuity context | Native Session Reader | Verified Loopback OTLP ([`docs/codex-cli-telemetry.md`](docs/codex-cli-telemetry.md)) |
 | **Cursor** | Extension + MCP | `sessionStart` Bootstrap | Deny-only `Write` plan gate | Composer DB & Transcripts | Verified Composer Sync ([`docs/cursor-history.md`](docs/cursor-history.md)) |
@@ -285,6 +286,7 @@ npm run test:package
 - [Architecture & Invariants](docs/architecture.md) — Comprehensive local-first system design and threat model.
 - [Feature Parity Ledger](docs/feature-parity.md) — Line-by-line feature tracking against legacy Beacon, Mancode, AnyJev, and RRSI.
 - [Host Source Matrix](docs/source-matrix.md) — Detailed coverage analysis for each supported agent harness.
+- [Aider Procedure Access](docs/aider.md) — Digest-checked portable procedure loading with Aider's explicit read-only file option.
 - [Model Context Protocol (MCP) Setup](docs/mcp.md) — Guide to configuring MCP tools, resources, and handoffs.
 - [Team Authorization & Sync](docs/team-authorization.md) — Ed25519 cryptographic trust policies, revision control, and Git-ref sync.
 - [Task Continuity & Handoffs](docs/task-handoffs.md) — Cross-session continuity, session stores, and brief exports.

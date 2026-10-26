@@ -565,6 +565,42 @@ test('OpenCode CLI installs and removes a reviewed procedure in .agents/skills',
   }
 });
 
+test('Aider installs a digest-checked read-only skill and prints an explicit load command without editing config', async () => {
+  const f = fixture();
+  const configPath = path.join(f.root, '.aider.conf.yml');
+  const config = 'read:\n  - USER_CONVENTIONS.md\nmodel: user-selected-model\n';
+  writeFileSync(configPath, config);
+  const stdout = writableText();
+  const stderr = writableText();
+  const base = ['--project-root', f.root, '--skill-file', f.file, '--sha256', f.sha256];
+  try {
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'install', ...base], stdout.stream, stderr.stream), 0, stderr.text());
+    const installed = JSON.parse(stdout.text()) as {
+      family: string;
+      action: string;
+      result: { host: string; action: string; path: string };
+      warning: string;
+    };
+    assert.equal(installed.family, 'aider');
+    assert.equal(installed.action, 'install');
+    assert.equal(installed.result.host, 'aider');
+    assert.equal(installed.result.action, 'installed');
+    assert.match(installed.result.path, /^\.agents\/skills\//);
+    assert.ok(installed.warning.includes(`aider --read "${installed.result.path}"`));
+    assert.ok(installed.warning.includes('does not configure Aider to auto-read'));
+    assert.equal(readFileSync(configPath, 'utf8'), config);
+
+    const removeOut = writableText();
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'uninstall', ...base], removeOut.stream, stderr.stream), 0, stderr.text());
+    const removed = JSON.parse(removeOut.text()) as { result: { host: string; action: string } };
+    assert.equal(removed.result.host, 'aider');
+    assert.equal(removed.result.action, 'removed');
+    assert.equal(readFileSync(configPath, 'utf8'), config);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('OpenHands CLI installs only reviewed project skills and preserves its MCP and hook settings', async () => {
   const f = fixture();
   const configDirectory = path.join(f.root, '.openhands');

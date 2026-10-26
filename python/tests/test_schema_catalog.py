@@ -50,6 +50,7 @@ def test_project_skill_result_schema_accepts_windsurf_and_rejects_unknown_hosts_
         "sha256": "a" * 64,
     }
     validator.validate(result)
+    validator.validate({**result, "host": "aider"})
     with pytest.raises(ValidationError):
         validator.validate({**result, "host": "unknown-agent"})
     with pytest.raises(ValidationError):

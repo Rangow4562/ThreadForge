@@ -68,7 +68,7 @@ type mancodeProjectFactImport struct {
 func eligibleMancodePath(relative, sourceRoot string) bool {
 	lower := mancodePath(relative, sourceRoot)
 	base := strings.ToLower(filepath.Base(relative))
-	isDocument := extIs(relative, ".json", ".md", ".mdx")
+	isDocument := extIs(relative, ".json", ".md", ".mdx", ".txt", ".log")
 	if isMancodeProgressHTMLPath(relative) {
 		return extIs(relative, ".html")
 	}
@@ -234,7 +234,8 @@ func classifyMancodeRecord(relative string) string {
 		case "checkpoint.json":
 			return "workflow_checkpoint"
 		default:
-			if strings.HasSuffix(base, ".md") || strings.HasSuffix(base, ".mdx") {
+			if strings.HasSuffix(base, ".md") || strings.HasSuffix(base, ".mdx") ||
+				strings.HasSuffix(base, ".txt") || strings.HasSuffix(base, ".log") {
 				return "workflow_document"
 			}
 			return "workflow_state"

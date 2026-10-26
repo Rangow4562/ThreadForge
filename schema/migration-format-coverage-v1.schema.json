@@ -176,9 +176,10 @@
         "review_remediation_binding_verified": { "type": "boolean" },
         "plan_presence_verified": { "type": "boolean" },
         "plan_content_binding_verified": { "const": false },
+        "artifact_references": { "$ref": "#/$defs/mancode_legacy_artifact_references" },
         "status": { "enum": ["verified", "incomplete", "conflicting"] },
         "issues": {
-          "type": "array", "maxItems": 26, "uniqueItems": true,
+          "type": "array", "maxItems": 30, "uniqueItems": true,
           "items": { "enum": [
             "metadata_missing", "metadata_ambiguous", "metadata_invalid",
             "requirements_missing", "requirements_ambiguous", "requirements_invalid",
@@ -186,7 +187,9 @@
             "verification_invalid", "plan_missing", "plan_ambiguous", "plan_invalid",
             "requirements_digest_mismatch", "acceptance_criteria_mismatch", "plan_version_mismatch",
             "remediation_round_mismatch", "metadata_requirements_digest_mismatch",
-            "metadata_requirements_status_mismatch", "metadata_verification_status_mismatch", "legacy_unverified"
+            "metadata_requirements_status_mismatch", "metadata_verification_status_mismatch",
+            "referenced_artifact_missing", "referenced_artifact_unimported", "referenced_artifact_ambiguous", "referenced_artifact_unavailable",
+            "legacy_unverified"
           ] }
         },
         "authority": { "const": "local_pending_review" },
@@ -203,8 +206,45 @@
         { "if": { "required": ["metadata_verification_status_binding_verified"], "properties": { "metadata_verification_status_binding_verified": { "const": true } } }, "then": { "required": ["metadata_verification_status_present"], "properties": { "metadata_verification_status_present": { "const": true }, "metadata_valid": { "const": true }, "verification_valid": { "const": true } } } },
         { "if": { "required": ["metadata_requirements_status_present", "status"], "properties": { "metadata_requirements_status_present": { "const": true }, "status": { "const": "verified" } } }, "then": { "required": ["metadata_requirements_status_binding_verified"], "properties": { "metadata_requirements_status_binding_verified": { "const": true } } } },
         { "if": { "required": ["metadata_verification_status_present", "status"], "properties": { "metadata_verification_status_present": { "const": true }, "status": { "const": "verified" } } }, "then": { "required": ["metadata_verification_status_binding_verified"], "properties": { "metadata_verification_status_binding_verified": { "const": true } } } },
+        { "if": { "required": ["artifact_references", "status"], "properties": { "status": { "const": "verified" } } }, "then": { "properties": { "artifact_references": { "properties": { "binding_verified": { "const": true } } } } } },
         { "if": { "properties": { "status": { "const": "verified" } } }, "then": { "properties": { "metadata_valid": { "const": true }, "requirements_valid": { "const": true }, "verification_valid": { "const": true }, "plan_valid": { "const": true }, "requirements_digest_binding_verified": { "const": true }, "acceptance_criteria_binding_verified": { "const": true }, "plan_version_binding_verified": { "const": true }, "review_remediation_binding_verified": { "const": true }, "plan_presence_verified": { "const": true }, "issues": { "maxItems": 0 } } }, "else": { "properties": { "issues": { "minItems": 1 } } } }
       ]
+    },
+    "mancode_legacy_artifact_references": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference_count", "found_count", "imported_count", "targets", "binding_verified"],
+      "properties": {
+        "reference_count": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "found_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "imported_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "targets": {
+          "type": "array", "maxItems": 10000,
+          "items": { "$ref": "#/$defs/mancode_legacy_artifact_target" }
+        },
+        "binding_verified": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "binding_verified": { "const": true } } },
+          "then": {
+            "properties": {
+              "found_count": { "minimum": 1 },
+              "imported_count": { "minimum": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "mancode_legacy_artifact_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path_sha256", "source_sha256", "imported"],
+      "properties": {
+        "path_sha256": { "$ref": "#/$defs/sha256" },
+        "source_sha256": { "$ref": "#/$defs/sha256" },
+        "imported": { "type": "boolean" }
+      }
     },
     "mancode_team_policy_check": {
       "type": "object",

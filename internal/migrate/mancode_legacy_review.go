@@ -18,7 +18,6 @@ const (
 
 var (
 	mancodeLegacyReviewBlockerID = regexp.MustCompile(`^[A-Z][A-Z0-9-]{0,31}$`)
-	mancodeLegacyReviewDrivePath = regexp.MustCompile(`^[A-Za-z]:`)
 )
 
 type mancodeLegacyReviewProjection struct {
@@ -208,11 +207,7 @@ func mancodeLegacyReviewDomains(value any) ([]string, bool) {
 
 func mancodeLegacyReviewReportPath(value string) bool {
 	normalized := strings.ReplaceAll(value, "\\", "/")
-	clean := path.Clean(normalized)
-	return mancodeBoundedString(value, 1, 512) && strings.TrimSpace(value) != "" &&
-		!strings.HasPrefix(normalized, "/") && !strings.HasPrefix(normalized, "//") &&
-		!mancodeLegacyReviewDrivePath.MatchString(normalized) && clean != ".." && !strings.HasPrefix(clean, "../") &&
-		!strings.Contains(normalized, "../") && !strings.Contains(normalized, "/..") && strings.HasSuffix(strings.ToLower(clean), ".md")
+	return mancodeLegacySafeArtifactPath(value, 512) && strings.EqualFold(path.Ext(normalized), ".md")
 }
 
 func mancodeLegacyReviewText(value any) (string, bool) {

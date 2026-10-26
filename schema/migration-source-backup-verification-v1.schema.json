@@ -16,8 +16,14 @@
     "source_fingerprint": { "$ref": "#/$defs/sha256" },
     "current_source_fingerprint": { "$ref": "#/$defs/sha256" },
     "snapshot_sha256": { "$ref": "#/$defs/sha256" },
-    "source_tree_sha256": { "$ref": "#/$defs/sha256" },
-    "backup_tree_sha256": { "$ref": "#/$defs/sha256" },
+    "source_tree_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "Deterministic tree commitment; credential-bearing paths contribute a normalized path-only commitment instead of a per-file content digest."
+    },
+    "backup_tree_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "Deterministic tree commitment; credential-bearing paths contribute a normalized path-only commitment instead of a per-file content digest."
+    },
     "source_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
     "backup_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
     "source_bytes": { "type": "integer", "minimum": 0, "maximum": 1073741824 },

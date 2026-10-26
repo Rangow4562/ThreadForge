@@ -85,7 +85,10 @@ func decodeMancodeSourceItems(relative string, data []byte) ([]any, error) {
 			return values, nil
 		}
 		return []any{value}, nil
-	case ".md", ".mdx":
+	case ".md", ".mdx", ".txt", ".log":
+		if !utf8.Valid(data) {
+			return nil, errors.New("invalid UTF-8 Mancode workflow document")
+		}
 		return []any{map[string]any{"content": string(data)}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported Mancode file extension %q", filepath.Ext(relative))

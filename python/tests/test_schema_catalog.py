@@ -2178,6 +2178,17 @@ def test_cutover_v5_requires_format_coverage_and_source_backup_verification():
             "review_remediation_binding_verified": True,
             "plan_presence_verified": True,
             "plan_content_binding_verified": False,
+            "artifact_references": {
+                "reference_count": 1,
+                "found_count": 1,
+                "imported_count": 1,
+                "targets": [{
+                    "path_sha256": "d" * 64,
+                    "source_sha256": "e" * 64,
+                    "imported": True,
+                }],
+                "binding_verified": True,
+            },
             "status": "verified",
             "issues": [],
             "authority": "local_pending_review",
@@ -2243,6 +2254,23 @@ def test_cutover_v5_requires_format_coverage_and_source_backup_verification():
         } for name in ("metadata", "requirements", "review", "verification", "plan")]],
     }
     coverage_validator.validate(coverage_document)
+
+    incomplete_artifact_document = json.loads(json.dumps(coverage_document))
+    incomplete_artifact_check = incomplete_artifact_document["mancode_legacy_workflow_checks"][0]
+    incomplete_artifact_check["artifact_references"] = {
+        "reference_count": 1,
+        "found_count": 0,
+        "imported_count": 0,
+        "targets": [],
+        "binding_verified": False,
+    }
+    incomplete_artifact_check["status"] = "incomplete"
+    incomplete_artifact_check["issues"] = ["referenced_artifact_missing"]
+    coverage_validator.validate(incomplete_artifact_document)
+
+    verified_without_artifact_binding = json.loads(json.dumps(coverage_document))
+    verified_without_artifact_binding["mancode_legacy_workflow_checks"][0]["artifact_references"]["binding_verified"] = False
+    assert list(coverage_validator.iter_errors(verified_without_artifact_binding))
 
     legacy_coverage_document = json.loads(json.dumps(coverage_document))
     legacy_check = legacy_coverage_document["mancode_legacy_workflow_checks"][0]

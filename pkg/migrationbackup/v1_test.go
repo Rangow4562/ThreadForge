@@ -260,6 +260,63 @@ func TestPathWithinTreatsDifferentWindowsVolumesAsDisjoint(t *testing.T) {
 	}
 }
 
+func TestSensitiveTreeEntriesUsePathOnlyReceiptsButStillDetectBackupDifferences(t *testing.T) {
+	sourceRoot := t.TempDir()
+	backupRoot := t.TempDir()
+	relative := filepath.ToSlash(filepath.Join("nested", "private-secret.txt"))
+	secret := []byte("credential-a")
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(sourceRoot, filepath.FromSlash(relative))), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(backupRoot, filepath.FromSlash(relative))), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceRoot, filepath.FromSlash(relative)), secret, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupRoot, filepath.FromSlash(relative)), secret, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	source, err := scanTree(sourceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := scanTree(backupRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceFile := source.files[relative]
+	backupFile := backup.files[relative]
+	secretDigest := sha256.Sum256(secret)
+	if sourceFile.digest != migrate.CredentialPathCommitment(relative) ||
+		sourceFile.digest == hex.EncodeToString(secretDigest[:]) || source.sha256 != backup.sha256 || differentFileCount(source, backup) != 0 {
+		t.Fatalf("credential tree receipt included its content digest: source=%+v backup=%+v", sourceFile, backupFile)
+	}
+	credentialManifest := migrate.Manifest{
+		SourceFingerprint: strings.Repeat("a", 64),
+		Files: []migrate.FileEntry{{
+			Path: relative, SourceSHA256: migrate.CredentialPathCommitment(relative),
+			SourceBytes: int64(len(secret)), Status: "credential_path_excluded",
+		}},
+	}
+	if mismatches := snapshotSourceMismatchCount(source, credentialManifest, credentialManifest); mismatches != 0 {
+		t.Fatalf("snapshot verifier did not honor the credential path-only commitment: mismatches=%d", mismatches)
+	}
+
+	if err := os.WriteFile(filepath.Join(backupRoot, filepath.FromSlash(relative)), []byte("credential-b"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changedBackup, err := scanTree(backupRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.sha256 != changedBackup.sha256 || differentFileCount(source, changedBackup) != 1 {
+		t.Fatalf("credential content mismatch was not detected without changing the path-only receipt: source=%+v backup=%+v",
+			sourceFile, changedBackup.files[relative])
+	}
+}
+
 func backupFixture(t *testing.T) (string, string) {
 	t.Helper()
 	sourceRoot := t.TempDir()

@@ -48,43 +48,60 @@ type Report struct {
 // MancodeLegacyWorkflowCheck records path-redacted binding evidence for the
 // pre-v3 workflow files. It is continuity evidence only, never execution authority.
 type MancodeLegacyWorkflowCheck struct {
-	SchemaVersion                             string   `json:"schema_version"`
-	Relationship                              string   `json:"relationship"`
-	WorkflowIDSHA256                          string   `json:"workflow_id_sha256"`
-	MetadataFileCount                         int      `json:"metadata_file_count"`
-	MetadataValid                             bool     `json:"metadata_valid"`
-	MetadataSourceSetSHA256                   string   `json:"metadata_source_set_sha256,omitempty"`
-	RequirementsFileCount                     int      `json:"requirements_file_count"`
-	RequirementsValid                         bool     `json:"requirements_valid"`
-	RequirementsSourceSetSHA256               string   `json:"requirements_source_set_sha256,omitempty"`
-	ReviewFileCount                           int      `json:"review_file_count"`
-	ReviewValid                               bool     `json:"review_valid"`
-	ReviewSourceSetSHA256                     string   `json:"review_source_set_sha256,omitempty"`
-	VerificationFileCount                     int      `json:"verification_file_count"`
-	VerificationValid                         bool     `json:"verification_valid"`
-	VerificationSourceSetSHA256               string   `json:"verification_source_set_sha256,omitempty"`
-	PlanFileCount                             int      `json:"plan_file_count"`
-	PlanValid                                 bool     `json:"plan_valid"`
-	PlanSourceSetSHA256                       string   `json:"plan_source_set_sha256,omitempty"`
-	MetadataPlanVersionDefaulted              bool     `json:"metadata_plan_version_defaulted"`
-	MetadataRequirementsDigestPresent         bool     `json:"metadata_requirements_digest_present"`
-	MetadataRequirementsDigestBindingVerified bool     `json:"metadata_requirements_digest_binding_verified"`
-	MetadataRequirementsStatusPresent         bool     `json:"metadata_requirements_status_present,omitempty"`
-	MetadataRequirementsStatusBindingVerified bool     `json:"metadata_requirements_status_binding_verified,omitempty"`
-	MetadataVerificationStatusPresent         bool     `json:"metadata_verification_status_present,omitempty"`
-	MetadataVerificationStatusBindingVerified bool     `json:"metadata_verification_status_binding_verified,omitempty"`
-	WorkflowPathBindingVerified               bool     `json:"workflow_path_binding_verified"`
-	RequirementsDigestBindingVerified         bool     `json:"requirements_digest_binding_verified"`
-	AcceptanceCriteriaBindingVerified         bool     `json:"acceptance_criteria_binding_verified"`
-	PlanVersionBindingVerified                bool     `json:"plan_version_binding_verified"`
-	ReviewRemediationBindingVerified          bool     `json:"review_remediation_binding_verified"`
-	PlanPresenceVerified                      bool     `json:"plan_presence_verified"`
-	PlanContentBindingVerified                bool     `json:"plan_content_binding_verified"`
-	Status                                    string   `json:"status"`
-	Issues                                    []string `json:"issues"`
-	Authority                                 string   `json:"authority"`
-	HumanReviewRequired                       bool     `json:"human_review_required"`
-	ExecutionAuthorized                       bool     `json:"execution_authorized"`
+	SchemaVersion                             string                           `json:"schema_version"`
+	Relationship                              string                           `json:"relationship"`
+	WorkflowIDSHA256                          string                           `json:"workflow_id_sha256"`
+	MetadataFileCount                         int                              `json:"metadata_file_count"`
+	MetadataValid                             bool                             `json:"metadata_valid"`
+	MetadataSourceSetSHA256                   string                           `json:"metadata_source_set_sha256,omitempty"`
+	RequirementsFileCount                     int                              `json:"requirements_file_count"`
+	RequirementsValid                         bool                             `json:"requirements_valid"`
+	RequirementsSourceSetSHA256               string                           `json:"requirements_source_set_sha256,omitempty"`
+	ReviewFileCount                           int                              `json:"review_file_count"`
+	ReviewValid                               bool                             `json:"review_valid"`
+	ReviewSourceSetSHA256                     string                           `json:"review_source_set_sha256,omitempty"`
+	VerificationFileCount                     int                              `json:"verification_file_count"`
+	VerificationValid                         bool                             `json:"verification_valid"`
+	VerificationSourceSetSHA256               string                           `json:"verification_source_set_sha256,omitempty"`
+	PlanFileCount                             int                              `json:"plan_file_count"`
+	PlanValid                                 bool                             `json:"plan_valid"`
+	PlanSourceSetSHA256                       string                           `json:"plan_source_set_sha256,omitempty"`
+	MetadataPlanVersionDefaulted              bool                             `json:"metadata_plan_version_defaulted"`
+	MetadataRequirementsDigestPresent         bool                             `json:"metadata_requirements_digest_present"`
+	MetadataRequirementsDigestBindingVerified bool                             `json:"metadata_requirements_digest_binding_verified"`
+	MetadataRequirementsStatusPresent         bool                             `json:"metadata_requirements_status_present,omitempty"`
+	MetadataRequirementsStatusBindingVerified bool                             `json:"metadata_requirements_status_binding_verified,omitempty"`
+	MetadataVerificationStatusPresent         bool                             `json:"metadata_verification_status_present,omitempty"`
+	MetadataVerificationStatusBindingVerified bool                             `json:"metadata_verification_status_binding_verified,omitempty"`
+	WorkflowPathBindingVerified               bool                             `json:"workflow_path_binding_verified"`
+	RequirementsDigestBindingVerified         bool                             `json:"requirements_digest_binding_verified"`
+	AcceptanceCriteriaBindingVerified         bool                             `json:"acceptance_criteria_binding_verified"`
+	PlanVersionBindingVerified                bool                             `json:"plan_version_binding_verified"`
+	ReviewRemediationBindingVerified          bool                             `json:"review_remediation_binding_verified"`
+	PlanPresenceVerified                      bool                             `json:"plan_presence_verified"`
+	PlanContentBindingVerified                bool                             `json:"plan_content_binding_verified"`
+	ArtifactReferences                        *MancodeLegacyArtifactReferences `json:"artifact_references,omitempty"`
+	Status                                    string                           `json:"status"`
+	Issues                                    []string                         `json:"issues"`
+	Authority                                 string                           `json:"authority"`
+	HumanReviewRequired                       bool                             `json:"human_review_required"`
+	ExecutionAuthorized                       bool                             `json:"execution_authorized"`
+}
+
+// MancodeLegacyArtifactReferences binds review/evidence references to
+// path-redacted source-file commitments. It carries no artifact text or raw path.
+type MancodeLegacyArtifactReferences struct {
+	ReferenceCount  int                           `json:"reference_count"`
+	FoundCount      int                           `json:"found_count"`
+	ImportedCount   int                           `json:"imported_count"`
+	Targets         []MancodeLegacyArtifactTarget `json:"targets"`
+	BindingVerified bool                          `json:"binding_verified"`
+}
+
+type MancodeLegacyArtifactTarget struct {
+	PathSHA256   string `json:"path_sha256"`
+	SourceSHA256 string `json:"source_sha256"`
+	Imported     bool   `json:"imported"`
 }
 
 // CrossFileCheck records a bounded, path-redacted relationship check between
@@ -464,6 +481,8 @@ func ValidateMancodeLegacyWorkflowChecks(product string, checks []MancodeLegacyW
 		"plan_version_mismatch": true, "remediation_round_mismatch": true,
 		"metadata_requirements_digest_mismatch": true,
 		"metadata_requirements_status_mismatch": true, "metadata_verification_status_mismatch": true,
+		"referenced_artifact_missing": true, "referenced_artifact_unimported": true,
+		"referenced_artifact_ambiguous": true, "referenced_artifact_unavailable": true,
 		"legacy_unverified": true,
 	}
 	previousID := ""
@@ -513,21 +532,62 @@ func ValidateMancodeLegacyWorkflowChecks(product string, checks []MancodeLegacyW
 			(check.PlanPresenceVerified && (!check.PlanValid || check.PlanFileCount != 1)) {
 			return errors.New("Mancode legacy workflow binding claims verification without valid inputs")
 		}
+		if check.ArtifactReferences != nil {
+			references := check.ArtifactReferences
+			if references.ReferenceCount < 1 || references.ReferenceCount > maxCoverageRecords ||
+				references.FoundCount < 0 || references.FoundCount > references.ReferenceCount ||
+				references.ImportedCount < 0 || references.ImportedCount > references.FoundCount ||
+				len(references.Targets) != references.FoundCount || len(references.Targets) > maxCoverageFiles {
+				return errors.New("Mancode legacy workflow artifact reference counts are invalid")
+			}
+			previousPath := ""
+			importedTargets := 0
+			for _, target := range references.Targets {
+				if !digestPattern.MatchString(target.PathSHA256) || !digestPattern.MatchString(target.SourceSHA256) ||
+					previousPath != "" && target.PathSHA256 <= previousPath {
+					return errors.New("Mancode legacy workflow artifact target commitment is invalid")
+				}
+				previousPath = target.PathSHA256
+				if target.Imported {
+					importedTargets++
+				}
+			}
+			if importedTargets != references.ImportedCount ||
+				references.BindingVerified && (references.ReferenceCount != references.FoundCount ||
+					references.FoundCount != references.ImportedCount) {
+				return errors.New("Mancode legacy workflow artifact reference bindings are inconsistent")
+			}
+		} else if mancodeLegacyCheckHasIssue(check.Issues, "referenced_artifact_missing") ||
+			mancodeLegacyCheckHasIssue(check.Issues, "referenced_artifact_unimported") ||
+			mancodeLegacyCheckHasIssue(check.Issues, "referenced_artifact_ambiguous") ||
+			mancodeLegacyCheckHasIssue(check.Issues, "referenced_artifact_unavailable") {
+			return errors.New("Mancode legacy workflow artifact issue has no reference evidence")
+		}
 		if check.WorkflowPathBindingVerified && check.MetadataFileCount+check.RequirementsFileCount+
 			check.ReviewFileCount+check.VerificationFileCount+check.PlanFileCount == 0 {
 			return errors.New("Mancode legacy workflow path binding has no source files")
 		}
-		if len(check.Issues) > 26 {
+		if len(check.Issues) > 30 {
 			return errors.New("Mancode legacy workflow issue list exceeds bounds")
 		}
 		previousIssue := ""
 		conflicting := false
+		artifactMissing, artifactUnimported, artifactAmbiguous, artifactUnavailable := false, false, false, false
 		for _, issue := range check.Issues {
 			if !allowedIssues[issue] || issue <= previousIssue {
 				return errors.New("Mancode legacy workflow issue list is invalid")
 			}
 			previousIssue = issue
 			switch issue {
+			case "referenced_artifact_missing":
+				artifactMissing = true
+			case "referenced_artifact_unimported":
+				artifactUnimported = true
+			case "referenced_artifact_ambiguous":
+				artifactAmbiguous = true
+				conflicting = true
+			case "referenced_artifact_unavailable":
+				artifactUnavailable = true
 			case "requirements_digest_mismatch":
 				conflicting = true
 				if check.RequirementsDigestBindingVerified {
@@ -571,6 +631,15 @@ func ValidateMancodeLegacyWorkflowChecks(product string, checks []MancodeLegacyW
 				}
 			}
 		}
+		if check.ArtifactReferences != nil {
+			references := check.ArtifactReferences
+			if (references.ReferenceCount > references.FoundCount) != (artifactMissing || artifactAmbiguous || artifactUnavailable) ||
+				(references.FoundCount > references.ImportedCount) != artifactUnimported ||
+				(references.BindingVerified != (references.ReferenceCount == references.FoundCount &&
+					references.FoundCount == references.ImportedCount && !artifactMissing && !artifactUnimported && !artifactAmbiguous)) {
+				return errors.New("Mancode legacy workflow artifact reference issues contradict their counts")
+			}
+		}
 		switch check.Status {
 		case "verified":
 			if len(check.Issues) != 0 || !check.WorkflowPathBindingVerified || !check.MetadataValid ||
@@ -579,7 +648,8 @@ func ValidateMancodeLegacyWorkflowChecks(product string, checks []MancodeLegacyW
 				check.MetadataRequirementsStatusPresent && !check.MetadataRequirementsStatusBindingVerified ||
 				check.MetadataVerificationStatusPresent && !check.MetadataVerificationStatusBindingVerified ||
 				!check.RequirementsDigestBindingVerified || !check.AcceptanceCriteriaBindingVerified ||
-				!check.PlanVersionBindingVerified || !check.ReviewRemediationBindingVerified || !check.PlanPresenceVerified {
+				!check.PlanVersionBindingVerified || !check.ReviewRemediationBindingVerified || !check.PlanPresenceVerified ||
+				check.ArtifactReferences != nil && !check.ArtifactReferences.BindingVerified {
 				return errors.New("verified Mancode legacy workflow check is incomplete")
 			}
 		case "incomplete":
@@ -595,6 +665,15 @@ func ValidateMancodeLegacyWorkflowChecks(product string, checks []MancodeLegacyW
 		}
 	}
 	return nil
+}
+
+func mancodeLegacyCheckHasIssue(issues []string, expected string) bool {
+	for _, issue := range issues {
+		if issue == expected {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateMancodeTeamPolicyChecks validates review-only V3 team-policy workspace

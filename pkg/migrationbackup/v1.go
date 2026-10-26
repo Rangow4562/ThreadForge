@@ -45,10 +45,11 @@ type Report struct {
 }
 
 type fileState struct {
-	size   int64
-	mode   uint32
-	digest string
-	info   os.FileInfo
+	size          int64
+	mode          uint32
+	digest        string
+	contentDigest string
+	info          os.FileInfo
 }
 
 type treeState struct {
@@ -284,8 +285,13 @@ func scanTree(root string) (treeState, error) {
 			return errors.New("tree exceeds configured bounds")
 		}
 		state.bytes += written
+		contentDigest := hex.EncodeToString(hasher.Sum(nil))
+		commitment := contentDigest
+		if migrate.IsSensitivePath(relative) {
+			commitment = migrate.CredentialPathCommitment(relative)
+		}
 		state.files[relative] = fileState{
-			size: written, mode: uint32(info.Mode().Perm()), digest: hex.EncodeToString(hasher.Sum(nil)), info: info,
+			size: written, mode: uint32(info.Mode().Perm()), digest: commitment, contentDigest: contentDigest, info: info,
 		}
 		return nil
 	})
@@ -339,7 +345,7 @@ func sameTree(left, right treeState) bool {
 	}
 	for path, a := range left.files {
 		b, ok := right.files[path]
-		if !ok || a.size != b.size || a.mode != b.mode || a.digest != b.digest {
+		if !ok || a.size != b.size || a.mode != b.mode || a.digest != b.digest || a.contentDigest != b.contentDigest {
 			return false
 		}
 	}
@@ -358,7 +364,8 @@ func differentFileCount(source, backup treeState) int {
 	for path := range paths {
 		a, sourceOK := source.files[path]
 		b, backupOK := backup.files[path]
-		if !sourceOK || !backupOK || a.size != b.size || a.mode != b.mode || a.digest != b.digest {
+		if !sourceOK || !backupOK || a.size != b.size || a.mode != b.mode || a.digest != b.digest ||
+			a.contentDigest != b.contentDigest {
 			different++
 		}
 	}

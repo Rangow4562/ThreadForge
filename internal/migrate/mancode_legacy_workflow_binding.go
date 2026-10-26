@@ -19,7 +19,7 @@ type mancodeLegacyWorkflowComponents struct {
 	plan         []int
 }
 
-func bindMancodeLegacyWorkflows(sourceRoot string, scanned *[]scannedFile) []migrationcoverage.MancodeLegacyWorkflowCheck {
+func bindMancodeLegacyWorkflows(sourceRoot string, scanned *[]scannedFile, summary *Summary) ([]migrationcoverage.MancodeLegacyWorkflowCheck, error) {
 	groups := make(map[string]*mancodeLegacyWorkflowComponents)
 	for index := range *scanned {
 		file := (*scanned)[index]
@@ -83,6 +83,19 @@ func bindMancodeLegacyWorkflows(sourceRoot string, scanned *[]scannedFile) []mig
 		check.ReviewSourceSetSHA256 = mancodeLegacyWorkflowSourceSetDigest(*scanned, group.review)
 		check.VerificationSourceSetSHA256 = mancodeLegacyWorkflowSourceSetDigest(*scanned, group.verification)
 		check.PlanSourceSetSHA256 = mancodeLegacyWorkflowSourceSetDigest(*scanned, group.plan)
+		var artifactReferences []mancodeLegacyWorkflowArtifactReference
+		for _, indexes := range [][]int{group.review, group.verification} {
+			for _, index := range indexes {
+				artifactReferences = append(artifactReferences, (*scanned)[index].legacyArtifactReferences...)
+			}
+		}
+		reconciledReferences, artifactIssues, err := reconcileMancodeLegacyArtifactReferences(
+			sourceRoot, artifactReferences, scanned, summary)
+		if err != nil {
+			return nil, err
+		}
+		check.ArtifactReferences = reconciledReferences
+		check.Issues = append(check.Issues, artifactIssues...)
 
 		var metadata mancodeLegacyWorkflowSummary
 		check.MetadataValid = mancodeLegacyWorkflowSingleRecord(*scanned, group.metadata, "mancode_legacy_workflow_summary", &metadata)
@@ -169,7 +182,8 @@ func bindMancodeLegacyWorkflows(sourceRoot string, scanned *[]scannedFile) []mig
 		switch {
 		case len(check.Issues) == 0 && check.MetadataValid && check.RequirementsValid && check.VerificationValid &&
 			check.PlanValid && check.RequirementsDigestBindingVerified && check.AcceptanceCriteriaBindingVerified &&
-			check.PlanVersionBindingVerified && check.ReviewRemediationBindingVerified && check.PlanPresenceVerified:
+			check.PlanVersionBindingVerified && check.ReviewRemediationBindingVerified && check.PlanPresenceVerified &&
+			(check.ArtifactReferences == nil || check.ArtifactReferences.BindingVerified):
 			check.Status = "verified"
 		case mancodeLegacyWorkflowHasBindingMismatch(check.Issues):
 			check.Status = "conflicting"
@@ -179,7 +193,7 @@ func bindMancodeLegacyWorkflows(sourceRoot string, scanned *[]scannedFile) []mig
 		upgradeMancodeLegacyVerificationBinding(scanned, group.verification, check)
 		checks = append(checks, check)
 	}
-	return checks
+	return checks, nil
 }
 
 func appendMancodeLegacyComponentIssues(check *migrationcoverage.MancodeLegacyWorkflowCheck, name string, count int, valid bool) {
@@ -400,6 +414,10 @@ func validateMancodeLegacyWorkflowManifestChecks(manifest Manifest) error {
 			!mancodeLegacyManifestComponentMatches(group.plan, check.PlanFileCount, check.PlanValid, check.PlanSourceSetSHA256) {
 			return errors.New("Mancode legacy workflow source commitments do not match the manifest file inventory")
 		}
+		if check.ArtifactReferences != nil && !mancodeLegacyManifestArtifactTargetsMatch(
+			manifest.Files, directory, manifest.SourceRoot, check.ArtifactReferences) {
+			return errors.New("Mancode legacy workflow artifact commitments do not match the manifest file inventory")
+		}
 	}
 	return nil
 }
@@ -490,12 +508,46 @@ func mancodeLegacyManifestSourceSet(files []FileEntry) string {
 	return mancodePrivacySourceHashSetDigest(hashes)
 }
 
+func mancodeLegacyManifestArtifactTargetsMatch(files []FileEntry, directory, sourceRoot string,
+	references *migrationcoverage.MancodeLegacyArtifactReferences) bool {
+	if references == nil || references.ReferenceCount < 1 || len(references.Targets) != references.FoundCount {
+		return false
+	}
+	matched := make(map[string]bool, len(references.Targets))
+	workflowPrefix := strings.ToLower(filepath.ToSlash(strings.Trim(directory, "/"))) + "/"
+	for _, target := range references.Targets {
+		var match *FileEntry
+		for index := range files {
+			file := &files[index]
+			canonical := strings.ToLower(strings.Trim(mancodePath(file.Path, sourceRoot), "/"))
+			if !strings.HasPrefix(canonical, workflowPrefix) || mancodeLegacyArtifactPathHash(file.Path, sourceRoot) != target.PathSHA256 {
+				continue
+			}
+			if match != nil {
+				return false
+			}
+			match = file
+		}
+		if match == nil || matched[target.PathSHA256] || match.SourceSHA256 != target.SourceSHA256 {
+			return false
+		}
+		imported := match.ImportedCount > 0 && match.ExcludedCount == 0 && match.RejectedCount == 0 &&
+			match.Status != "unsupported" && match.Status != "credential_path_excluded"
+		if imported != target.Imported {
+			return false
+		}
+		matched[target.PathSHA256] = true
+	}
+	return true
+}
+
 func mancodeLegacyWorkflowHasBindingMismatch(issues []string) bool {
 	for _, issue := range issues {
 		switch issue {
 		case "requirements_digest_mismatch", "acceptance_criteria_mismatch", "plan_version_mismatch",
 			"remediation_round_mismatch", "metadata_requirements_digest_mismatch",
-			"metadata_requirements_status_mismatch", "metadata_verification_status_mismatch":
+			"metadata_requirements_status_mismatch", "metadata_verification_status_mismatch",
+			"referenced_artifact_ambiguous":
 			return true
 		}
 	}

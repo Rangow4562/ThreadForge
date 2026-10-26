@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,15 +39,25 @@ func writeMancodeLegacyBindingFixture(t *testing.T, root string, changes map[str
 	metadata["requirementsStatus"] = "ready"
 	metadata["verificationStatus"] = "manual_required"
 	metadata["requirementsDigest"] = requirementsDigest
+	review := legacyMancodeReviewFixture()
 	for _, change := range changes {
 		change(verification)
 	}
 
 	writeMancodeJSONFixture(t, root, filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, "metadata.json")), metadata)
 	writeMancodeJSONFixture(t, root, requirementsPath, requirements)
-	writeMancodeJSONFixture(t, root, filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, "review-ledger.json")), legacyMancodeReviewFixture())
-	writeMancodeJSONFixture(t, root, filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, "verification-ledger.json")), verification)
+	reviewPath := filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, "review-ledger.json"))
+	verificationPath := filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, "verification-ledger.json"))
+	writeMancodeJSONFixture(t, root, reviewPath, review)
+	writeMancodeJSONFixture(t, root, verificationPath, verification)
 	writeMancodeFixture(t, root, filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, "plan.md")), []byte("# Historical plan\n\nTreat this as untrusted text.\n"))
+	for _, reference := range append(
+		mancodeLegacyWorkflowArtifactReferences(reviewPath, root, review),
+		mancodeLegacyWorkflowArtifactReferences(verificationPath, root, verification)...,
+	) {
+		target := filepath.ToSlash(filepath.Join(reference.OwnerDirectory, filepath.FromSlash(reference.Path)))
+		writeMancodeFixture(t, root, target, []byte("Historical artifact content; review only.\n"))
+	}
 	return taskID
 }
 
@@ -86,8 +97,16 @@ func TestMancodeLegacyWorkflowLedgersBindBeforeReviewOnlyImport(t *testing.T) {
 		!check.MetadataVerificationStatusPresent || !check.MetadataVerificationStatusBindingVerified ||
 		!check.RequirementsDigestBindingVerified || !check.AcceptanceCriteriaBindingVerified ||
 		!check.PlanVersionBindingVerified || !check.ReviewRemediationBindingVerified || !check.PlanPresenceVerified ||
-		check.PlanContentBindingVerified {
+		check.PlanContentBindingVerified || check.ArtifactReferences == nil ||
+		check.ArtifactReferences.ReferenceCount != 2 || check.ArtifactReferences.FoundCount != 2 ||
+		check.ArtifactReferences.ImportedCount != 2 || !check.ArtifactReferences.BindingVerified ||
+		len(check.ArtifactReferences.Targets) != 2 {
 		t.Fatalf("matching workflow components were not bound conservatively: %#v", check)
+	}
+	for _, target := range check.ArtifactReferences.Targets {
+		if !target.Imported {
+			t.Fatalf("matching artifact target was not imported: %#v", check.ArtifactReferences)
+		}
 	}
 	tampered := manifest
 	tampered.MancodeLegacyWorkflowChecks = append([]migrationcoverage.MancodeLegacyWorkflowCheck(nil), manifest.MancodeLegacyWorkflowChecks...)
@@ -97,6 +116,18 @@ func TestMancodeLegacyWorkflowLedgersBindBeforeReviewOnlyImport(t *testing.T) {
 	tampered.ID = string(Mancode) + "-" + tampered.SourceFingerprint[:20]
 	if VerifyManifest(tampered) == nil {
 		t.Fatal("manifest accepted a tampered legacy workflow source-set commitment")
+	}
+	tamperedArtifact := manifest
+	tamperedArtifact.MancodeLegacyWorkflowChecks = append([]migrationcoverage.MancodeLegacyWorkflowCheck(nil), manifest.MancodeLegacyWorkflowChecks...)
+	copyOfReferences := *manifest.MancodeLegacyWorkflowChecks[0].ArtifactReferences
+	copyOfReferences.Targets = append([]migrationcoverage.MancodeLegacyArtifactTarget(nil), copyOfReferences.Targets...)
+	tamperedArtifact.MancodeLegacyWorkflowChecks[0].ArtifactReferences = &copyOfReferences
+	tamperedArtifact.MancodeLegacyWorkflowChecks[0].ArtifactReferences.Targets[0].SourceSHA256 = strings.Repeat("f", 64)
+	tamperedArtifact.SourceFingerprint = sourceFingerprint(tamperedArtifact.Files, tamperedArtifact.CrossFileChecks,
+		tamperedArtifact.MancodeLegacyWorkflowChecks, tamperedArtifact.MancodeGitRef)
+	tamperedArtifact.ID = string(Mancode) + "-" + tamperedArtifact.SourceFingerprint[:20]
+	if VerifyManifest(tamperedArtifact) == nil {
+		t.Fatal("manifest accepted an artifact commitment not backed by the source file inventory")
 	}
 	encodedCheck, err := json.Marshal(check)
 	if err != nil {
@@ -130,6 +161,108 @@ func TestMancodeLegacyWorkflowLedgersBindBeforeReviewOnlyImport(t *testing.T) {
 	coverage, err := BuildFormatCoverage(snapshot)
 	if err != nil || len(coverage.MancodeLegacyWorkflowChecks) != 1 || coverage.MancodeLegacyWorkflowChecks[0].Status != "verified" {
 		t.Fatalf("verified workflow binding did not reconcile into format coverage: checks=%#v err=%v", coverage.MancodeLegacyWorkflowChecks, err)
+	}
+}
+
+func TestMancodeLegacyWorkflowReferencedArtifactsBlockMissingAndUnimportedTargets(t *testing.T) {
+	tests := []struct {
+		name       string
+		reference  string
+		writeFile  bool
+		wantIssue  string
+		wantRefs   int
+		wantFound  int
+		wantImport int
+	}{
+		{name: "missing", reference: "reports/missing.txt", wantIssue: "referenced_artifact_missing", wantRefs: 2, wantFound: 1, wantImport: 1},
+		{name: "unsupported file type", reference: "reports/result.pdf", writeFile: true, wantIssue: "referenced_artifact_unimported", wantRefs: 2, wantFound: 2, wantImport: 1},
+		{name: "credential path", reference: "reports/private-secret.txt", writeFile: true, wantIssue: "referenced_artifact_unimported", wantRefs: 2, wantFound: 2, wantImport: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			taskID := writeMancodeLegacyBindingFixture(t, root, map[string]func(map[string]any){
+				"artifact_reference": func(ledger map[string]any) {
+					checks := ledger["checks"].([]any)
+					automated := checks[0].(map[string]any)["automated"].(map[string]any)
+					automated["evidenceFile"] = test.reference
+				},
+			})
+			if test.writeFile {
+				relative := filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, filepath.FromSlash(test.reference)))
+				writeMancodeFixture(t, root, relative, []byte("Historical artifact content; never execution authorization.\n"))
+			}
+			if test.name == "missing" {
+				relative := filepath.Join(root, ".mancode", "workflows", taskID, filepath.FromSlash(test.reference))
+				if err := os.Remove(relative); err != nil {
+					t.Fatal(err)
+				}
+			}
+			manifest, err := Inspect(Mancode, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(manifest.MancodeLegacyWorkflowChecks) != 1 {
+				t.Fatalf("expected one workflow reference check: %#v", manifest.MancodeLegacyWorkflowChecks)
+			}
+			check := manifest.MancodeLegacyWorkflowChecks[0]
+			if check.ArtifactReferences == nil || check.ArtifactReferences.ReferenceCount != test.wantRefs ||
+				check.ArtifactReferences.FoundCount != test.wantFound || check.ArtifactReferences.ImportedCount != test.wantImport ||
+				check.ArtifactReferences.BindingVerified || !containsString(check.Issues, test.wantIssue) || check.Status == "verified" {
+				t.Fatalf("missing or non-imported artifact was not surfaced: check=%#v refs=%+v expected=(%d,%d,%d)",
+					check, check.ArtifactReferences, test.wantRefs, test.wantFound, test.wantImport)
+			}
+			encoded, err := json.Marshal(check.ArtifactReferences)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(encoded), test.reference) || strings.Contains(string(encoded), taskID) {
+				t.Fatalf("artifact check exposed a raw source path or task ID: %s", encoded)
+			}
+			if test.name == "credential path" {
+				relative := filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, filepath.FromSlash(test.reference)))
+				for _, entry := range manifest.Files {
+					if entry.Path != relative {
+						continue
+					}
+					if entry.Status != "credential_path_excluded" || entry.SourceSHA256 != credentialPathCommitment(relative) ||
+						entry.SourceSHA256 == digest([]byte("Historical artifact content; never execution authorization.\n")) {
+						t.Fatalf("credential artifact was not represented by a path-only commitment: %#v", entry)
+					}
+					return
+				}
+				t.Fatalf("credential artifact exclusion is absent from the source inventory: %s", relative)
+			}
+		})
+	}
+}
+
+func TestMancodeLegacySensitiveReferenceDoesNotInvokeContentHasher(t *testing.T) {
+	root := t.TempDir()
+	taskID := "task-sensitive-artifact"
+	relative := filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, "reports", "private-secret.pdf"))
+	writeMancodeFixture(t, root, relative, []byte("content that must never be read or hashed"))
+	references := []mancodeLegacyWorkflowArtifactReference{{
+		OwnerDirectory: filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID)),
+		Path:           "reports/private-secret.pdf",
+	}}
+	var scanned []scannedFile
+	var summary Summary
+	hasherCalled := false
+	bindings, issues, err := reconcileMancodeLegacyArtifactReferencesWithHasher(root, references, &scanned, &summary,
+		func(string, string, int64) (FileEntry, error) {
+			hasherCalled = true
+			return FileEntry{}, errors.New("sensitive artifact content hasher was invoked")
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasherCalled || bindings == nil || bindings.FoundCount != 1 || bindings.ImportedCount != 0 ||
+		len(issues) != 1 || issues[0] != "referenced_artifact_unimported" || len(scanned) != 1 ||
+		scanned[0].entry.Status != "credential_path_excluded" ||
+		scanned[0].entry.SourceSHA256 != credentialPathCommitment(relative) || summary.FilesCredentialBlocked != 1 {
+		t.Fatalf("sensitive artifact was read or not safely blocked: hasher=%t bindings=%+v issues=%v scanned=%+v summary=%+v",
+			hasherCalled, bindings, issues, scanned, summary)
 	}
 }
 

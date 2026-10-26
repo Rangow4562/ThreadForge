@@ -93,6 +93,7 @@ type Record struct {
 type scannedFile struct {
 	entry                            FileEntry
 	records                          []Record
+	legacyArtifactReferences         []mancodeLegacyWorkflowArtifactReference
 	sourceData                       []byte
 	joinedCompanion                  *FileEntry
 	metadataReadBytes                int64
@@ -215,13 +216,9 @@ func inspectWithOptions(product Product, sourceRoot string, scannedSink *[]scann
 		}
 		manifest.Summary.TotalSourceBytes += fileInfo.Size()
 		if sensitivePath(rel) {
-			hash, hashErr := hashFile(name)
-			if hashErr != nil {
-				return hashErr
-			}
 			manifest.Summary.FilesCredentialBlocked++
 			scanned = append(scanned, scannedFile{entry: FileEntry{
-				Path: rel, SourceSHA256: hash, SourceBytes: fileInfo.Size(),
+				Path: rel, SourceSHA256: credentialPathCommitment(rel), SourceBytes: fileInfo.Size(),
 				Status: "credential_path_excluded", Issue: "credential-bearing path excluded",
 			}})
 			return nil
@@ -374,7 +371,10 @@ func inspectWithOptions(product Product, sourceRoot string, scannedSink *[]scann
 			return Manifest{}, errors.New("migration source exceeds 100000-record limit")
 		}
 		manifest.CrossFileChecks = bindMancodePrivacyPolicyExclusions(&scanned)
-		manifest.MancodeLegacyWorkflowChecks = bindMancodeLegacyWorkflows(root, &scanned)
+		manifest.MancodeLegacyWorkflowChecks, err = bindMancodeLegacyWorkflows(root, &scanned, &manifest.Summary)
+		if err != nil {
+			return Manifest{}, fmt.Errorf("bind Mancode legacy workflow artifacts: %w", err)
+		}
 		manifest.MancodeTeamPolicyChecks, err = bindMancodeTeamPolicyWorkspace(&scanned, root)
 		if err != nil {
 			return Manifest{}, fmt.Errorf("bind Mancode team-policy workspace: %w", err)
@@ -1285,6 +1285,10 @@ func scanFileWithMancodeGitRef(product Product, sourceRoot, relative, fullPath s
 				file.entry.ExcludedCount++
 				continue
 			}
+			if product == Mancode && (item.Type == "mancode_legacy_review_summary" || item.Type == "mancode_legacy_verification_summary") {
+				file.legacyArtifactReferences = append(file.legacyArtifactReferences,
+					mancodeLegacyWorkflowArtifactReferences(relative, sourceRoot, value)...)
+			}
 			hash := digest(item.Payload)
 			recordPath := relative
 			if product == Mancode && isMancodeCoordinationRecordType(item.Type) {
@@ -1625,6 +1629,18 @@ func sensitivePath(relative string) bool {
 		}
 	}
 	return false
+}
+
+// IsSensitivePath reports whether a relative source path is excluded from
+// migration because it appears credential-bearing.
+func IsSensitivePath(relative string) bool {
+	return sensitivePath(relative)
+}
+
+// CredentialPathCommitment returns a stable, path-only digest for an excluded
+// credential path. It does not inspect or hash file contents.
+func CredentialPathCommitment(relative string) string {
+	return credentialPathCommitment(relative)
 }
 
 func encodeRecordLines(records []Record) ([]byte, error) {

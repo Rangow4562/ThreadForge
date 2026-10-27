@@ -45,6 +45,11 @@ function Invoke-Check {
 
 Invoke-Check -Label 'Go tests' -Executable 'go' -Arguments @('test', './...') -WorkingDirectory $RepositoryRoot
 Invoke-Check -Label 'Go vet' -Executable 'go' -Arguments @('vet', './...') -WorkingDirectory $RepositoryRoot
+if (Get-Command 'uv' -ErrorAction SilentlyContinue) {
+    Invoke-Check -Label 'Python dependency lock freshness' -Executable 'uv' -Arguments @('lock', '--check') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
+} else {
+    Write-Host 'SKIPPED: Python dependency lock freshness (uv is unavailable; hosted CI enforces the lock)'
+}
 Invoke-Check -Label 'Python tests' -Executable 'python' -Arguments @('-m', 'pytest', '-q') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
 Invoke-Check -Label 'Python compile check' -Executable 'python' -Arguments @('-m', 'compileall', '-q', '.', '..\third_party\harbor_terminus2', '..\third_party\archipelago', '..\domains\coding', '..\domains\workspace') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
 Invoke-Check -Label 'Python sdist/wheel build, content audit, and installed protocol smoke' -Executable 'python' -Arguments @('scripts/verify_distribution.py') -WorkingDirectory (Join-Path $RepositoryRoot 'python')

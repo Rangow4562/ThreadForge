@@ -1,5 +1,7 @@
 # Threadforge Python modules
 
+For a reproducible local test environment, run `uv sync --project python --locked --extra test --extra decisions --extra workspace` from the repository root, then run checks through `uv run --project python --locked --extra test --extra decisions --extra workspace ...`. `python/uv.lock` resolves every optional extra and platform marker; the standard CI matrix installs and exercises only `test`, `decisions`, and `workspace`. The `hf`, `serving`, `typed-data`, and `evolution` extras are lock-resolved but are not all runtime-validated by that matrix. The lock pins dependency artifacts; it does not establish license approval or API compatibility for extras that are not tested.
+
 The versioned operation `decision.model.truncate` converts an existing local HF checkpoint into a new depth-truncated checkpoint. It requires a new output directory, never downloads or overwrites, strips source-path metadata, and returns hashes/counts with review-required, execution-unverified, cutover-ineligible status. Its optional `dtype` is `auto` by default; use explicit `float16`, `bfloat16`, or `float32` only when changing checkpoint precision is intended.
 
 The optional `hf` extra supports the Transformers 4.x `torch_dtype` API and the Transformers 5.x `dtype` and causal-mask signature changes. Compatibility tests simulate both API shapes; no authentic Transformers 5 checkpoint has been loaded in the current verification environment.

@@ -38,6 +38,15 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up locked Python environment
+        shell: bash
+        working-directory: python
+        run: |
+          python -m pip install uv==0.11.7
+          uv --version
+          uv lock --check
+          uv sync --locked --extra test --extra decisions --extra workspace
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -58,16 +67,11 @@ jobs:
           fi
           printf 'TMPDIR=%s\n' "$temp_root" >> "$GITHUB_ENV"
 
-      - name: Install Python runtime dependencies used by Go protocol tests and Python suites
-        shell: bash
-        working-directory: python
-        run: python -m pip install -e '.[test,decisions,workspace]'
-
       - name: Run Threadforge Go tests and vet
         shell: bash
         run: |
-          go test ./...
-          go vet ./...
+          uv run --project python --locked --extra test --extra decisions --extra workspace go test ./...
+          uv run --project python --locked --extra test --extra decisions --extra workspace go vet ./...
 
       - name: Run vendored Beacon contract tests
         shell: bash
@@ -80,14 +84,14 @@ jobs:
         env:
           THREADFORGE_REQUIRE_ENGINEERING_GATEWAY_HTTP: "1"
         run: |
-          python -m pytest -q
-          python -m compileall -q .
-          ruff check threadforge_py tests
+          uv run --locked --extra test --extra decisions --extra workspace python -m pytest -q
+          uv run --locked --extra test --extra decisions --extra workspace python -m compileall -q .
+          uv run --locked --extra test --extra decisions --extra workspace ruff check threadforge_py tests
 
       - name: Build, inspect, and install Python distributions
         shell: bash
         working-directory: python
-        run: python scripts/verify_distribution.py
+        run: uv run --locked --extra test --extra decisions --extra workspace python scripts/verify_distribution.py
 
       - name: Install TypeScript adapter dependencies
         shell: bash

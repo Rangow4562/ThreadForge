@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -616,6 +617,7 @@ func TestMancodeV3ExecutionV2PolicyAndRunHistoryValidation(t *testing.T) {
 			root := t.TempDir()
 			directory := mancodeV3Fixture(t, root, "local", strings.Repeat("0", 25)+"6", false)
 			fixtureState := mancodeExecutionStateFixture(t)
+			var expectedDecision, expectedCIObservation any
 			if historyKind == "run" {
 				fixtureState["runs"] = []any{mancodeExecutionRunFixture(fixtureState)}
 			} else if historyKind == "attempt" {
@@ -625,11 +627,13 @@ func TestMancodeV3ExecutionV2PolicyAndRunHistoryValidation(t *testing.T) {
 				fixtureState["runs"] = []any{run}
 				fixtureState["attempts"] = []any{mancodeExecutionAttemptFixture(attemptID, mancodeString(run["runId"]))}
 			} else if historyKind == "decision" {
-				fixtureState["decisions"] = []any{mancodeExecutionDecisionFixture(fixtureState)}
+				expectedDecision = mancodeExecutionDecisionFixture(fixtureState)
+				fixtureState["decisions"] = []any{expectedDecision}
 			} else if historyKind == "ci" {
 				run, observation := mancodeExecutionCIObservationFixture(t, fixtureState)
 				fixtureState["runs"] = []any{run}
 				fixtureState["ciObservations"] = []any{observation}
+				expectedCIObservation = observation
 			}
 			writeMancodeV2VerificationFixture(t, root, directory, fixtureState)
 			dataRoot := t.TempDir()
@@ -642,21 +646,84 @@ func TestMancodeV3ExecutionV2PolicyAndRunHistoryValidation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			var verification *Record
+			aggregateFound := false
 			for _, record := range records {
-				if record.Type != "mancode_workflow_aggregate" {
-					continue
+				switch record.Type {
+				case "workflow_verification":
+					if verification != nil {
+						t.Fatal("snapshot duplicated the Mancode workflow verification record")
+					}
+					if record.Scope != "local_pending_review" {
+						t.Fatalf("execution history scope=%q, want local_pending_review", record.Scope)
+					}
+					copy := record
+					verification = &copy
+				case "mancode_workflow_aggregate":
+					var aggregate map[string]any
+					if err := json.Unmarshal(record.Payload, &aggregate); err != nil {
+						t.Fatal(err)
+					}
+					if aggregate["status"] != "complete" {
+						t.Fatalf("execution history status=%v, want complete: %#v", aggregate["status"], aggregate)
+					}
+					aggregateFound = true
 				}
-				var aggregate map[string]any
-				if err := json.Unmarshal(record.Payload, &aggregate); err != nil {
+			}
+			if verification == nil {
+				t.Fatal("snapshot omitted the Mancode workflow verification record")
+			}
+			if !aggregateFound {
+				t.Fatal("snapshot omitted the Mancode V3 aggregate")
+			}
+			decoder := json.NewDecoder(bytes.NewReader(verification.Payload))
+			decoder.UseNumber()
+			var verificationPayload map[string]any
+			if err := decoder.Decode(&verificationPayload); err != nil {
+				t.Fatal(err)
+			}
+			execution, ok := verificationPayload["execution"].(map[string]any)
+			if !ok {
+				t.Fatal("snapshot omitted the V2 execution history")
+			}
+			decisions, ok := execution["decisions"].([]any)
+			if !ok {
+				t.Fatal("snapshot V2 decisions are not a list")
+			}
+			ciObservations, ok := execution["ciObservations"].([]any)
+			if !ok {
+				t.Fatal("snapshot V2 CI observations are not a list")
+			}
+			wantDecisionCount, wantCIObservationCount := 0, 0
+			if expectedDecision != nil {
+				wantDecisionCount = 1
+			}
+			if expectedCIObservation != nil {
+				wantCIObservationCount = 1
+			}
+			if len(decisions) != wantDecisionCount || len(ciObservations) != wantCIObservationCount {
+				t.Fatalf("snapshot V2 decision/CI counts=(%d,%d), want (%d,%d)", len(decisions), len(ciObservations), wantDecisionCount, wantCIObservationCount)
+			}
+			if expectedDecision != nil {
+				wantDigest, err := mancodeCanonicalDigest(expectedDecision)
+				if err != nil {
 					t.Fatal(err)
 				}
-				wantStatus := "complete"
-				if aggregate["status"] != wantStatus {
-					t.Fatalf("execution history status=%v, want %s: %#v", aggregate["status"], wantStatus, aggregate)
+				gotDigest, err := mancodeCanonicalDigest(decisions[0])
+				if err != nil || gotDigest != wantDigest {
+					t.Fatalf("snapshot changed structured V2 decision history: got %s, want %s (err=%v)", gotDigest, wantDigest, err)
 				}
-				return
 			}
-			t.Fatal("snapshot omitted the Mancode V3 aggregate")
+			if expectedCIObservation != nil {
+				wantDigest, err := mancodeCanonicalDigest(expectedCIObservation)
+				if err != nil {
+					t.Fatal(err)
+				}
+				gotDigest, err := mancodeCanonicalDigest(ciObservations[0])
+				if err != nil || gotDigest != wantDigest {
+					t.Fatalf("snapshot changed structured V2 CI observation: got %s, want %s (err=%v)", gotDigest, wantDigest, err)
+				}
+			}
 		})
 	}
 }

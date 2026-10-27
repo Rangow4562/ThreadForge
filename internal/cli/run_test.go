@@ -5198,6 +5198,57 @@ func TestPromptMemoryHookTaskResumeIsExplicitProjectScopedAndAdvisory(t *testing
 		t.Fatalf("discovery returned task context for an empty project: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 
+	qwenInput, err := json.Marshal(userPromptMemoryHookInput{
+		HookEventName: "UserPromptExpansion", CWD: projectRoot, Prompt: "Qwen model-expanded prompt must not be echoed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	qwenBaseArgs := []string{"memory", "inject-qwen", "--project-id", "demo-project",
+		"--threadforge-managed-qwen-memory=v1", "--threadforge-memory=qwen-v1"}
+	stdout.Reset()
+	stderr.Reset()
+	if code := RunWithInput(qwenBaseArgs, bytes.NewReader(qwenInput), &stdout, &stderr); code != 0 ||
+		strings.Contains(stdout.String(), "Resume parser fix") || strings.Contains(stdout.String(), "Fix the parser") {
+		t.Fatalf("Qwen injected task details without opt-in: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	qwenExplicitArgs := append(append([]string(nil), qwenBaseArgs...), "--task-id", "resume-task")
+	stdout.Reset()
+	stderr.Reset()
+	if code := RunWithInput(qwenExplicitArgs, bytes.NewReader(qwenInput), &stdout, &stderr); code != 0 {
+		t.Fatalf("Qwen explicit task resume code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var qwenResumeResponse struct {
+		HookSpecificOutput *struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if json.Unmarshal(stdout.Bytes(), &qwenResumeResponse) != nil || qwenResumeResponse.HookSpecificOutput == nil ||
+		qwenResumeResponse.HookSpecificOutput.HookEventName != "UserPromptExpansion" {
+		t.Fatalf("Qwen task-resume response malformed: %s", stdout.String())
+	}
+	qwenTaskContext := qwenResumeResponse.HookSpecificOutput.AdditionalContext
+	for _, expected := range []string{"Resume parser fix", "Fix the parser", "plan_only", "Plan-only reminder", "advisory context only"} {
+		if !strings.Contains(qwenTaskContext, expected) {
+			t.Errorf("Qwen task-resume context missing %q: %s", expected, qwenTaskContext)
+		}
+	}
+	for _, withheld := range []string{"resume-session", "PRIVATE_SESSION_PROGRESS", "PRIVATE_SESSION_NEXT_ACTION", "PRIVATE_SESSION_HANDOFF", "Qwen model-expanded prompt must not be echoed"} {
+		if strings.Contains(stdout.String(), withheld) {
+			t.Errorf("Qwen task-resume context leaked private session/prompt data %q: %s", withheld, stdout.String())
+		}
+	}
+
+	qwenDiscoveryArgs := append(append([]string(nil), qwenBaseArgs...), "--discover-active-task")
+	stdout.Reset()
+	stderr.Reset()
+	if code := RunWithInput(qwenDiscoveryArgs, bytes.NewReader(qwenInput), &stdout, &stderr); code != 0 ||
+		!strings.Contains(stdout.String(), "exactly one eligible task") || !strings.Contains(stdout.String(), "Resume parser fix") ||
+		strings.Contains(stdout.String(), "PRIVATE_SESSION_") {
+		t.Fatalf("Qwen unique active-task discovery failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+
 	// A second eligible task makes discovery ambiguous and withholds all task details.
 	run("task", "create", "--id", "second-active-task", "--project-id", "demo-project", "--title", "Second active task",
 		"--objective", "Must not be guessed", "--criterion", "Choose explicitly")
@@ -5214,6 +5265,20 @@ func TestPromptMemoryHookTaskResumeIsExplicitProjectScopedAndAdvisory(t *testing
 	}
 	if !strings.Contains(stdout.String(), "multiple active tasks") {
 		t.Fatalf("ambiguous discovery did not surface a selection requirement: %s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := RunWithInput(qwenDiscoveryArgs, bytes.NewReader(qwenInput), &stdout, &stderr); code != 0 ||
+		!strings.Contains(stdout.String(), "multiple active tasks") || strings.Contains(stdout.String(), "Resume parser fix") ||
+		strings.Contains(stdout.String(), "Second active task") || strings.Contains(stdout.String(), "Must not be guessed") {
+		t.Fatalf("Qwen ambiguous task discovery leaked task details: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	invalidQwenTaskArgs := append(append([]string(nil), qwenBaseArgs...), "--task-id", "resume-task", "--discover-active-task")
+	if code := RunWithInput(invalidQwenTaskArgs, bytes.NewReader(qwenInput), &stdout, &stderr); code != 2 ||
+		!strings.Contains(stderr.String(), "--discover-active-task") {
+		t.Fatalf("Qwen explicit task and discovery were combined: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 
 	stdout.Reset()
@@ -5253,6 +5318,14 @@ func TestPromptMemoryHookTaskResumeIsExplicitProjectScopedAndAdvisory(t *testing
 	}
 	if !strings.Contains(stderr.String(), "task_project_mismatch") {
 		t.Fatalf("cross-project refusal not reported: %s", stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	qwenForeignArgs := append(append([]string(nil), qwenBaseArgs...), "--task-id", "foreign-task")
+	if code := RunWithInput(qwenForeignArgs, bytes.NewReader(qwenInput), &stdout, &stderr); code != 0 ||
+		strings.Contains(stdout.String(), "Foreign task title") || strings.Contains(stdout.String(), "Foreign project-only context") ||
+		!strings.Contains(stderr.String(), "task_project_mismatch") {
+		t.Fatalf("Qwen cross-project task context was not withheld: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 
 	stdout.Reset()

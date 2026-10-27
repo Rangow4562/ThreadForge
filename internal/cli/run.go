@@ -1628,12 +1628,9 @@ func injectUserPromptMemory(args []string, stdin io.Reader, stdout, stderr io.Wr
 		strings.TrimSpace(*sessionID) != "" && (privacy.ContainsCredentialText(*sessionID) || strings.TrimSpace(*sessionID) != *sessionID) ||
 		strings.TrimSpace(*sessionID) != "" && strings.TrimSpace(*taskID) == "" ||
 		*discoverActiveTask && (strings.TrimSpace(*taskID) != "" || strings.TrimSpace(*sessionID) != "") ||
-		host == "qwen-code" && (strings.TrimSpace(*taskID) != "" || strings.TrimSpace(*sessionID) != "" || *discoverActiveTask) ||
 		*marker != runtimeValue || *ownerMarker != ownerValue || fs.NArg() != 0 {
 		usageOptions := " [--max-items 1-32] [--max-tokens 1-16000]"
-		if host != "qwen-code" {
-			usageOptions += " [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]"
-		}
+		usageOptions += " [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]"
 		_, _ = fmt.Fprintln(stderr, usage+usageOptions)
 		return 2
 	}
@@ -4003,7 +4000,7 @@ Commands:
   memory inject-codex --project-id <id> --threadforge-managed-codex-memory=v1 --threadforge-memory=codex-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory inject-gemini --project-id <id> --threadforge-managed-gemini-memory=v1 --threadforge-memory=gemini-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory inject-cursor --project-id <id> --threadforge-managed-cursor-memory=v1 --threadforge-memory=cursor-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
-  memory inject-qwen --project-id <id> --threadforge-managed-qwen-memory=v1 --threadforge-memory=qwen-v1 [--max-items 1-32] [--max-tokens 1-16000]
+  memory inject-qwen --project-id <id> --threadforge-managed-qwen-memory=v1 --threadforge-memory=qwen-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory inject-antigravity --project-id <id> --threadforge-managed-antigravity-memory=v1 --threadforge-memory=antigravity-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory inject-opencode --project-id <id> --threadforge-managed-opencode-memory=v1 --threadforge-memory=opencode-v1 [--max-items 1-32] [--max-tokens 1-16000]
   memory inject-copilot --project-id <id> --threadforge-managed-copilot-memory=v1 --threadforge-memory=copilot-v1 [--max-items 1-32] [--max-tokens 1-16000]

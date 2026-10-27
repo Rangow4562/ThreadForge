@@ -18,13 +18,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 compatibility for the inventory CLI.
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        tomllib = None  # type: ignore[assignment]
 
-SCHEMA_VERSION = "threadforge.dependency-inventory.v2"
+
+SCHEMA_VERSION = "threadforge.dependency-inventory.v3"
 PYTHON_LOCK_HEADER = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\]+)")
 PYTHON_EXTRA_REQUIREMENT = re.compile(
     r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]+\])?(.*)$"
 )
 PYTHON_HASH = re.compile(r"--hash=sha256:([0-9a-f]{64})")
+PYTHON_UV_HASH = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class InventoryError(RuntimeError):
@@ -48,8 +57,26 @@ def component(
     source_manifest: str,
     source_manifest_sha256: str,
     integrity: list[str] | None = None,
+    resolution_markers: list[str] | None = None,
+    direct_requirements: list[dict[str, str]] | None = None,
     replaced: bool = False,
 ) -> dict[str, Any]:
+    normalized_direct_requirements: dict[str, dict[str, str]] = {}
+    for item in direct_requirements or []:
+        if not all(
+            isinstance(item.get(field), str) and item[field]
+            for field in ("group", "requirement", "source_manifest", "source_manifest_sha256")
+        ):
+            raise InventoryError("direct Python requirements must retain their source manifest")
+        normalized = {
+            "group": item["group"],
+            "requirement": item["requirement"],
+            "source_manifest": item["source_manifest"],
+            "source_manifest_sha256": item["source_manifest_sha256"],
+        }
+        normalized_direct_requirements[
+            json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+        ] = normalized
     return {
         "ecosystem": ecosystem,
         "name": name,
@@ -63,6 +90,11 @@ def component(
         "source_manifest": source_manifest,
         "source_manifest_sha256": source_manifest_sha256,
         "integrity": sorted(set(integrity or [])),
+        "resolution_markers": sorted(set(resolution_markers or [])),
+        "direct_requirements": [
+            normalized_direct_requirements[key]
+            for key in sorted(normalized_direct_requirements)
+        ],
         "replaced": replaced,
     }
 
@@ -285,47 +317,200 @@ def parse_requirement(requirement: str) -> tuple[str, str]:
     return name, constraint
 
 
+def normalize_python_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def load_toml_document(path: Path, relative: str) -> dict[str, Any]:
+    if tomllib is None:
+        raise InventoryError(
+            "Python 3.10 requires the 'tomli' package to read " + relative
+        )
+    try:
+        value = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise InventoryError(f"invalid TOML dependency manifest {relative}: {error}") from error
+    if not isinstance(value, dict):
+        raise InventoryError(f"dependency manifest {relative} has no TOML table root")
+    return value
+
+
 def python_extra_components(
     root: Path, manifests: dict[str, dict[str, str]], relative: str
 ) -> list[dict[str, Any]]:
     digest = register_manifest(root, manifests, relative)
-    lines = (root / relative).read_text(encoding="utf-8").splitlines()
-    in_section = False
-    group: str | None = None
-    items = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            in_section = stripped == "[project.optional-dependencies]"
-            group = None
-            continue
-        if not in_section:
-            continue
-        group_match = re.match(r"^([A-Za-z0-9_-]+)\s*=\s*\[", stripped)
-        if group_match:
-            group = group_match.group(1)
-        if group is None:
-            continue
-        for requirement in re.findall(r'"([^"]+)"', stripped):
+    document = load_toml_document(root / relative, relative)
+    project = document.get("project")
+    if not isinstance(project, dict):
+        raise InventoryError(f"dependency manifest {relative} has no project table")
+    groups: list[tuple[str, str, list[str]]] = []
+    runtime = project.get("dependencies", [])
+    if not isinstance(runtime, list) or any(not isinstance(item, str) for item in runtime):
+        raise InventoryError(f"invalid project dependencies in {relative}")
+    groups.append(("runtime", "runtime", runtime))
+    optional = project.get("optional-dependencies", {})
+    if not isinstance(optional, dict):
+        raise InventoryError(f"invalid optional dependencies in {relative}")
+    for group, requirements in optional.items():
+        if not isinstance(group, str) or not isinstance(requirements, list) or any(
+            not isinstance(item, str) for item in requirements
+        ):
+            raise InventoryError(f"invalid optional dependency group in {relative}")
+        groups.append((group, "optional", requirements))
+
+    items: list[dict[str, Any]] = []
+    for group, scope, requirements in groups:
+        for requirement in requirements:
             name, constraint = parse_requirement(requirement)
+            safe_requirement = requirement.strip()
+            if "@" in safe_requirement or re.search(
+                r"(?i)(?:https?|file|git\+|ssh)://", safe_requirement
+            ):
+                safe_requirement = f"{name} @ <redacted-source>"
             items.append(
                 component(
                     ecosystem="pypi",
                     name=name,
                     version=None,
                     version_constraint=constraint,
-                    scope="optional",
+                    scope=scope,
                     group=group,
                     direct=True,
                     license_declared=None,
                     source_manifest=relative,
                     source_manifest_sha256=digest,
+                    direct_requirements=[
+                        {
+                            "group": group,
+                            "requirement": safe_requirement,
+                            "source_manifest": relative,
+                            "source_manifest_sha256": digest,
+                        }
+                    ],
                 )
             )
-        if stripped == "]":
-            group = None
     if not items:
-        raise InventoryError(f"no optional dependencies found in {relative}")
+        raise InventoryError(f"no project dependencies found in {relative}")
+    return items
+
+
+def python_uv_lock_components(
+    root: Path,
+    manifests: dict[str, dict[str, str]],
+    lock_relative: str,
+    pyproject_relative: str,
+) -> list[dict[str, Any]]:
+    lock_digest = register_manifest(root, manifests, lock_relative)
+    declarations = python_extra_components(root, manifests, pyproject_relative)
+    project_document = load_toml_document(root / pyproject_relative, pyproject_relative)
+    lock = load_toml_document(root / lock_relative, lock_relative)
+    project = project_document.get("project")
+    if not isinstance(project, dict):
+        raise InventoryError(f"dependency manifest {pyproject_relative} has no project table")
+    project_name = project.get("name")
+    requires_python = project.get("requires-python")
+    if not isinstance(project_name, str) or not isinstance(requires_python, str):
+        raise InventoryError(f"project name or requires-python is missing in {pyproject_relative}")
+    if lock.get("version") != 1 or lock.get("requires-python") != requires_python:
+        raise InventoryError(f"Python lock header does not match {pyproject_relative}")
+    packages = lock.get("package")
+    if not isinstance(packages, list) or not packages:
+        raise InventoryError(f"Python lockfile {lock_relative} has no package records")
+
+    requirements_by_name: dict[str, list[dict[str, str]]] = {}
+    for declaration in declarations:
+        key = normalize_python_name(declaration["name"])
+        requirements_by_name.setdefault(key, []).extend(declaration["direct_requirements"])
+
+    project_key = normalize_python_name(project_name)
+    locked_project = False
+    locked_names: set[str] = set()
+    identities: set[tuple[str, str, str]] = set()
+    items: list[dict[str, Any]] = []
+    for package in packages:
+        if not isinstance(package, dict):
+            raise InventoryError(f"Python lockfile {lock_relative} has an invalid package record")
+        name = package.get("name")
+        version = package.get("version")
+        source = package.get("source")
+        if not isinstance(name, str) or not name or not isinstance(version, str) or not version:
+            raise InventoryError(f"Python lockfile {lock_relative} has an unnamed or unpinned package")
+        if not isinstance(source, dict):
+            raise InventoryError(f"Python lockfile {lock_relative} has a package without a source")
+        name_key = normalize_python_name(name)
+        if name_key == project_key and source.get("editable") == ".":
+            if locked_project:
+                raise InventoryError(f"Python lockfile {lock_relative} has duplicate project records")
+            locked_project = True
+            continue
+        if set(source) != {"registry"} or not isinstance(source.get("registry"), str):
+            raise InventoryError(
+                f"unsupported non-registry package source in {lock_relative}: {name}"
+            )
+
+        marker_value = package.get("resolution-markers", [])
+        if not isinstance(marker_value, list) or any(
+            not isinstance(marker, str) or not marker for marker in marker_value
+        ):
+            raise InventoryError(f"invalid resolution markers in {lock_relative}: {name}")
+        marker_key = json.dumps(sorted(set(marker_value)), separators=(",", ":"))
+        identity = (name_key, version, marker_key)
+        if identity in identities:
+            raise InventoryError(f"duplicate package resolution in {lock_relative}: {name} {version}")
+        identities.add(identity)
+
+        integrity: list[str] = []
+        sdist = package.get("sdist")
+        if sdist is not None:
+            if not isinstance(sdist, dict):
+                raise InventoryError(f"invalid source distribution record in {lock_relative}: {name}")
+            sdist_hash = sdist.get("hash")
+            if not isinstance(sdist_hash, str) or not PYTHON_UV_HASH.fullmatch(sdist_hash):
+                raise InventoryError(f"missing or invalid artifact hash in {lock_relative}: {name}")
+            integrity.append(sdist_hash)
+        wheels = package.get("wheels", [])
+        if not isinstance(wheels, list):
+            raise InventoryError(f"invalid wheel records in {lock_relative}: {name}")
+        for wheel in wheels:
+            if not isinstance(wheel, dict):
+                raise InventoryError(f"invalid wheel record in {lock_relative}: {name}")
+            wheel_hash = wheel.get("hash")
+            if not isinstance(wheel_hash, str) or not PYTHON_UV_HASH.fullmatch(wheel_hash):
+                raise InventoryError(f"missing or invalid artifact hash in {lock_relative}: {name}")
+            integrity.append(wheel_hash)
+        if not integrity:
+            raise InventoryError(f"Python lockfile {lock_relative} has an unhashed package: {name}")
+
+        direct_requirements = requirements_by_name.get(name_key, [])
+        locked_names.add(name_key)
+        items.append(
+            component(
+                ecosystem="pypi",
+                name=name,
+                version=version,
+                version_constraint=None,
+                scope="optional",
+                group="uv-lock",
+                direct=bool(direct_requirements),
+                license_declared=None,
+                source_manifest=lock_relative,
+                source_manifest_sha256=lock_digest,
+                integrity=integrity,
+                resolution_markers=marker_value,
+                direct_requirements=direct_requirements,
+            )
+        )
+
+    if not locked_project:
+        raise InventoryError(f"Python lockfile {lock_relative} has no matching editable project")
+    unresolved_direct = sorted(set(requirements_by_name) - locked_names)
+    if unresolved_direct:
+        raise InventoryError(
+            "Python lockfile does not resolve declared direct requirements: "
+            + ", ".join(unresolved_direct[:20])
+        )
+    if not items:
+        raise InventoryError(f"Python lockfile {lock_relative} has no external distributions")
     return items
 
 
@@ -391,7 +576,14 @@ def build_inventory(root: Path) -> dict[str, Any]:
             root, manifests, "containers/engineering/build-requirements.lock", "build"
         )
     )
-    items.extend(python_extra_components(root, manifests, "python/pyproject.toml"))
+    items.extend(
+        python_uv_lock_components(
+            root,
+            manifests,
+            "python/uv.lock",
+            "python/pyproject.toml",
+        )
+    )
     items.sort(
         key=lambda item: (
             item["source_manifest"],
@@ -409,12 +601,13 @@ def build_inventory(root: Path) -> dict[str, Any]:
         "release_clearance": False,
         "coverage": {
             "status": "source-manifest-inventory-only",
-            "resolved_python_optional_extras": False,
+            "resolved_python_optional_extras": True,
             "license_review_complete": False,
             "license_metadata_collection": license_metadata,
             "note": (
-                "This inventory records checked-in dependency manifests only. It is not a "
-                "complete artifact SBOM, legal opinion, or redistribution approval."
+                "Python optional extras resolve through the hash-bearing uv.lock; license "
+                "metadata remains unreviewed. This is not a complete artifact SBOM, legal "
+                "opinion, or redistribution approval."
             ),
         },
         "counts": {

@@ -9232,6 +9232,7 @@ test = [
     { name = "referencing" },
     { name = "ruff" },
     { name = "setuptools" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "wheel" },
 ]
 typed-data = [
@@ -9281,6 +9282,7 @@ requires-dist = [
     { name = "safetensors", marker = "extra == 'hf'", specifier = ">=0.4" },
     { name = "setuptools", marker = "extra == 'test'", specifier = ">=77" },
     { name = "tenacity", marker = "extra == 'workspace'", specifier = ">=8.0" },
+    { name = "tomli", marker = "python_full_version < '3.11' and extra == 'test'", specifier = ">=2" },
     { name = "torch", marker = "extra == 'hf'", specifier = ">=2.3" },
     { name = "transformers", marker = "extra == 'hf'", specifier = ">=4.53" },
     { name = "transformers", marker = "extra == 'serving'", specifier = ">=4.53" },

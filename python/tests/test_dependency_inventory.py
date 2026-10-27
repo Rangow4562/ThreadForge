@@ -10,7 +10,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = ROOT / "scripts" / "generate_dependency_inventory.py"
-SCHEMA_PATH = ROOT / "schema" / "dependency-inventory-v2.schema.json"
+SCHEMA_PATH = ROOT / "schema" / "dependency-inventory-v3.schema.json"
 SPEC = importlib.util.spec_from_file_location("threadforge_dependency_inventory", SCRIPT_PATH)
 assert SPEC is not None and SPEC.loader is not None
 inventory = importlib.util.module_from_spec(SPEC)
@@ -44,9 +44,11 @@ def test_python_lock_parser_rejects_unhashed_pins():
         inventory.parse_python_lock("alpha==1.2.3\n", "requirements.lock", "b" * 64, "runtime")
 
 
-def test_python_optional_extra_ranges_stay_explicitly_unresolved(tmp_path):
+def test_python_extra_declarations_preserve_exact_direct_requirements(tmp_path):
     path = tmp_path / "pyproject.toml"
     path.write_text(
+        '[project]\n'
+        'dependencies = []\n'
         '[project.optional-dependencies]\n'
         'decisions = ["numpy>=1.24"]\n'
         'evolution = ["anthropic[vertex]>=0.40", "litellm>=1.50"]\n',
@@ -60,7 +62,123 @@ def test_python_optional_extra_ranges_stay_explicitly_unresolved(tmp_path):
         ("litellm", ">=1.50", "evolution"),
     ]
     assert all(item["version"] is None and item["license_declared"] is None for item in items)
+    declaration_source = {
+        "source_manifest": "pyproject.toml",
+        "source_manifest_sha256": items[0]["source_manifest_sha256"],
+    }
+    assert [item["direct_requirements"] for item in items] == [
+        [{"group": "decisions", "requirement": "numpy>=1.24", **declaration_source}],
+        [{"group": "evolution", "requirement": "anthropic[vertex]>=0.40", **declaration_source}],
+        [{"group": "evolution", "requirement": "litellm>=1.50", **declaration_source}],
+    ]
     assert manifests["pyproject.toml"]["sha256"] == items[0]["source_manifest_sha256"]
+
+
+def _write_uv_inventory_fixture(root, *, include_direct=True, use_unsupported_source=False):
+    (root / "pyproject.toml").write_text(
+        '[project]\n'
+        'name = "fixture-project"\n'
+        'version = "0.1.0"\n'
+        'requires-python = ">=3.10"\n'
+        'dependencies = []\n'
+        '[project.optional-dependencies]\n'
+        'decisions = ["direct-lib[feature]>=2.0", '
+        '"private-lib @ https://user:secret@example.test/private.whl"]\n',
+        encoding="utf-8",
+    )
+    direct_record = (
+        '[[package]]\n'
+        'name = "direct-lib"\n'
+        'version = "2.1.0"\n'
+        'source = { registry = "https://user:secret@example.test/simple" }\n'
+        'resolution-markers = ["python_full_version >= \'3.10\'"]\n'
+        'wheels = [{ url = "https://user:secret@example.test/direct.whl", '
+        'hash = "sha256:' + "a" * 64 + '" }]\n'
+    ) if include_direct else ""
+    private_url_record = (
+        '[[package]]\n'
+        'name = "private-lib"\n'
+        'version = "1.0.0"\n'
+        'source = { registry = "https://user:secret@example.test/simple" }\n'
+        'wheels = [{ url = "https://user:secret@example.test/private.whl", '
+        'hash = "sha256:' + "c" * 64 + '" }]\n'
+    )
+    transitive_source = (
+        'source = { git = "https://token:secret@example.test/transitive.git" }\n'
+        if use_unsupported_source
+        else 'source = { registry = "https://user:secret@example.test/simple" }\n'
+    )
+    transitive_record = (
+        '[[package]]\n'
+        'name = "transitive-lib"\n'
+        'version = "1.4.2"\n'
+        + transitive_source
+        + 'sdist = { url = "file:///C:/private/transitive.tar.gz", hash = "sha256:'
+        + "b" * 64
+        + '" }\n'
+    )
+    root_record = (
+        'version = 1\n'
+        'revision = 3\n'
+        'requires-python = ">=3.10"\n'
+        '[[package]]\n'
+        'name = "fixture-project"\n'
+        'version = "0.1.0"\n'
+        'source = { editable = "." }\n'
+    )
+    (root / "uv.lock").write_text(
+        root_record + direct_record + private_url_record + transitive_record,
+        encoding="utf-8",
+    )
+
+
+def test_uv_lock_inventory_preserves_hashes_markers_and_direct_ranges_without_urls(tmp_path):
+    _write_uv_inventory_fixture(tmp_path)
+    manifests = {}
+    items = inventory.python_uv_lock_components(
+        tmp_path, manifests, "uv.lock", "pyproject.toml"
+    )
+    assert [(item["name"], item["version"], item["direct"]) for item in items] == [
+        ("direct-lib", "2.1.0", True),
+        ("private-lib", "1.0.0", True),
+        ("transitive-lib", "1.4.2", False),
+    ]
+    direct = items[0]
+    assert direct["scope"] == "optional"
+    assert direct["group"] == "uv-lock"
+    assert direct["direct_requirements"] == [
+        {
+            "group": "decisions",
+            "requirement": "direct-lib[feature]>=2.0",
+            "source_manifest": "pyproject.toml",
+            "source_manifest_sha256": manifests["pyproject.toml"]["sha256"],
+        }
+    ]
+    assert direct["resolution_markers"] == ["python_full_version >= '3.10'"]
+    assert direct["integrity"] == ["sha256:" + "a" * 64]
+    assert items[1]["direct_requirements"] == [
+        {
+            "group": "decisions",
+            "requirement": "private-lib @ <redacted-source>",
+            "source_manifest": "pyproject.toml",
+            "source_manifest_sha256": manifests["pyproject.toml"]["sha256"],
+        }
+    ]
+    assert items[2]["direct_requirements"] == []
+    serialized = json.dumps(items)
+    assert all(secret not in serialized for secret in ("https://", "file:///", "user:secret", "token:secret", "C:/private"))
+    assert manifests["uv.lock"]["sha256"] == items[0]["source_manifest_sha256"]
+    assert "pyproject.toml" in manifests
+
+
+def test_uv_lock_inventory_rejects_unsupported_sources_and_missing_direct_packages(tmp_path):
+    _write_uv_inventory_fixture(tmp_path, use_unsupported_source=True)
+    with pytest.raises(inventory.InventoryError, match="unsupported non-registry package source"):
+        inventory.python_uv_lock_components(tmp_path, {}, "uv.lock", "pyproject.toml")
+
+    _write_uv_inventory_fixture(tmp_path, include_direct=False)
+    with pytest.raises(inventory.InventoryError, match="does not resolve declared direct requirements"):
+        inventory.python_uv_lock_components(tmp_path, {}, "uv.lock", "pyproject.toml")
 
 
 def test_npm_lock_inventory_omits_registry_urls_and_retains_declared_license(tmp_path):
@@ -143,11 +261,11 @@ def test_inventory_schema_requires_no_clearance_and_unreviewed_components():
         )
     ]
     report = {
-        "schema_version": "threadforge.dependency-inventory.v2",
+        "schema_version": "threadforge.dependency-inventory.v3",
         "release_clearance": False,
         "coverage": {
             "status": "source-manifest-inventory-only",
-            "resolved_python_optional_extras": False,
+            "resolved_python_optional_extras": True,
             "license_review_complete": False,
             "license_metadata_collection": inventory.license_metadata_collection(components),
             "note": "Manifest inventory only; legal review remains open.",
@@ -202,7 +320,10 @@ def test_license_audit_snapshot_matches_current_source_manifest_inventory():
         None,
     )
     assert python_extras_row is not None, "license-audit.md must document optional Python extras"
-    assert f"reports {counts['unresolved_versions']} unresolved version declarations" in python_extras_row
+    assert f"reports {counts['unresolved_versions']} unresolved component versions" in python_extras_row
+    assert "python/uv.lock" in report["manifests"][-1]["path"] or any(
+        item["path"] == "python/uv.lock" for item in report["manifests"]
+    )
     npm_entries = sum(item["ecosystem"] == "npm" for item in report["components"])
     assert f"All {npm_entries} npm lock entries have a nonempty declared license field" in summary
     assert report["release_clearance"] is False

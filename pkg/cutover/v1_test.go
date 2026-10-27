@@ -338,6 +338,81 @@ func TestAssessBlocksIncompleteMancodeLegacyWorkflowBinding(t *testing.T) {
 	}
 }
 
+func TestAssessBlocksMancodeLegacyPlanWithoutSourceVersionBinding(t *testing.T) {
+	root := t.TempDir()
+	report, _, trust := completeFixture(t, root)
+	var mancodeMigration *MigrationEvidence
+	for index := range report.Migrations {
+		if report.Migrations[index].Product == "mancode" {
+			mancodeMigration = &report.Migrations[index]
+			break
+		}
+	}
+	if mancodeMigration == nil {
+		t.Fatal("complete fixture is missing Mancode migration evidence")
+	}
+	coveragePath := filepath.Join(root, mancodeMigration.FormatCoverage.Path)
+	content, err := os.ReadFile(coveragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var coverage migrationcoverage.Report
+	if err := json.Unmarshal(content, &coverage); err != nil {
+		t.Fatal(err)
+	}
+	workflowFormats := []string{
+		"mancode.legacy-workflow-metadata", "mancode.legacy-workflow-requirements",
+		"mancode.legacy-workflow-review", "mancode.legacy-workflow-verification",
+		"mancode.legacy-workflow-plan",
+	}
+	for _, id := range workflowFormats {
+		coverage.Formats = append(coverage.Formats, migrationcoverage.Format{
+			ID: id, Files: 1, SourceBytes: 1, RecordsFound: 1, RecordsImported: 1,
+			SnapshotFiles: 1, FileSetSHA256: testDigest(id),
+		})
+	}
+	sort.Slice(coverage.Formats, func(i, j int) bool { return coverage.Formats[i].ID < coverage.Formats[j].ID })
+	coverage.FilesScanned += len(workflowFormats)
+	coverage.SourceBytes += int64(len(workflowFormats))
+	coverage.RecordsFound += len(workflowFormats)
+	coverage.RecordsImported += len(workflowFormats)
+	coverage.SnapshotFiles += len(workflowFormats)
+	coverage.MancodeLegacyWorkflowChecks = []migrationcoverage.MancodeLegacyWorkflowCheck{{
+		SchemaVersion: migrationcoverage.MancodeLegacyWorkflowBindingSchemaVersion,
+		Relationship:  "mancode_legacy_workflow_ledgers", WorkflowIDSHA256: testDigest("legacy-workflow-task"),
+		MetadataFileCount: 1, MetadataValid: true, MetadataSourceSetSHA256: testDigest("metadata"),
+		RequirementsFileCount: 1, RequirementsValid: true, RequirementsSourceSetSHA256: testDigest("requirements"),
+		ReviewFileCount: 1, ReviewValid: true, ReviewSourceSetSHA256: testDigest("review"),
+		VerificationFileCount: 1, VerificationValid: true, VerificationSourceSetSHA256: testDigest("verification"),
+		PlanFileCount: 1, PlanValid: true, PlanSourceSetSHA256: testDigest("plan"),
+		MetadataRequirementsDigestPresent: true, MetadataRequirementsDigestBindingVerified: true,
+		WorkflowPathBindingVerified: true, RequirementsDigestBindingVerified: true,
+		AcceptanceCriteriaBindingVerified: true, PlanVersionBindingVerified: true,
+		ReviewRemediationBindingVerified: true, PlanPresenceVerified: true,
+		PlanContentBindingVerified: false, Status: "verified", Issues: []string{},
+		Authority: "local_pending_review", HumanReviewRequired: true, ExecutionAuthorized: false,
+	}}
+	if err := migrationcoverage.Validate(coverage); err != nil {
+		t.Fatalf("otherwise valid legacy workflow coverage was rejected: %v", err)
+	}
+	updated, err := json.Marshal(coverage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(coveragePath, updated, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(updated)
+	mancodeMigration.FormatCoverage.SHA256 = hex.EncodeToString(digest[:])
+	mancodeMigration.SourceRecords += len(workflowFormats)
+	mancodeMigration.ImportedRecords += len(workflowFormats)
+
+	assessment, err := AssessWithTrust(report, root, trust)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "legacy workflow plans without source-bound content/version binding") {
+		t.Fatalf("Mancode legacy plan without source-bound version evidence was not blocked: %#v, %v", assessment, err)
+	}
+}
+
 func TestAssessBlocksIncompleteMancodeTeamPolicyWorkspaceBinding(t *testing.T) {
 	root := t.TempDir()
 	report, _, trust := completeFixture(t, root)

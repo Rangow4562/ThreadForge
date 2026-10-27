@@ -460,6 +460,9 @@ func validateMigrationFormatCoverage(assessment *Assessment, verifier *artifactV
 		if check.Status != "verified" {
 			assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" has an incomplete or conflicting legacy workflow ledger binding")
 		}
+		if check.PlanFileCount > 0 && !check.PlanContentBindingVerified {
+			assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" has legacy workflow plans without source-bound content/version binding")
+		}
 	}
 	for _, check := range coverage.MancodeTeamPolicyChecks {
 		if check.Status != "verified" {

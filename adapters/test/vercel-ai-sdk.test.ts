@@ -2,32 +2,25 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createThreadforgeVercelTelemetryOptions } from '../src/vercel-ai-sdk.ts';
 
-test('creates opt-in Vercel telemetry settings with input and output recording disabled', () => {
-  let spansStarted = 0;
-  const tracer = { startSpan() { spansStarted += 1; return {}; } };
-  const settings = createThreadforgeVercelTelemetryOptions(tracer);
+test('creates Vercel AI SDK v7 per-call telemetry settings with content and context capture disabled', () => {
+  const settings = createThreadforgeVercelTelemetryOptions();
 
   assert.deepEqual(settings, {
-    isEnabled: true,
-    tracer,
     recordInputs: false,
     recordOutputs: false,
+    includeRuntimeContext: false,
+    includeToolsContext: false,
   });
-  assert.equal(settings.tracer, tracer);
-  assert.equal(spansStarted, 0, 'creating settings must not start a span or make a network request');
-  assert.equal(Object.hasOwn(settings, 'endpoint'), false, 'exporter endpoints remain application-owned');
+  assert.deepEqual(Object.keys(settings).sort(), [
+    'includeRuntimeContext', 'includeToolsContext', 'recordInputs', 'recordOutputs',
+  ]);
 });
 
-test('rejects missing or malformed tracers without initializing global telemetry', () => {
-  assert.throws(() => createThreadforgeVercelTelemetryOptions(null as never), /tracer is required/);
-  assert.throws(() => createThreadforgeVercelTelemetryOptions({} as never), /tracer is required/);
-  assert.throws(() => createThreadforgeVercelTelemetryOptions({ startSpan: 1 } as never), /tracer is required/);
-});
-
-test('does not mutate tracer state or expose unrelated configuration fields', () => {
-  const tracer = Object.freeze({ startSpan() { return {}; }, privateLabel: 'PRIVATE_TRACER_LABEL' });
-  const originalKeys = Object.keys(tracer);
-  const settings = createThreadforgeVercelTelemetryOptions(tracer);
-  assert.deepEqual(Object.keys(tracer), originalKeys);
-  assert.deepEqual(Object.keys(settings).sort(), ['isEnabled', 'recordInputs', 'recordOutputs', 'tracer'].sort());
+test('does not initialize global telemetry, exporters, or network state', () => {
+  const first = createThreadforgeVercelTelemetryOptions();
+  const second = createThreadforgeVercelTelemetryOptions();
+  assert.notEqual(first, second);
+  assert.equal(Object.hasOwn(first, 'tracer'), false);
+  assert.equal(Object.hasOwn(first, 'isEnabled'), false);
+  assert.equal(Object.hasOwn(first, 'endpoint'), false);
 });

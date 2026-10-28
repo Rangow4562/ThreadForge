@@ -42,17 +42,20 @@ These are local metadata observers, not Beacon's OpenTelemetry auto-instrumentat
 
 `instrumentClaudeAgentQuery(query, options)` returns `{ query, dispose() }`. It preserves the query's async iteration and binds control methods to the original query object. It counts terminal `type: "result"` markers and uses only the result's boolean `is_error` to distinguish completed from failed calls. Early iterator return is reported as interrupted. It does not inspect message bodies, `result`, session IDs, UUIDs, model-usage snapshots, or control payloads. Token and cost attribution are intentionally omitted because SDK usage snapshots can be cumulative across streaming turns and resumed sessions. Disposing disables telemetry without interrupting the query. This remains a structural fixture-tested observer; no real Claude Agent SDK process or model run is part of the test suite.
 
-For Vercel AI SDK, `createThreadforgeVercelTelemetryOptions(tracer)` returns the native `experimental_telemetry` shape with `isEnabled: true`, `recordInputs: false`, and `recordOutputs: false`. Pass the result to each `generateText` or `streamText` call that should emit spans:
+For Vercel AI SDK v7, `createThreadforgeVercelTelemetryOptions()` returns per-call `telemetry` settings that explicitly disable input, output, runtime-context, and tool-context recording. Register and configure the application's telemetry integration once at startup; this helper does not initialize a global integration, provider, or exporter:
 
 ```ts
 import { generateText } from "ai";
+import { registerTelemetry } from "ai";
+import { OpenTelemetry } from "@ai-sdk/otel";
 import { createThreadforgeVercelTelemetryOptions } from "@threadforge/adapter-contracts/vercel-ai-sdk";
 
-const telemetry = createThreadforgeVercelTelemetryOptions(localTracer);
-await generateText({ model, prompt, experimental_telemetry: telemetry });
+registerTelemetry(new OpenTelemetry(/* application-owned OpenTelemetry configuration */));
+const telemetry = createThreadforgeVercelTelemetryOptions();
+await generateText({ model, prompt, telemetry });
 ```
 
-`localTracer` must be supplied and configured by the application (for example, with a local OTLP exporter targeting Threadforge's loopback receiver). The helper creates no exporter, process-global provider, environment setting, or network connection. The SDK/provider span attributes and live Vercel package compatibility have not been validated here; do not enable input/output recording when composing other telemetry settings.
+The application owns the telemetry integration, OpenTelemetry provider/exporter, endpoint, and retention policy. Avoid registering another integration that records content or context. The SDK/provider span attributes and live Vercel package compatibility have not been validated here; this helper only supplies privacy-minimizing per-call options and is not telemetry-delivery evidence.
 
 For applications that own an OpenTelemetry provider, `@threadforge/adapter-contracts/otel-span-processor` exports `createThreadforgeSpanProcessor(options={})`, a dependency-free structural `SpanProcessor` implementation. It accepts only a fixed set of `gen_ai.operation.name` values and bounded provider/model/token metadata, and posts projected events to the loopback `/v1/events` intake. `endpoint` defaults to `http://127.0.0.1:4318/v1/events`; `timeoutMs` defaults to `1500` and must be from 100 to 10000. At most 64 intake requests are in flight; overflow is dropped, and `forceFlush()`/`shutdown()` wait for accepted in-flight requests. Span names, trace/span IDs, arbitrary attributes, events, links, exception descriptions, prompt/output text, and credential-shaped provider/model values are not copied. This is a local metadata bridge, not Beacon's OpenTelemetry auto-instrumentation or a live-version compatibility claim. The application remains responsible for provider/exporter setup and for ensuring its own other exporters do not forward sensitive data.
 

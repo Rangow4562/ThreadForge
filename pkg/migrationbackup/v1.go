@@ -20,10 +20,10 @@ import (
 const SchemaVersion = "threadforge.migration-source-backup-verification.v1"
 
 const (
-	maxFiles      = 10000
-	maxEntries    = 100000
-	maxFileBytes  = int64(32 << 20)
-	maxTotalBytes = int64(1 << 30)
+	maxFiles         = 10000
+	maxEntries       = 100000
+	maxTotalBytes    = int64(1 << 30)
+	maxTreeFileBytes = maxTotalBytes
 )
 
 type Report struct {
@@ -257,9 +257,17 @@ func scanTree(root string) (treeState, error) {
 			directories[relative] = struct{}{}
 			return nil
 		}
-		if !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > maxFileBytes || len(state.files) >= maxFiles ||
-			state.bytes > maxTotalBytes-info.Size() {
-			return errors.New("tree contains an unsupported or over-limit file")
+		if !info.Mode().IsRegular() {
+			return errors.New("tree contains a non-regular file")
+		}
+		if info.Size() < 0 || info.Size() > maxTreeFileBytes {
+			return errors.New("tree file exceeds the configured size limit")
+		}
+		if len(state.files) >= maxFiles {
+			return errors.New("tree exceeds the file-count limit")
+		}
+		if state.bytes > maxTotalBytes-info.Size() {
+			return errors.New("tree exceeds the total-byte limit")
 		}
 		file, err := os.Open(fullPath)
 		if err != nil {
@@ -282,7 +290,7 @@ func scanTree(root string) (treeState, error) {
 			return errors.New("tree file changed during reading")
 		}
 		if len(state.files)+1 > maxFiles || state.bytes > maxTotalBytes-written {
-			return errors.New("tree exceeds configured bounds")
+			return errors.New("tree exceeds the configured file-count or total-byte limit")
 		}
 		state.bytes += written
 		contentDigest := hex.EncodeToString(hasher.Sum(nil))

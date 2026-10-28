@@ -49,6 +49,43 @@ func TestVerifySnapshotReportsExactIndependentCopyWithoutPathsOrContent(t *testi
 	}
 }
 
+func TestVerifySnapshotStreamsLargeUnimportedGitMetadataFile(t *testing.T) {
+	sourceRoot, backupRoot := backupFixture(t)
+	writeBackupFixtureFile(t, filepath.Join(sourceRoot, ".beacon", "endpoint", "logs", "runtime.jsonl"),
+		validBeaconEventLog(t, "synthetic migration event"))
+	packPath := filepath.Join(sourceRoot, ".git", "objects", "pack", "fixture.pack")
+	if err := os.MkdirAll(filepath.Dir(packPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pack, err := os.OpenFile(packPath, os.O_CREATE|os.O_RDWR|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This is one byte beyond the 32 MiB eligible-input file limit. Backup
+	// verification must still hash the complete unrelated tree entry within
+	// its 1 GiB aggregate bound.
+	const largePackBytes = int64(32<<20) + 1
+	if err := pack.Truncate(largePackBytes); err != nil {
+		_ = pack.Close()
+		t.Fatal(err)
+	}
+	if err := pack.Close(); err != nil {
+		t.Fatal(err)
+	}
+	copyBackupFixtureTree(t, sourceRoot, backupRoot)
+	manifestPath := createBackupFixtureSnapshot(t, sourceRoot)
+
+	report, err := VerifySnapshot(manifestPath, backupRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Status != "verified" || report.SourceFiles != 2 || report.BackupFiles != 2 ||
+		report.SourceBytes != report.BackupBytes || report.SourceBytes <= largePackBytes ||
+		report.DifferentFiles != 0 || report.SnapshotSourceMismatches != 0 || report.SharedFiles != 0 {
+		t.Fatalf("large unrelated Git metadata prevented exact backup verification: %#v", report)
+	}
+}
+
 func TestVerifySnapshotRejectsChangedAndIncompleteBackups(t *testing.T) {
 	sourceRoot, backupRoot := backupFixture(t)
 	writeBackupFixtureFile(t, filepath.Join(sourceRoot, ".beacon", "endpoint", "logs", "runtime.jsonl"), validBeaconEventLog(t, "source bytes"))

@@ -10,6 +10,8 @@ GitHub Copilot CLI approved-memory note (October 24, 2026): Threadforge now offe
 
 Codex CLI task-plan gate note (October 20, 2026): installed smoke v29 verified one Codex CLI 0.163.0 exec_command denial for a persisted synthetic plan_only task; the target stayed absent and no real model ran. Direct apply_patch was not exposed by this CLI request. Governed shell effects remain unscoped, and normal trust discovery is unverified; see the [Codex CLI task-plan gate](codex-cli-plan-gate.md).
 
+Codex CLI task-aware memory installer note (October 28, 2026): installed smoke v39 invokes the public `codex memory install` path with an explicit task selector and verifies the task context reaches the local provider through `UserPromptSubmit` before any MCP result. It runs against Codex CLI 0.164.0 with `hooks = true` and hook-trust bypass scoped to disposable `CODEX_HOME`; no user trust or feature setting is changed and no real model is called. Normal trust/enablement discovery, model adherence, task efficacy, and other Codex client variants remain unverified; see the [Codex memory hook](codex-hooks.md#approved-project-memory-injection).
+
 Antigravity CLI task-plan gate probe (October 20, 2026): smoke v31 on installed `agy` 1.4.2 configured a project `PreToolUse` command and attempted one valid direct file-tool call, but the command observer recorded zero callbacks. The host returned a generic tool error and the sentinel stayed absent; this does not establish a Threadforge denial. Project-hook enforcement through this CLI is unverified for the selected version; Antigravity IDE behavior is not tested.
 
 ## Additional requested harnesses (outside legacy-source parity)

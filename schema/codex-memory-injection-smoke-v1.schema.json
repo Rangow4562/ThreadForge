@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/codex-memory-injection-smoke-v1.schema.json",
+  "title": "Threadforge installed Codex task-aware memory injection smoke result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "host_cli_version", "provider", "hook_event", "installer_action",
+    "task_selector_persisted", "task_context_observed", "task_context_content_retained_in_report",
+    "task_objective_observed", "advisory_safety_statement_verified", "action_ready", "guidance_only",
+    "execution_authorized", "real_model_invocations"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.codex-memory-injection-smoke.v1" },
+    "status": { "const": "verified" },
+    "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "provider": { "const": "deterministic-loopback-fixture" },
+    "hook_event": { "const": "UserPromptSubmit" },
+    "installer_action": { "const": "installed" },
+    "task_selector_persisted": { "const": true },
+    "task_context_observed": { "const": true },
+    "task_context_content_retained_in_report": { "const": false },
+    "task_objective_observed": { "const": true },
+    "advisory_safety_statement_verified": { "const": true },
+    "action_ready": { "const": false },
+    "guidance_only": { "const": true },
+    "execution_authorized": { "const": false },
+    "real_model_invocations": { "const": 0 }
+  }
+}

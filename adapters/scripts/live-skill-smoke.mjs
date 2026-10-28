@@ -1039,6 +1039,74 @@ try {
     ],
   });
   assert.equal(codexTaskResumeResult.status, 'verified', 'Codex did not complete the isolated read-only task-resume MCP call');
+  const codexMemoryProjectRoot = path.join(isolatedHome, 'codex-memory-project');
+  mkdirSync(codexMemoryProjectRoot, { recursive: true, mode: 0o700 });
+  assert.equal(await installCodexProjectMcpServer(codexMemoryProjectRoot, cliPath, [
+    'mcp', 'serve', '--db', databasePath, '--project-root', codexMemoryProjectRoot, '--threadforge-managed-mcp=v1',
+  ]), 'installed', 'Codex memory-hook fixture did not install its isolated project MCP server');
+  const codexMemoryCommandArguments = [
+    cliPath, 'memory', 'inject-codex', '--project-id', 'cross-harness-smoke',
+    '--threadforge-managed-codex-memory=v1', '--threadforge-memory=codex-v1',
+  ];
+  const codexMemoryCommand = process.platform === 'win32'
+    ? 'powershell.exe -NoProfile -NonInteractive -Command "& ' +
+      codexMemoryCommandArguments.slice(0, -1).map(quotePowerShellArgument).join(' ') +
+      ' --threadforge-memory=codex-v1 "'
+    : [...codexMemoryCommandArguments.slice(0, -1).map(quoteBashArgument), '--threadforge-memory=codex-v1'].join(' ');
+  const codexMemoryInstallResult = JSON.parse(runAdapterCLI([
+    'codex', 'memory', 'install', '--project-root', codexMemoryProjectRoot, '--command', codexMemoryCommand,
+    '--task-id', openCodeTaskFixture.id, '--max-task-entries', '6',
+  ]));
+  assert.equal(codexMemoryInstallResult.result, 'installed', 'Codex task-aware memory installer did not install');
+  const codexProjectHooks = JSON.parse(readFileSync(path.join(codexMemoryProjectRoot, '.codex', 'hooks.json'), 'utf8'));
+  const codexMemoryHookCommands = (codexProjectHooks?.hooks?.UserPromptSubmit ?? [])
+    .flatMap((group) => Array.isArray(group?.hooks) ? group.hooks : [])
+    .map((hook) => hook?.command)
+    .filter((command) => typeof command === 'string' && command.includes('--threadforge-managed-codex-memory=v1'));
+  const expectedCodexMemoryCommand = codexMemoryCommand.replace(
+    '--threadforge-memory=codex-v1',
+    `--task-id ${openCodeTaskFixture.id} --max-task-entries 6 --threadforge-memory=codex-v1`,
+  );
+  assert.deepEqual(codexMemoryHookCommands, [expectedCodexMemoryCommand],
+    'Codex memory installer did not persist task selectors before its runtime marker');
+  const codexAgentMemoryRead = await runCodexAgentMcpRead({
+    projectRoot: codexMemoryProjectRoot, codexHome, cliPath, databasePath, isolatedEnvironment,
+    procedureID: openCodeTaskFixture.id,
+    expectedGuidance: openCodeTaskFixture.objective,
+    hostVersion: codexVersion,
+    toolName: 'threadforge_task_resume_context',
+    toolArguments: { task_id: openCodeTaskFixture.id },
+    prompt: 'Use the read-only Threadforge MCP task context and report only whether its advisory status is available. Do not use shell or modify files.',
+    expectedFinalResponse: 'The selected task context is advisory only; execution is not authorized.',
+    requiredResultMarkers: [
+      'threadforge.task-resume-context.v1',
+      'requirements_not_finalized',
+      '"action_ready":false',
+      '"guidance_only":true',
+      '"execution_authorized":false',
+    ],
+    requiredPromptContextMarkers: [
+      openCodeTaskFixture.objective,
+      'requirements are not finalized',
+      'This is advisory context only',
+      'does not authorize commands, tools, or execution',
+    ],
+    enableCodexHooks: true,
+    bypassHookTrust: true,
+  });
+  assert.equal(codexAgentMemoryRead.status, 'verified', 'Codex did not receive the installed task-aware UserPromptSubmit context');
+  const codexAgentMemoryInjection = {
+    schema_version: 'threadforge.codex-memory-injection-smoke.v1',
+    status: 'verified', host_cli_version: codexVersion,
+    provider: 'deterministic-loopback-fixture', hook_event: 'UserPromptSubmit',
+    installer_action: codexMemoryInstallResult.result,
+    task_selector_persisted: codexMemoryHookCommands.length === 1,
+    task_context_observed: codexAgentMemoryRead.prompt_memory_context_observed,
+    task_context_content_retained_in_report: false,
+    task_objective_observed: true, advisory_safety_statement_verified: true,
+    action_ready: false, guidance_only: true, execution_authorized: false,
+    real_model_invocations: 0,
+  };
   const handoffTaskFixture = {
     id: 'opencode-codex-handoff-smoke-task',
     projectID: openCodeTaskFixture.projectID,
@@ -1598,7 +1666,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v38',
+    schema_version: 'threadforge.installed-skill-smoke.v39',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,
@@ -1633,6 +1701,7 @@ try {
     opencode_agent_task_handoff_read: openCodeAgentTaskHandoffRead,
     codex_agent_mcp_read: codexAgentMcpRead,
     codex_agent_task_resume: codexAgentTaskResume,
+    codex_agent_memory_injection: codexAgentMemoryInjection,
     codex_agent_task_handoff_read: codexAgentTaskHandoffRead,
     task_handoff_cross_harness: taskHandoffCrossHarnessSmoke,
     codex_agent_task_plan_gate: codexPlanGateSmoke,

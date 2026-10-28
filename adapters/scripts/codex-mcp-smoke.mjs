@@ -14,15 +14,20 @@ const modelID = 'threadforge-codex-fixture-model';
 export async function runCodexAgentMcpRead({
   projectRoot, codexHome, cliPath, databasePath, isolatedEnvironment, procedureID, expectedGuidance,
   toolName = 'threadforge_procedure_get', toolArguments, prompt, expectedFinalResponse,
-  requiredResultMarkers = [], hostVersion = 'unknown', privateTelemetryValues = [],
+  requiredResultMarkers = [], requiredPromptContextMarkers = [], enableCodexHooks = false, bypassHookTrust = false,
+  hostVersion = 'unknown', privateTelemetryValues = [],
 }) {
   const mcpArguments = toolArguments ?? { procedure_id: procedureID };
   const promptText = prompt ?? `Read approved procedure ${procedureID} using Threadforge MCP, then repeat its first guidance sentence exactly. Do not use shell or modify files.`;
   const finalResponse = expectedFinalResponse ?? expectedGuidance;
+  if (requiredPromptContextMarkers.some((marker) => promptText.includes(marker))) {
+    throw new Error('Codex task-memory prompt contains an expected injected-context marker');
+  }
   let completionRequests = 0;
   let auxiliaryRequests = 0;
   let fixtureToolCalls = 0;
   let toolResultObserved = false;
+  let promptContextObservedRequests = 0;
   let authorizationSafe = true;
   let fixtureError;
   const providerShapes = [];
@@ -91,10 +96,16 @@ export async function runCodexAgentMcpRead({
         }
 
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        const serializedBody = JSON.stringify(body);
         const input = Array.isArray(body.input) ? body.input : [];
         const tools = Array.isArray(body.tools) ? body.tools : [];
         const functionOutputs = input.filter((item) => item?.type === 'function_call_output');
         completionRequests++;
+        if (functionOutputs.length === 0 && serializedBody.includes(promptText) &&
+            requiredPromptContextMarkers.length > 0 &&
+            requiredPromptContextMarkers.every((marker) => serializedBody.includes(marker))) {
+          promptContextObservedRequests++;
+        }
         if (providerShapes.length < 12) {
           providerShapes.push({
             body_keys: Object.keys(body).sort().slice(0, 16),
@@ -190,6 +201,7 @@ export async function runCodexAgentMcpRead({
       `model = ${tomlString(modelID)}`,
       `model_provider = ${tomlString(providerID)}`,
       'sandbox_mode = "read-only"',
+      ...(enableCodexHooks ? ['', '[features]', 'hooks = true'] : []),
       '',
       `[model_providers.${providerID}]`,
       'name = "Threadforge deterministic local smoke provider"',
@@ -214,7 +226,8 @@ export async function runCodexAgentMcpRead({
     assert.match(listing.stdout, /threadforge/i, 'Codex MCP inventory did not include the project Threadforge server');
 
     const run = await runCodex([
-      'exec', '--json', '--ephemeral', '--sandbox', 'read-only', '--cd', projectRoot,
+      'exec', '--json', '--ephemeral', ...(bypassHookTrust ? ['--dangerously-bypass-hook-trust'] : []),
+      '--sandbox', 'read-only', '--cd', projectRoot,
       '--skip-git-repo-check', '--model', modelID, promptText,
     ], { cwd: projectRoot, env: environment, timeout: 120_000 });
     if (fixtureError) throw new Error(fixtureError);
@@ -223,6 +236,10 @@ export async function runCodexAgentMcpRead({
     assert.equal(toolResultObserved, true, 'fixture provider did not observe the MCP procedure result');
     assert.equal(completionRequests, auxiliaryRequests + 2,
       'expected only tool-less auxiliary requests, one MCP tool call, and one final response');
+    if (requiredPromptContextMarkers.length > 0) {
+      assert.ok(promptContextObservedRequests > 0,
+        'Codex did not send the task-memory hook context with the original prompt before any MCP tool result');
+    }
     assert.ok(run.stdout.includes(expectedFinalResponse ?? expectedGuidance), `Codex final output did not contain the expected ${toolName} summary`);
     assert.ok(telemetry.logs > 0 && telemetry.log_records > 0,
       `Codex did not deliver OTLP logs to the loopback collector: ${JSON.stringify(telemetry)}`);
@@ -248,6 +265,10 @@ export async function runCodexAgentMcpRead({
         host_cli_version: hostVersion,
         handoff_page_contract_markers_verified: requiredResultMarkers.length > 0 && toolResultObserved,
         private_identifiers_detected_in_telemetry: sensitiveTelemetryFields.some((field) => field.includes(':private_identifier_')),
+      } : {}),
+      ...(requiredPromptContextMarkers.length > 0 ? {
+        prompt_memory_context_observed: promptContextObservedRequests > 0,
+        prompt_memory_context_observation_requests: promptContextObservedRequests,
       } : {}),
       status: 'verified', provider: 'deterministic-loopback-fixture',
       codex_mcp_configured: true, tool: toolName,

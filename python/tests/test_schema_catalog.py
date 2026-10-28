@@ -344,6 +344,38 @@ def test_codex_task_resume_smoke_schema_is_advisory_and_content_free():
         }})
 
 
+def test_codex_memory_injection_smoke_schema_is_advisory_and_content_free():
+    schema = json.loads((SCHEMA_DIRECTORY / "codex-memory-injection-smoke-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.codex-memory-injection-smoke.v1",
+        "status": "verified",
+        "host_cli_version": "codex-cli 0.164.0",
+        "provider": "deterministic-loopback-fixture",
+        "hook_event": "UserPromptSubmit",
+        "installer_action": "installed",
+        "task_selector_persisted": True,
+        "task_context_observed": True,
+        "task_context_content_retained_in_report": False,
+        "task_objective_observed": True,
+        "advisory_safety_statement_verified": True,
+        "action_ready": False,
+        "guidance_only": True,
+        "execution_authorized": False,
+        "real_model_invocations": 0,
+    }
+    validator.validate(result)
+    for invalid in (
+        {**result, "execution_authorized": True},
+        {**result, "task_context_content_retained_in_report": True},
+        {**result, "task_id": "private-task-id"},
+        {**result, "objective": "Synthetic task objective"},
+        {**result, "prompt": "Private user prompt"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_codex_cli_plan_gate_smoke_schema_records_only_a_denied_shell_attempt():
     schema = json.loads((SCHEMA_DIRECTORY / "codex-cli-plan-gate-smoke-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

@@ -78,6 +78,12 @@ import { getPiHistoryStatus, syncPiHistory } from './pi-history.ts';
 import { getPrimeHistoryStatus, syncPrimeHistory } from './prime-history.ts';
 import { installOpenHandsProjectHooks, openHandsManagedMarker, removeOpenHandsProjectHooks } from './openhands-hooks-config.ts';
 import { runOpenHandsHook } from './openhands-hook.ts';
+import {
+  getOpenHandsUserMcpServerStatus,
+  installOpenHandsUserMcpServer,
+  uninstallOpenHandsUserMcpServer,
+  updateOpenHandsUserMcpServer,
+} from './openhands-mcp-config.ts';
 import { devinHookEvents, devinManagedMarker, runDevinHook } from './devin-hook.ts';
 import { installDevinHooks, removeDevinHooks, type DevinHookScope } from './devin-hooks-config.ts';
 import { devinDesktopHookEvents, devinDesktopManagedMarker, runDevinDesktopHook } from './devin-desktop-hook.ts';
@@ -163,6 +169,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   let primeSubsystem: 'sessions' | undefined;
   let dshSubsystem: 'sessions' | undefined;
   let clineSubsystem: 'sessions' | 'plugin' | 'mcp' | undefined;
+  let openHandsSubsystem: 'mcp' | undefined;
   let projectSkillSubsystem: 'skills' | undefined;
   let qoderCommandSubsystem: 'commands' | undefined;
   let bootstrapSubsystem: 'mcp' | 'instructions' | undefined;
@@ -397,6 +404,15 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   }
   if (family === 'cline' && action === 'mcp') {
     clineSubsystem = 'mcp';
+    action = rest[0];
+    rest = rest.slice(1);
+    if (!action) {
+      stderr.write(`${usage()}\n`);
+      return 2;
+    }
+  }
+  if (family === 'openhands' && action === 'mcp') {
+    openHandsSubsystem = 'mcp';
     action = rest[0];
     rest = rest.slice(1);
     if (!action) {
@@ -639,6 +655,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       (family === 'cline' && clineSubsystem === 'sessions') ||
       (family === 'cline' && clineSubsystem === 'plugin' && clinePluginScope === 'user') ||
       (family === 'cline' && clineSubsystem === 'mcp') ||
+      (family === 'openhands' && openHandsSubsystem === 'mcp') ||
       (family === 'goose' && gooseSubsystem === 'otel') ||
       (family === 'vscode' && vscodeSubsystem === 'otel') ||
       (family === 'claude' && claudeSubsystem === 'sessions') ||
@@ -719,6 +736,28 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       const result = action === 'install' ? await installClineUserMcpServer(required(options, 'command'), pathOptions)
         : action === 'update' ? await updateClineUserMcpServer(required(options, 'expected-command'), required(options, 'command'), pathOptions)
           : await uninstallClineUserMcpServer(required(options, 'expected-command'), pathOptions);
+      stdout.write(`${JSON.stringify({ result })}\n`);
+      return 0;
+    }
+    if (family === 'openhands' && openHandsSubsystem === 'mcp' && ['install', 'update', 'uninstall', 'status'].includes(action)) {
+      rejectUnexpected(options, ['config-path', 'command', 'expected-command']);
+      if ((action === 'install' || action === 'status') && options.values.has('expected-command')) {
+        throw new Error(`--expected-command is not valid for OpenHands MCP ${action}`);
+      }
+      if ((action === 'status' || action === 'uninstall') && options.values.has('command')) {
+        throw new Error(`--command is not valid for OpenHands MCP ${action}`);
+      }
+      const pathOptions = options.values.has('config-path') ? { configPath: required(options, 'config-path') } : {};
+      if (action === 'status') {
+        const status = await getOpenHandsUserMcpServerStatus(pathOptions);
+        stdout.write(`${JSON.stringify(status)}\n`);
+        return status.result === 'installed' ? 0 : 1;
+      }
+      const result = action === 'install'
+        ? await installOpenHandsUserMcpServer(required(options, 'command'), pathOptions)
+        : action === 'update'
+          ? await updateOpenHandsUserMcpServer(required(options, 'expected-command'), required(options, 'command'), pathOptions)
+          : await uninstallOpenHandsUserMcpServer(required(options, 'expected-command'), pathOptions);
       stdout.write(`${JSON.stringify({ result })}\n`);
       return 0;
     }
@@ -1744,6 +1783,7 @@ function usage(): string {
     '  npm run adapter -- openclaw install|update|uninstall --scope active-gateway [--openclaw-cli <command>] [--print] [--acknowledge-local-source]',
     '  npm run adapter -- openhands install|update --project-root <absolute-path> [--command-template <command-with-{event}-and-marker>]',
     '  npm run adapter -- openhands uninstall --project-root <absolute-path>',
+    '  npm run adapter -- openhands mcp install|update|uninstall|status [--config-path <absolute-user-config-path>] [--command <threadforge-executable>] [--expected-command <current-executable>]',
     '  npm run adapter -- openhands hook <session_start|user_prompt_submit|pre_tool_use|post_tool_use|stop|session_end> --threadforge-openhands-hook=v1',
     '  npm run adapter -- hermes hooks print-config [--command-template <command-with-{event}-and-marker>]',
     '  npm run adapter -- hermes hook <event> --threadforge-hermes-hook=v1',

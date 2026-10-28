@@ -190,6 +190,18 @@ npm.cmd --prefix adapters run adapter -- mcp uninstall --host kimi-code --projec
 
 The manager changes only `mcpServers.threadforge`, storing bounded `command` and `args` with the ownership marker. It rejects credential-like values, `cwd`, trust, and environment fields, preserves other project MCP entries, and never changes Kimi trust or permission settings. Kimi may require a user trust decision before enabling project MCP; Threadforge does not make that decision. The `kimi` executable is not installed here, so live config discovery and tool use remain unverified. See [Kimi Code integration](kimi-code.md) and the official [MCP configuration docs](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/mcp.html).
 
+## OpenHands user-global MCP
+
+OpenHands CLI uses a user-level MCP config at `~/.openhands/mcp.json` and does not document a project-level MCP file. Threadforge has a separate global manager:
+
+```powershell
+npm.cmd --prefix adapters run adapter -- openhands mcp install --command <absolute-threadforge-executable>
+npm.cmd --prefix adapters run adapter -- openhands mcp update --expected-command <current-executable> --command <new-absolute-threadforge-executable>
+npm.cmd --prefix adapters run adapter -- openhands mcp uninstall --expected-command <current-executable>
+```
+
+It manages only `mcpServers.threadforge`, without `--project-root`, auto-approval fields, trust changes, or credentials. This exposes the local Threadforge store globally, not version-controlled project memory. Use `--config-path <absolute-path>` for an alternate local file. The OpenHands binary is unavailable here; config discovery and tool dispatch remain unverified. See [OpenHands integration](openhands.md) and the official [MCP server docs](https://docs.openhands.dev/openhands/usage/cli/mcp-servers).
+
 ## Claude Code command hooks
 
 `@threadforge/adapter-contracts/claude-hook` accepts Claude Code command-hook JSON on stdin and maps supported lifecycle events to the local `/v1/events` intake. By default, prompt and tool payloads are not forwarded: only a bounded SHA-256 digest and byte count are retained, and digests are omitted for values larger than 64 KiB. Session and call identifiers are hashed before logging; tool/agent labels are bounded and credential-like labels are omitted. Working directories, transcript paths, raw prompts, tool arguments, and tool outputs are not retained. Permission requests remain requests, and the mapper does not invent approval decisions or process exit codes. Capture errors are fail-open so this observational hook cannot block or authorize an agent action.

@@ -1733,6 +1733,44 @@ test('adapter CLI installs async OpenHands hooks and handles telemetry fail-open
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('adapter CLI installs OpenHands MCP globally without project binding or auto-approval', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-openhands-mcp-cli-'));
+  const configPath = path.join(root, '.openhands', 'mcp.json');
+  try {
+    await mkdir(path.dirname(configPath), { recursive: true });
+    const original = { mcpServers: { analytics: { command: 'analytics', args: ['serve'] } }, otherSetting: true };
+    await writeFile(configPath, JSON.stringify(original));
+    const command = path.join(root, 'bin', 'threadforge.exe');
+    let result = await invoke(['openhands', 'mcp', 'install', '--config-path', configPath, '--command', command]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'installed');
+    let config = JSON.parse(await readFile(configPath, 'utf8'));
+    assert.deepEqual(config.mcpServers.threadforge, {
+      command, args: ['mcp', 'serve', '--threadforge-managed-mcp=v1'],
+    });
+    assert.deepEqual(config.mcpServers.analytics, original.mcpServers.analytics);
+    assert.equal(Object.hasOwn(config.mcpServers.threadforge, 'autoApprove'), false);
+
+    result = await invoke(['openhands', 'mcp', 'status', '--config-path', configPath]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'installed');
+
+    result = await invoke(['openhands', 'mcp', 'update', '--config-path', configPath,
+      '--expected-command', command, '--command', `${command}-next`]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'updated');
+
+    result = await invoke(['openhands', 'mcp', 'uninstall', '--config-path', configPath, '--expected-command', `${command}-next`]);
+    assert.equal(result.code, 0, result.stderr);
+    config = JSON.parse(await readFile(configPath, 'utf8'));
+    assert.deepEqual(config, original);
+
+    const projectScoped = await invoke(['openhands', 'mcp', 'install', '--project-root', root, '--command', command]);
+    assert.notEqual(projectScoped.code, 0);
+    assert.match(projectScoped.stderr, /unsupported adapter option/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('Hermes CLI prints a manual hook fragment and invokes only marked telemetry hooks', async () => {
   const config = await invoke(['hermes', 'hooks', 'print-config']);
   assert.equal(config.code, 0, config.stderr);

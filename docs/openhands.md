@@ -34,4 +34,17 @@ npm.cmd run adapter -- openhands skills uninstall --project-root <absolute-path>
 
 This route uses the shared `.agents/skills/` ownership contract. It accepts only an approved, privacy-reviewed Threadforge export with a matching SHA-256, refuses collisions or modified content, and preserves neighboring skills. It does not modify `.openhands/mcp.json`, hooks, trust, or credentials. The skill remains advisory guidance, not execution authorization. OpenHands may load it from the project path, but live discovery and actual task retrieval have not been verified here. See OpenHands' [Agent Skills documentation](https://docs.openhands.dev/openhands/usage/skills).
 
+## User-global MCP server
+
+OpenHands CLI reads MCP servers from the user-level `~/.openhands/mcp.json`; its documented CLI does not provide project-specific MCP configuration. Threadforge therefore exposes a separate, explicit user-global registration. It starts the local MCP server without `--project-root`, so it reaches the local Threadforge store rather than version-controlled project memory.
+
+```powershell
+npm.cmd --prefix adapters run adapter -- openhands mcp install --command <absolute-threadforge-executable>
+npm.cmd --prefix adapters run adapter -- openhands mcp status
+npm.cmd --prefix adapters run adapter -- openhands mcp update --expected-command <current-executable> --command <new-absolute-threadforge-executable>
+npm.cmd --prefix adapters run adapter -- openhands mcp uninstall --expected-command <current-executable>
+```
+
+Use `--config-path <absolute-path>` to target an alternate local MCP config. Threadforge changes only `mcpServers.threadforge`, writes only `command` and bounded `args`, and preserves other entries. It does not set automatic approvals, trust, or environment credentials. This is a global local-store connection—not project-scoped memory—and OpenHands CLI discovery/tool dispatch have not been tested because the executable is unavailable here. See OpenHands' [MCP server documentation](https://docs.openhands.dev/openhands/usage/cli/mcp-servers).
+
 OpenHands' current [hooks reference](https://docs.openhands.dev/openhands/usage/customization/hooks) describes asynchronous hooks and project hook configuration. The event payloads and generated command still require installed-version and platform verification. User-scope SDK capture, runtime discovery, packaged installation, and cross-harness retrieval are not implemented. This is not release parity or cutover evidence.

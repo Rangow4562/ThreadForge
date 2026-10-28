@@ -1217,7 +1217,7 @@ try {
   const geminiVersion = runHost('gemini', ['--version']).trim();
   const geminiCliSmokeResults = await runGeminiCliTelemetrySmoke({
     smokeRoot: isolatedHome, isolatedEnvironment, runGemini: runGeminiCliAsync,
-    version: geminiVersion, cliPath, taskFixture: openCodeTaskFixture,
+    version: geminiVersion, cliPath, taskFixture: openCodeTaskFixture, runAdapterCLI,
   });
   const geminiCliTelemetrySmoke = geminiCliSmokeResults.telemetry;
   const geminiAgentTaskResume = geminiCliSmokeResults.task_resume;
@@ -1598,7 +1598,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v37',
+    schema_version: 'threadforge.installed-skill-smoke.v38',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,

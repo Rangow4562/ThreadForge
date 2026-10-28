@@ -6,14 +6,14 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { installGeminiTelemetry } from '../src/gemini-telemetry-config.ts';
-import { installGeminiProjectMemoryHook, installGeminiProjectPlanGateHook } from '../src/gemini-memory-config.ts';
+import { installGeminiProjectPlanGateHook } from '../src/gemini-memory-config.ts';
 
 const fixtureModel = 'gemini-2.5-flash';
 const fixtureKey = `AIzaSy${'0'.repeat(33)}`;
 const outputMarker = 'THREADFORGE_GEMINI_TELEMETRY_SMOKE_OK';
 const maxRequestBytes = 16 << 20;
 
-export async function runGeminiCliTelemetrySmoke({ smokeRoot, isolatedEnvironment, runGemini, version, cliPath, taskFixture }) {
+export async function runGeminiCliTelemetrySmoke({ smokeRoot, isolatedEnvironment, runGemini, version, cliPath, taskFixture, runAdapterCLI }) {
   const home = path.join(smokeRoot, 'gemini-telemetry-home');
   const project = path.join(smokeRoot, 'gemini-telemetry-project');
   const planGateProject = path.join(smokeRoot, 'gemini-plan-gate-project');
@@ -103,7 +103,17 @@ export async function runGeminiCliTelemetrySmoke({ smokeRoot, isolatedEnvironmen
     const hookObserverResultPath = path.join(smokeRoot, 'gemini-task-resume-hook-observer.json');
     const hookObserverSource = `import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-const [cliPath, resultPath, projectID, taskID] = process.argv.slice(2);
+const hookArguments = process.argv.slice(2);
+const [cliPath, resultPath, projectID, taskID] = hookArguments;
+const taskIDOption = hookArguments.indexOf('--task-id');
+const maxTaskEntriesOption = hookArguments.indexOf('--max-task-entries');
+if (taskIDOption < 0 || hookArguments[taskIDOption + 1] !== taskID || maxTaskEntriesOption < 0 || hookArguments[maxTaskEntriesOption + 1] !== '6') {
+  process.stderr.write('Gemini task-aware installer options did not reach the installed hook.\\n');
+  process.exit(2);
+}
+const taskSelectorArguments = [
+  '--task-id', hookArguments[taskIDOption + 1], '--max-task-entries', hookArguments[maxTaskEntriesOption + 1],
+];
 const markers = [
   ['task_objective_observed', 'Synthetic objective marker: preserve project guidance across harnesses.'],
   ['requirements_not_finalized_warning_verified', 'requirements are not finalized'],
@@ -113,7 +123,7 @@ const markers = [
 ];
 const child = spawnSync(cliPath, [
   'memory', 'inject-gemini', '--project-id', projectID,
-  '--threadforge-managed-gemini-memory=v1', '--threadforge-memory=gemini-v1', '--task-id', taskID,
+  '--threadforge-managed-gemini-memory=v1', ...taskSelectorArguments, '--threadforge-memory=gemini-v1',
 ], { input: readFileSync(0), encoding: 'utf8', env: process.env, timeout: 10000, maxBuffer: 1 << 20, windowsHide: true });
 let invocationCount = 0;
 if (existsSync(resultPath)) {
@@ -141,15 +151,26 @@ if (Object.values(checks).some((value) => !value)) process.exitCode = 1;
       process.execPath, hookObserverPath, cliPath, hookObserverResultPath, taskFixture.projectID, taskFixture.id,
       '--threadforge-managed-gemini-memory=v1', '--threadforge-memory=gemini-v1',
     ];
-    const hookCommand = process.platform === 'win32'
-      ? `& ${hookCommandArguments.map(quotePowerShellArgument).join(' ')}`
-      : hookCommandArguments.map(quotePosixArgument).join(' ');
-    assert.equal(await installGeminiProjectMemoryHook(project, hookCommand), 'installed');
+    const runtimeMarker = '--threadforge-memory=gemini-v1';
+    const quotedHookCommandArguments = hookCommandArguments.slice(0, -1).map(
+      process.platform === 'win32' ? quotePowerShellArgument : quotePosixArgument,
+    );
+    const hookCommand = `${process.platform === 'win32' ? '& ' : ''}${quotedHookCommandArguments.join(' ')} ${runtimeMarker}`;
+    const memoryInstallResult = JSON.parse(runAdapterCLI([
+      'gemini', 'memory', 'install', '--project-root', project, '--command', hookCommand,
+      '--task-id', taskFixture.id, '--max-task-entries', '6',
+    ]));
+    assert.equal(memoryInstallResult.result, 'installed', 'Gemini task-aware project-memory installer did not install');
     const projectSettingsPath = path.join(project, '.gemini', 'settings.json');
     const projectSettings = JSON.parse(readFileSync(projectSettingsPath, 'utf8'));
     const installedHook = projectSettings.hooks?.BeforeAgent?.flatMap((group) => group.hooks ?? [])
       .find((hook) => hook.name === 'threadforge-approved-memory');
-    assert.equal(installedHook?.command, hookCommand, 'Gemini project BeforeAgent hook did not preserve the task-resume observer command');
+    const expectedTaskAwareHookCommand = hookCommand.replace(
+      runtimeMarker,
+      `--task-id ${taskFixture.id} --max-task-entries 6 ${runtimeMarker}`,
+    );
+    assert.equal(installedHook?.command, expectedTaskAwareHookCommand,
+      'Gemini memory installer did not persist the requested task selector before its runtime marker');
     // Gemini sanitizes hook environments. Give only this disposable hook the
     // isolated Threadforge store root needed to read the synthetic task.
     installedHook.env = { THREADFORGE_HOME: smokeRoot };

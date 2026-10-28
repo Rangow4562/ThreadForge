@@ -16,49 +16,84 @@ import (
 // memory response to an existing task in the same project. The receipt
 // describes the MCP handler result, not client delivery or model exposure.
 func (s *Store) RecordMemoryRetrievalReceipt(ctx context.Context, receipt memoryfeedback.RetrievalReceipt) (int64, error) {
-	if err := memoryfeedback.ValidateRetrievalReceipt(receipt); err != nil {
-		return 0, err
-	}
-	payload, err := json.Marshal(receipt)
+	sequences, err := s.RecordMemoryRetrievalReceipts(ctx, []memoryfeedback.RetrievalReceipt{receipt})
 	if err != nil {
 		return 0, err
 	}
-	var sequence int64
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		task, err := readTask(ctx, tx, receipt.TaskID)
+	return sequences[0], nil
+}
+
+// RecordMemoryRetrievalReceipts atomically appends a bounded group of receipts
+// from one task-scoped MCP context result.
+func (s *Store) RecordMemoryRetrievalReceipts(ctx context.Context, receipts []memoryfeedback.RetrievalReceipt) ([]int64, error) {
+	if len(receipts) == 0 || len(receipts) > memoryfeedback.MaxRetrievalReceiptBatch {
+		return nil, fmt.Errorf("memory retrieval receipt batch must contain 1-%d records", memoryfeedback.MaxRetrievalReceiptBatch)
+	}
+	first := receipts[0]
+	payloads := make([]string, len(receipts))
+	seenIDs := make(map[string]bool, len(receipts))
+	for i, receipt := range receipts {
+		if err := memoryfeedback.ValidateRetrievalReceipt(receipt); err != nil {
+			return nil, fmt.Errorf("validate memory retrieval receipt %d: %w", i, err)
+		}
+		if receipt.ProjectID != first.ProjectID || receipt.TaskID != first.TaskID || receipt.SessionID != first.SessionID {
+			return nil, errors.New("memory retrieval receipt batch must share one project, task, and session scope")
+		}
+		if seenIDs[receipt.ID] {
+			return nil, errors.New("memory retrieval receipt batch contains a duplicate ID")
+		}
+		seenIDs[receipt.ID] = true
+		payload, err := json.Marshal(receipt)
+		if err != nil {
+			return nil, err
+		}
+		payloads[i] = string(payload)
+	}
+	sequences := make([]int64, 0, len(receipts))
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		task, err := readTask(ctx, tx, first.TaskID)
 		if err != nil {
 			return err
 		}
-		if task.ProjectID != receipt.ProjectID {
+		if task.ProjectID != first.ProjectID {
 			return errors.New("memory retrieval receipt project_id does not match its task")
 		}
-		if receipt.SessionID != "" {
-			session, err := readSession(ctx, tx, receipt.SessionID)
+		if first.SessionID != "" {
+			session, err := readSession(ctx, tx, first.SessionID)
 			if err != nil {
 				return err
 			}
-			if session.TaskID != receipt.TaskID || session.ProjectID != receipt.ProjectID {
+			if session.TaskID != first.TaskID || session.ProjectID != first.ProjectID {
 				return errors.New("memory retrieval receipt session does not belong to its task and project")
 			}
 		}
 		var count int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_retrieval_receipts WHERE project_id = ?`, receipt.ProjectID).Scan(&count); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_retrieval_receipts WHERE project_id = ?`, first.ProjectID).Scan(&count); err != nil {
 			return err
 		}
-		if count >= memoryfeedback.MaxProjectRecords {
+		if count+len(receipts) > memoryfeedback.MaxProjectRecords {
 			return fmt.Errorf("project memory retrieval receipt limit reached (%d)", memoryfeedback.MaxProjectRecords)
 		}
-		result, err := tx.ExecContext(ctx,
-			`INSERT INTO memory_retrieval_receipts(id, project_id, task_id, target_id, target_revision, created_at, receipt_json)
-			 VALUES(?, ?, ?, ?, ?, ?, ?)`, receipt.ID, receipt.ProjectID, receipt.TaskID,
-			receipt.TargetID, receipt.TargetRevision, receipt.CreatedAt, string(payload))
-		if err != nil {
-			return fmt.Errorf("append memory retrieval receipt: %w", err)
+		for i, receipt := range receipts {
+			result, err := tx.ExecContext(ctx,
+				`INSERT INTO memory_retrieval_receipts(id, project_id, task_id, target_id, target_revision, created_at, receipt_json)
+				 VALUES(?, ?, ?, ?, ?, ?, ?)`, receipt.ID, receipt.ProjectID, receipt.TaskID,
+				receipt.TargetID, receipt.TargetRevision, receipt.CreatedAt, payloads[i])
+			if err != nil {
+				return fmt.Errorf("append memory retrieval receipt: %w", err)
+			}
+			sequence, err := result.LastInsertId()
+			if err != nil {
+				return err
+			}
+			sequences = append(sequences, sequence)
 		}
-		sequence, err = result.LastInsertId()
-		return err
+		return nil
 	})
-	return sequence, err
+	if err != nil {
+		return nil, err
+	}
+	return sequences, nil
 }
 
 func validateMemoryFeedbackReceipt(ctx context.Context, tx *sql.Tx, feedback memoryfeedback.Feedback) error {

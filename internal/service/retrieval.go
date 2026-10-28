@@ -261,7 +261,7 @@ func RetrieveContextWithProjectRoot(
 				}
 				response.Memory = append(response.Memory, MemoryContextItem{
 					ID: record.ID, Kind: string(record.Kind), Revision: record.Revision, Title: record.Title,
-					Content: record.Content, Evidence: record.Evidence,
+					Freshness: freshness, Content: record.Content, Evidence: record.Evidence,
 				})
 				remaining -= cost
 			}

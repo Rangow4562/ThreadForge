@@ -35,6 +35,16 @@ type Server struct {
 	projectRoot       string
 }
 
+type contextGetWithReceipts struct {
+	SchemaVersion     string                            `json:"schema_version"`
+	Status            string                            `json:"status"`
+	ActionReady       bool                              `json:"action_ready"`
+	Procedures        []service.ProcedureContextItem    `json:"procedures"`
+	Memory            []service.MemoryContextItem       `json:"memory"`
+	Gaps              []string                          `json:"gaps"`
+	RetrievalReceipts []memoryfeedback.RetrievalReceipt `json:"retrieval_receipts"`
+}
+
 type rpcRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
@@ -216,10 +226,12 @@ func definitions() []toolDefinition {
 	tools := []toolDefinition{
 		{
 			Name:        "threadforge_context_get",
-			Description: "Retrieve bounded approved project facts, decisions, policies, and procedures. Results surface stale, conflicting, privacy-blocked, or incomplete context and never authorize actions. " + storedTextTrustNotice,
+			Description: "Retrieve bounded approved project facts, decisions, policies, and procedures. Results surface stale, conflicting, privacy-blocked, or incomplete context and never authorize actions. Optionally supply task_id and session_id to store content-free receipts for each exact returned revision. " + storedTextTrustNotice,
 			InputSchema: objectSchema(map[string]any{
 				"project_id": map[string]any{"type": "string", "minLength": 1},
 				"query":      map[string]any{"type": "string", "minLength": 1, "maxLength": 2000},
+				"task_id":    map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
+				"session_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
 				"paths":      map[string]any{"type": "array", "maxItems": 64, "items": map[string]any{"type": "string"}},
 				"modules":    map[string]any{"type": "array", "maxItems": 64, "items": map[string]any{"type": "string", "maxLength": 128}},
 				"path_fingerprints": map[string]any{
@@ -412,6 +424,8 @@ func (s *Server) callTool(ctx context.Context, params toolCallParams) (any, erro
 		var args struct {
 			ProjectID        string                           `json:"project_id"`
 			Query            string                           `json:"query"`
+			TaskID           string                           `json:"task_id"`
+			SessionID        string                           `json:"session_id"`
 			Paths            []string                         `json:"paths"`
 			Modules          []string                         `json:"modules"`
 			PathFingerprints []proceduregraph.PathFingerprint `json:"path_fingerprints"`
@@ -421,11 +435,25 @@ func (s *Server) callTool(ctx context.Context, params toolCallParams) (any, erro
 		if err := strictDecode(params.Arguments, &args); err != nil {
 			return nil, fmt.Errorf("invalid context arguments: %w", err)
 		}
-		return service.RetrieveContextWithProjectRoot(ctx, s.procedures, s.memory, service.ContextRequest{
+		response, err := service.RetrieveContextWithProjectRoot(ctx, s.procedures, s.memory, service.ContextRequest{
 			SchemaVersion: service.ContextRequestV2, ProjectID: args.ProjectID,
 			Query: args.Query, Paths: args.Paths, Modules: args.Modules, PathFingerprints: args.PathFingerprints,
 			MaxItems: args.MaxItems, MaxTokens: args.MaxTokens,
 		}, s.projectRoot, s.projectProcedures)
+		if err != nil {
+			return nil, err
+		}
+		if args.TaskID == "" && args.SessionID == "" {
+			return response, nil
+		}
+		receipts, err := s.recordContextRetrievalReceipts(ctx, response, args.ProjectID, args.TaskID, args.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		return contextGetWithReceipts{
+			SchemaVersion: response.SchemaVersion, Status: response.Status, ActionReady: response.ActionReady,
+			Procedures: response.Procedures, Memory: response.Memory, Gaps: response.Gaps, RetrievalReceipts: receipts,
+		}, nil
 	case "threadforge_project_memory_index":
 		var args struct {
 			ProjectID string `json:"project_id"`
@@ -911,6 +939,65 @@ func (s *Server) procedureFreshness(
 	return status, freshness, reason, nil
 }
 
+func (s *Server) recordContextRetrievalReceipts(
+	ctx context.Context,
+	response service.ContextResponse,
+	projectID, taskID, sessionID string,
+) ([]memoryfeedback.RetrievalReceipt, error) {
+	if taskID == "" {
+		if sessionID != "" {
+			return nil, errors.New("session_id requires task_id for retrieval receipts")
+		}
+		return nil, nil
+	}
+	if s.procedures == nil {
+		return nil, errors.New("task-scoped retrieval receipts require a local SQLite store")
+	}
+	receipts := make([]memoryfeedback.RetrievalReceipt, 0, len(response.Procedures)+len(response.Memory))
+	for _, item := range response.Procedures {
+		receipt, err := prepareMemoryRetrievalReceipt(memoryfeedback.RetrievalReceipt{
+			SchemaVersion: memoryfeedback.RetrievalReceiptVersion,
+			ProjectID:     projectID, TaskID: taskID, SessionID: sessionID,
+			TargetKind: memoryfeedback.TargetProcedure, TargetID: item.ID, TargetRevision: item.Revision,
+			Tool: "threadforge_context_get", Freshness: item.Freshness, GuidanceIncluded: true,
+			ObservationBoundary: "mcp_handler_result_prepared", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("prepare procedure context receipt: %w", err)
+		}
+		receipts = append(receipts, receipt)
+	}
+	for _, item := range response.Memory {
+		resultStatus := ""
+		switch item.Freshness {
+		case "verified":
+			resultStatus = "complete"
+		case "unverified":
+			resultStatus = "incomplete"
+		default:
+			return nil, fmt.Errorf("context returned unsupported project-memory freshness %q", item.Freshness)
+		}
+		receipt, err := prepareMemoryRetrievalReceipt(memoryfeedback.RetrievalReceipt{
+			SchemaVersion: memoryfeedback.RetrievalReceiptVersionV2,
+			ProjectID:     projectID, TaskID: taskID, SessionID: sessionID,
+			TargetKind: memoryfeedback.TargetKind(item.Kind), TargetID: item.ID, TargetRevision: item.Revision,
+			Tool: "threadforge_context_get", Freshness: item.Freshness, ResultStatus: resultStatus, GuidanceIncluded: true,
+			ObservationBoundary: "mcp_handler_result_prepared", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("prepare project-memory context receipt: %w", err)
+		}
+		receipts = append(receipts, receipt)
+	}
+	if len(receipts) == 0 {
+		return receipts, nil
+	}
+	if _, err := s.procedures.RecordMemoryRetrievalReceipts(ctx, receipts); err != nil {
+		return nil, fmt.Errorf("store local context retrieval receipts: %w", err)
+	}
+	return receipts, nil
+}
+
 func (s *Server) recordProcedureRetrievalReceipt(
 	ctx context.Context,
 	graph proceduregraph.Graph,
@@ -943,18 +1030,26 @@ func (s *Server) persistMemoryRetrievalReceipt(ctx context.Context, receipt memo
 	if s.procedures == nil {
 		return nil, errors.New("task-scoped retrieval receipts require a local SQLite store")
 	}
+	prepared, err := prepareMemoryRetrievalReceipt(receipt)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.procedures.RecordMemoryRetrievalReceipt(ctx, prepared); err != nil {
+		return nil, fmt.Errorf("store local memory retrieval receipt: %w", err)
+	}
+	return &prepared, nil
+}
+
+func prepareMemoryRetrievalReceipt(receipt memoryfeedback.RetrievalReceipt) (memoryfeedback.RetrievalReceipt, error) {
 	var idBytes [16]byte
 	if _, err := rand.Read(idBytes[:]); err != nil {
-		return nil, fmt.Errorf("generate retrieval receipt ID: %w", err)
+		return memoryfeedback.RetrievalReceipt{}, fmt.Errorf("generate retrieval receipt ID: %w", err)
 	}
 	receipt.ID = "retrieval-" + hex.EncodeToString(idBytes[:])
 	if err := memoryfeedback.ValidateRetrievalReceipt(receipt); err != nil {
-		return nil, err
+		return memoryfeedback.RetrievalReceipt{}, err
 	}
-	if _, err := s.procedures.RecordMemoryRetrievalReceipt(ctx, receipt); err != nil {
-		return nil, fmt.Errorf("store local memory retrieval receipt: %w", err)
-	}
-	return &receipt, nil
+	return receipt, nil
 }
 
 func objectSchema(properties map[string]any, required []string) map[string]any {

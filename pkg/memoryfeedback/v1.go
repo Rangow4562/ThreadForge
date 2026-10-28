@@ -21,6 +21,7 @@ const (
 	EvidenceSelfReported      = "self_reported"
 	MaxProjectRecords         = 100000
 	MaxSummaryRecords         = 10000
+	MaxRetrievalReceiptBatch  = 32
 )
 
 type TargetKind string
@@ -253,8 +254,8 @@ func ValidateRetrievalReceipt(value RetrievalReceipt) error {
 	}
 	if isV1 {
 		if value.TargetKind != TargetProcedure ||
-			(value.Tool != "threadforge_procedure_get" && value.Tool != "threadforge_procedure_guide") {
-			problems = append(problems, "v1 receipts are limited to procedure_get and procedure_guide")
+			(value.Tool != "threadforge_procedure_get" && value.Tool != "threadforge_procedure_guide" && value.Tool != "threadforge_context_get") {
+			problems = append(problems, "v1 receipts are limited to procedure_get, procedure_guide, or procedure entries from context_get")
 		}
 		if value.ResultStatus != "" {
 			problems = append(problems, "v1 receipts do not include result_status")
@@ -270,8 +271,8 @@ func ValidateRetrievalReceipt(value RetrievalReceipt) error {
 		if value.TargetKind != TargetFact && value.TargetKind != TargetDecision && value.TargetKind != TargetPolicy {
 			problems = append(problems, "v2 receipts must identify a fact, decision, or policy")
 		}
-		if value.Tool != "threadforge_project_memory_read" && value.Tool != "threadforge_project_memory_read_v2" {
-			problems = append(problems, "v2 receipts are limited to exact project-memory reads")
+		if value.Tool != "threadforge_project_memory_read" && value.Tool != "threadforge_project_memory_read_v2" && value.Tool != "threadforge_context_get" {
+			problems = append(problems, "v2 receipts are limited to project-memory reads or project-memory entries from context_get")
 		}
 		if value.Freshness != "verified" && value.Freshness != "stale" && value.Freshness != "incomplete" &&
 			value.Freshness != "unverified" && value.Freshness != "not_tracked" {

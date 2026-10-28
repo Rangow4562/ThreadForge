@@ -172,6 +172,61 @@ func TestMemoryFeedbackLinksVersion2ProjectMemoryReceipt(t *testing.T) {
 	}
 }
 
+func TestMemoryRetrievalReceiptBatchIsAtomicAndSingleScope(t *testing.T) {
+	database, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	task := continuity.Task{
+		SchemaVersion: continuity.SchemaVersion, ID: "task-context-receipt-batch", ProjectID: "repo-context-receipt", Owner: "local-user",
+		Title: "Read unified project context", Objective: "Bind all returned targets to one retrieval event",
+		AcceptanceCriteria: []string{"Procedure and project-memory receipts share task scope"}, Status: continuity.TaskOpen,
+		Revision: 1, CreatedAt: stamp, UpdatedAt: stamp,
+	}
+	if err := database.CreateTask(ctx, task, "local-user", "create unified context receipt task"); err != nil {
+		t.Fatal(err)
+	}
+	procedureReceipt := memoryfeedback.RetrievalReceipt{
+		SchemaVersion: memoryfeedback.RetrievalReceiptVersion, ID: "retrieval-0123456789abcdef0123456789abcdef",
+		ProjectID: task.ProjectID, TaskID: task.ID, TargetKind: memoryfeedback.TargetProcedure,
+		TargetID: "context-procedure", TargetRevision: 2, Tool: "threadforge_context_get",
+		Freshness: "verified", GuidanceIncluded: true, ObservationBoundary: "mcp_handler_result_prepared", CreatedAt: stamp,
+	}
+	memoryReceipt := memoryfeedback.RetrievalReceipt{
+		SchemaVersion: memoryfeedback.RetrievalReceiptVersionV2, ID: "retrieval-1123456789abcdef0123456789abcdef",
+		ProjectID: task.ProjectID, TaskID: task.ID, TargetKind: memoryfeedback.TargetFact,
+		TargetID: "context-fact", TargetRevision: 3, Tool: "threadforge_context_get",
+		Freshness: "unverified", ResultStatus: "incomplete", GuidanceIncluded: true,
+		ObservationBoundary: "mcp_handler_result_prepared", CreatedAt: stamp,
+	}
+	sequences, err := database.RecordMemoryRetrievalReceipts(ctx, []memoryfeedback.RetrievalReceipt{procedureReceipt, memoryReceipt})
+	if err != nil || len(sequences) != 2 || sequences[0] < 1 || sequences[1] <= sequences[0] {
+		t.Fatalf("sequences=%v err=%v", sequences, err)
+	}
+	newReceipt := procedureReceipt
+	newReceipt.ID = "retrieval-2123456789abcdef0123456789abcdef"
+	newReceipt.TargetID = "context-procedure-next"
+	if _, err := database.RecordMemoryRetrievalReceipts(ctx, []memoryfeedback.RetrievalReceipt{newReceipt, memoryReceipt}); err == nil {
+		t.Fatal("batch with an existing receipt ID was accepted")
+	}
+	var count int
+	if err := database.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_retrieval_receipts WHERE project_id = ?`, task.ProjectID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("failed receipt batch partially committed %d rows", count-2)
+	}
+	foreign := memoryReceipt
+	foreign.ID = "retrieval-3123456789abcdef0123456789abcdef"
+	foreign.TaskID = "another-task"
+	if _, err := database.RecordMemoryRetrievalReceipts(ctx, []memoryfeedback.RetrievalReceipt{procedureReceipt, foreign}); err == nil {
+		t.Fatal("mixed-task receipt batch was accepted")
+	}
+}
+
 func TestMemoryFeedbackRejectsTaskAndSessionScopeMismatch(t *testing.T) {
 	database, err := Open(filepath.Join(t.TempDir(), "threadforge.sqlite"))
 	if err != nil {

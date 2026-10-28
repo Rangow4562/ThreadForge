@@ -169,3 +169,51 @@ def test_memory_retrieval_receipt_v2_records_project_memory_read_status():
     ):
         with pytest.raises(ValidationError):
             validator.validate(invalid)
+
+
+def test_context_response_schema_accepts_bounded_mixed_task_scoped_receipts():
+    response = {
+        "schema_version": "threadforge.context-response.v2",
+        "status": "incomplete",
+        "action_ready": False,
+        "procedures": [{
+            "id": "context-procedure", "revision": 2, "title": "Build procedure",
+            "freshness": "unverified", "guidance": ["Run the focused test."],
+        }],
+        "memory": [{
+            "id": "context-fact", "kind": "fact", "revision": 3, "title": "Build fact",
+            "freshness": "unverified", "content": {"fact": "use the build cache"}, "evidence": [],
+        }],
+        "gaps": ["source freshness is unverified"],
+        "retrieval_receipts": [
+            {
+                "schema_version": "threadforge.memory-retrieval-receipt.v1",
+                "id": "retrieval-6123456789abcdef0123456789abcdef",
+                "project_id": "repo:example", "task_id": "task-context", "session_id": "session-context",
+                "target_kind": "procedure", "target_id": "context-procedure", "target_revision": 2,
+                "tool": "threadforge_context_get", "freshness": "unverified", "guidance_included": True,
+                "observation_boundary": "mcp_handler_result_prepared", "created_at": "2026-10-28T12:00:00Z",
+            },
+            {
+                "schema_version": "threadforge.memory-retrieval-receipt.v2",
+                "id": "retrieval-7123456789abcdef0123456789abcdef",
+                "project_id": "repo:example", "task_id": "task-context", "session_id": "session-context",
+                "target_kind": "fact", "target_id": "context-fact", "target_revision": 3,
+                "tool": "threadforge_context_get", "freshness": "unverified", "result_status": "incomplete",
+                "guidance_included": True, "observation_boundary": "mcp_handler_result_prepared",
+                "created_at": "2026-10-28T12:00:00Z",
+            },
+        ],
+    }
+    _validator("context-response-v2.schema.json").validate(response)
+
+    with pytest.raises(ValidationError):
+        _validator("context-response-v2.schema.json").validate({
+            **response,
+            "retrieval_receipts": response["retrieval_receipts"] * 17,
+        })
+    with pytest.raises(ValidationError):
+        _validator("context-response-v2.schema.json").validate({
+            **response,
+            "memory": [{**response["memory"][0], "freshness": "stale"}],
+        })

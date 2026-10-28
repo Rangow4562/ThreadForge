@@ -742,12 +742,13 @@ func (response ContextResponse) MarshalJSON() ([]byte, error) {
 }
 
 type MemoryContextItem struct {
-	ID       string                   `json:"id"`
-	Kind     string                   `json:"kind"`
-	Revision int                      `json:"revision"`
-	Title    string                   `json:"title"`
-	Content  json.RawMessage          `json:"content"`
-	Evidence []projectmemory.Evidence `json:"evidence"`
+	ID        string                   `json:"id"`
+	Kind      string                   `json:"kind"`
+	Revision  int                      `json:"revision"`
+	Title     string                   `json:"title"`
+	Freshness string                   `json:"freshness"`
+	Content   json.RawMessage          `json:"content"`
+	Evidence  []projectmemory.Evidence `json:"evidence"`
 }
 
 type ProcedureContextItem struct {

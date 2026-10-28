@@ -15,8 +15,10 @@ test('installation alone captures nothing until capture and a site are opted in'
   const page = await context.newPage();
   await page.goto('https://claude.ai/chat');
   await expect(page.locator('[data-testid="assistant-message"]')).toHaveAttribute('data-complete', '1');
-  const settings = await serviceWorker.evaluate(async () => (await chrome.storage.local.get('settings')).settings);
-  expect(settings).toMatchObject({
+  await expect.poll(
+    async () => serviceWorker.evaluate(async () => (await chrome.storage.local.get('settings')).settings),
+    { timeout: 5_000 },
+  ).toMatchObject({
     enabled: false,
     retention: 'metadata',
     sites: { claude_web: false, chatgpt_web: false },

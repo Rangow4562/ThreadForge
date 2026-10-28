@@ -14,7 +14,7 @@
     "target_kind": { "const": "procedure" },
     "target_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
     "target_revision": { "type": "integer", "minimum": 1 },
-    "tool": { "enum": ["threadforge_procedure_get", "threadforge_procedure_guide"] },
+    "tool": { "enum": ["threadforge_procedure_get", "threadforge_procedure_guide", "threadforge_context_get"] },
     "freshness": { "enum": ["verified", "unverified", "stale"] },
     "guidance_included": { "type": "boolean" },
     "observation_boundary": { "const": "mcp_handler_result_prepared" },

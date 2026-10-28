@@ -998,6 +998,135 @@ func TestMCPProjectMemoryReadsReturnTaskScopedVersion2Receipts(t *testing.T) {
 	}
 }
 
+func TestMCPContextGetReturnsAtomicReceiptsForExactIncludedRevisions(t *testing.T) {
+	root := t.TempDir()
+	database, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	memory, err := projectfiles.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := addApprovedProcedureWithInstruction(t, database, "context-procedure", "Use the approved context procedure.")
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	task := continuity.Task{
+		SchemaVersion: continuity.SchemaVersion, ID: "task-context-receipts", ProjectID: graph.ProjectID, Owner: "local-user",
+		Title: "Retrieve unified context", Objective: "Check task-scoped receipts for mixed context results",
+		AcceptanceCriteria: []string{"Each receipt names one exact included revision"}, Status: continuity.TaskOpen,
+		Revision: 1, CreatedAt: stamp, UpdatedAt: stamp,
+	}
+	if err := database.CreateTask(context.Background(), task, "local-user", "create unified context receipt task"); err != nil {
+		t.Fatal(err)
+	}
+	session := continuity.Session{
+		SchemaVersion: continuity.SchemaVersion, ID: "session-context-receipts", ProjectID: task.ProjectID,
+		TaskID: task.ID, Harness: "codex-cli", Status: continuity.SessionActive, Revision: 1,
+		StartedAt: stamp, UpdatedAt: stamp,
+	}
+	if err := database.StartSession(context.Background(), session, "local-user", "start unified context receipt session"); err != nil {
+		t.Fatal(err)
+	}
+	candidate := projectmemory.Candidate{
+		SchemaVersion: projectmemory.SchemaVersion, ID: "context-fact", ProjectID: task.ProjectID,
+		Kind: projectmemory.KindFact, Title: "Context memory fact", Content: json.RawMessage(`{"fact":"bounded context item"}`),
+		Evidence: []projectmemory.Evidence{{Origin: "human", ContentSHA256: strings.Repeat("c", 64), Redacted: true}},
+	}
+	if _, err := memory.Publish(candidate, 0, "reviewer", "approve context receipt fixture", true, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	server := NewWithProjectStores(database, memory, nil, root)
+	arguments := json.RawMessage(`{"project_id":"repo","query":"context","paths":["src/main.go"],"task_id":"task-context-receipts","session_id":"session-context-receipts","max_items":8,"max_tokens":1600}`)
+	value, err := server.callTool(context.Background(), toolCallParams{Name: "threadforge_context_get", Arguments: arguments})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response contextGetWithReceipts
+	if err := json.Unmarshal(data, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.SchemaVersion != "threadforge.context-response.v2" || len(response.Procedures) != 1 ||
+		response.Procedures[0].ID != graph.ID || response.Procedures[0].Revision != graph.Revision ||
+		response.Procedures[0].Freshness != "unverified" || len(response.Memory) != 1 ||
+		response.Memory[0].ID != candidate.ID || response.Memory[0].Revision != 1 || response.Memory[0].Freshness != "unverified" ||
+		len(response.RetrievalReceipts) != 2 {
+		t.Fatalf("mixed context response or receipt count was not preserved: %s", data)
+	}
+	var procedureReceipt, memoryReceipt *memoryfeedback.RetrievalReceipt
+	for i := range response.RetrievalReceipts {
+		receipt := &response.RetrievalReceipts[i]
+		if receipt.ProjectID != task.ProjectID || receipt.TaskID != task.ID || receipt.SessionID != session.ID ||
+			receipt.Tool != "threadforge_context_get" || !receipt.GuidanceIncluded ||
+			receipt.ObservationBoundary != "mcp_handler_result_prepared" {
+			t.Fatalf("context receipt lost its task scope or observation boundary: %+v", receipt)
+		}
+		switch receipt.TargetKind {
+		case memoryfeedback.TargetProcedure:
+			procedureReceipt = receipt
+		case memoryfeedback.TargetFact:
+			memoryReceipt = receipt
+		default:
+			t.Fatalf("unexpected context receipt kind %q", receipt.TargetKind)
+		}
+	}
+	if procedureReceipt == nil || procedureReceipt.SchemaVersion != memoryfeedback.RetrievalReceiptVersion ||
+		procedureReceipt.TargetID != graph.ID || procedureReceipt.TargetRevision != graph.Revision || procedureReceipt.Freshness != "unverified" {
+		t.Fatalf("procedure receipt did not bind the exact returned revision: %+v", procedureReceipt)
+	}
+	if memoryReceipt == nil || memoryReceipt.SchemaVersion != memoryfeedback.RetrievalReceiptVersionV2 ||
+		memoryReceipt.TargetID != candidate.ID || memoryReceipt.TargetRevision != 1 || memoryReceipt.Freshness != "unverified" ||
+		memoryReceipt.ResultStatus != "incomplete" {
+		t.Fatalf("project-memory receipt did not bind freshness for the exact returned revision: %+v", memoryReceipt)
+	}
+	encodedReceipts, err := json.Marshal(response.RetrievalReceipts)
+	if err != nil || strings.Contains(string(encodedReceipts), "bounded context item") || strings.Contains(string(encodedReceipts), "Use the approved context procedure") {
+		t.Fatalf("context receipts copied guidance content: %s err=%v", encodedReceipts, err)
+	}
+	feedback := memoryfeedback.Feedback{
+		SchemaVersion: memoryfeedback.SchemaVersion, ID: "memory-feedback-4123456789abcdef0123456789abcdef",
+		ProjectID: task.ProjectID, TaskID: task.ID, SessionID: session.ID, RetrievalReceiptID: memoryReceipt.ID,
+		TargetKind: memoryfeedback.TargetFact, TargetID: candidate.ID, TargetRevision: memoryReceipt.TargetRevision,
+		Exposure: memoryfeedback.ExposureUsed, Utility: memoryfeedback.UtilityHelpful, TaskResult: "passed",
+		Harness: "codex-cli", Actor: "local-user", EvidenceClass: memoryfeedback.EvidenceSelfReported, CreatedAt: stamp,
+	}
+	if _, err := database.RecordMemoryFeedback(context.Background(), feedback); err != nil {
+		t.Fatalf("feedback could not link to the exact project-memory context receipt: %v", err)
+	}
+	procedureFeedback := feedback
+	procedureFeedback.ID = "memory-feedback-5123456789abcdef0123456789abcdef"
+	procedureFeedback.RetrievalReceiptID = procedureReceipt.ID
+	procedureFeedback.TargetKind = memoryfeedback.TargetProcedure
+	procedureFeedback.TargetID = graph.ID
+	procedureFeedback.TargetRevision = graph.Revision
+	if _, err := database.RecordMemoryFeedback(context.Background(), procedureFeedback); err != nil {
+		t.Fatalf("feedback could not link to the exact procedure context receipt: %v", err)
+	}
+	summary, err := database.SummarizeMemoryFeedback(context.Background(), task.ProjectID, 10)
+	if err != nil || summary.Records != 2 || summary.RetrievalReceiptLinked != 2 {
+		t.Fatalf("summary did not observe both persisted context receipts: %+v err=%v", summary, err)
+	}
+	legacyValue, err := server.callTool(context.Background(), toolCallParams{
+		Name: "threadforge_context_get", Arguments: json.RawMessage(`{"project_id":"repo","query":"context","paths":["src/main.go"]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyJSON, err := json.Marshal(legacyValue)
+	if err != nil || strings.Contains(string(legacyJSON), "retrieval_receipts") {
+		t.Fatalf("context response changed when receipt collection was not requested: %s err=%v", legacyJSON, err)
+	}
+	if _, err := server.callTool(context.Background(), toolCallParams{
+		Name: "threadforge_context_get", Arguments: json.RawMessage(`{"project_id":"repo","query":"context","session_id":"session-context-receipts"}`),
+	}); err == nil {
+		t.Fatal("context retrieval accepted session_id without task_id")
+	}
+}
+
 func TestMCPProjectRootFingerprintsSourcesAndIgnoresCallerClaims(t *testing.T) {
 	root := t.TempDir()
 	sourcePath := filepath.Join(root, "src", "app.go")

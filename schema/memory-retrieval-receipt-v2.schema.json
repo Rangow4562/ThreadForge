@@ -14,7 +14,7 @@
     "target_kind": { "enum": ["fact", "decision", "policy"] },
     "target_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
     "target_revision": { "type": "integer", "minimum": 1 },
-    "tool": { "enum": ["threadforge_project_memory_read", "threadforge_project_memory_read_v2"] },
+    "tool": { "enum": ["threadforge_project_memory_read", "threadforge_project_memory_read_v2", "threadforge_context_get"] },
     "freshness": { "enum": ["verified", "stale", "incomplete", "unverified", "not_tracked"] },
     "result_status": { "enum": ["complete", "incomplete", "stale", "conflicting", "privacy_blocked"] },
     "guidance_included": { "type": "boolean" },

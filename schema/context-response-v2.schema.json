@@ -27,15 +27,26 @@
       "type": "array", "maxItems": 32,
       "items": {
         "type": "object", "additionalProperties": false,
-        "required": ["id", "kind", "revision", "title", "content", "evidence"],
+        "required": ["id", "kind", "revision", "title", "freshness", "content", "evidence"],
         "properties": {
           "id": { "type": "string" },
           "kind": { "enum": ["fact", "decision", "policy"] },
           "revision": { "type": "integer", "minimum": 1 },
           "title": { "type": "string" },
+          "freshness": { "enum": ["verified", "unverified"] },
           "content": { "type": "object" },
           "evidence": { "type": "array", "items": { "type": "object" } }
         }
+      }
+    },
+    "retrieval_receipts": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "oneOf": [
+          { "$ref": "https://threadforge.dev/schema/memory-retrieval-receipt-v1.schema.json" },
+          { "$ref": "https://threadforge.dev/schema/memory-retrieval-receipt-v2.schema.json" }
+        ]
       }
     },
     "gaps": { "type": "array", "items": { "type": "string" } }

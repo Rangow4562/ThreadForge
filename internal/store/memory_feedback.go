@@ -13,8 +13,8 @@ import (
 )
 
 // RecordMemoryRetrievalReceipt appends a local-only record that binds one
-// memory response to an existing task in the same project. The receipt
-// describes the MCP handler result, not client delivery or model exposure.
+// memory response to an existing task in the same project. The observation
+// boundary is schema-versioned and never proves client delivery or exposure.
 func (s *Store) RecordMemoryRetrievalReceipt(ctx context.Context, receipt memoryfeedback.RetrievalReceipt) (int64, error) {
 	sequences, err := s.RecordMemoryRetrievalReceipts(ctx, []memoryfeedback.RetrievalReceipt{receipt})
 	if err != nil {
@@ -24,7 +24,7 @@ func (s *Store) RecordMemoryRetrievalReceipt(ctx context.Context, receipt memory
 }
 
 // RecordMemoryRetrievalReceipts atomically appends a bounded group of receipts
-// from one task-scoped MCP context result.
+// from one task-scoped retrieval result.
 func (s *Store) RecordMemoryRetrievalReceipts(ctx context.Context, receipts []memoryfeedback.RetrievalReceipt) ([]int64, error) {
 	if len(receipts) == 0 || len(receipts) > memoryfeedback.MaxRetrievalReceiptBatch {
 		return nil, fmt.Errorf("memory retrieval receipt batch must contain 1-%d records", memoryfeedback.MaxRetrievalReceiptBatch)
@@ -239,6 +239,66 @@ func (s *Store) ListMemoryFeedback(ctx context.Context, filter memoryfeedback.Fi
 			return nil, 0, fmt.Errorf("validate linked memory retrieval receipt: %w", err)
 		}
 		items = append(items, feedback)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+// ListMemoryRetrievalReceipts returns content-free receipts for one exact
+// project/task scope, newest first, and validates indexed columns against each
+// versioned receipt payload before returning it.
+func (s *Store) ListMemoryRetrievalReceipts(ctx context.Context, filter memoryfeedback.RetrievalReceiptFilter) ([]memoryfeedback.RetrievalReceipt, int, error) {
+	if err := memoryfeedback.ValidateRetrievalReceiptFilter(filter); err != nil {
+		return nil, 0, err
+	}
+	where := "project_id = ? AND task_id = ?"
+	args := []any{filter.ProjectID, filter.TaskID}
+	if filter.TargetID != "" {
+		where += " AND target_id = ?"
+		args = append(args, filter.TargetID)
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_retrieval_receipts WHERE `+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	queryArgs := append(append([]any(nil), args...), filter.Limit, filter.Offset)
+	rows, err := tx.QueryContext(ctx,
+		`SELECT sequence, id, project_id, task_id, target_id, target_revision, created_at, receipt_json
+		 FROM memory_retrieval_receipts WHERE `+where+` ORDER BY sequence DESC LIMIT ? OFFSET ?`, queryArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]memoryfeedback.RetrievalReceipt, 0, filter.Limit)
+	for rows.Next() {
+		var sequence int64
+		var id, projectID, taskID, targetID, createdAt, payload string
+		var revision int
+		if err := rows.Scan(&sequence, &id, &projectID, &taskID, &targetID, &revision, &createdAt, &payload); err != nil {
+			return nil, 0, err
+		}
+		var receipt memoryfeedback.RetrievalReceipt
+		if err := decodeStrictJSON(payload, &receipt); err != nil {
+			return nil, 0, fmt.Errorf("decode memory retrieval receipt sequence %d: %w", sequence, err)
+		}
+		if err := memoryfeedback.ValidateRetrievalReceipt(receipt); err != nil || receipt.ID != id || receipt.ProjectID != projectID ||
+			receipt.TaskID != taskID || receipt.TargetID != targetID || receipt.TargetRevision != revision || receipt.CreatedAt != createdAt {
+			return nil, 0, errors.New("stored memory retrieval receipt index does not match its validated payload")
+		}
+		items = append(items, receipt)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err

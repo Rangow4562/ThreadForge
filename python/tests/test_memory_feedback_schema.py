@@ -171,6 +171,65 @@ def test_memory_retrieval_receipt_v2_records_project_memory_read_status():
             validator.validate(invalid)
 
 
+def test_memory_retrieval_receipt_v3_records_task_scoped_hook_preparation_only():
+    receipt = {
+        "schema_version": "threadforge.memory-retrieval-receipt.v3",
+        "id": "retrieval-8123456789abcdef0123456789abcdef",
+        "project_id": "repo:example",
+        "task_id": "task-123",
+        "target_kind": "fact",
+        "target_id": "build-invariant",
+        "target_revision": 2,
+        "tool": "threadforge_memory_inject",
+        "host": "codex-cli",
+        "freshness": "verified",
+        "guidance_included": True,
+        "observation_boundary": "hook_response_prepared",
+        "created_at": "2026-10-28T12:00:00Z",
+    }
+    validator = _validator("memory-retrieval-receipt-v3.schema.json")
+    validator.validate(receipt)
+    validator.validate({**receipt, "freshness": "stale", "guidance_included": False})
+    for invalid in (
+        {**receipt, "freshness": "stale"},
+        {**receipt, "model_exposed": True},
+        {**receipt, "prompt": "private user prompt"},
+        {**receipt, "host": "unknown-host"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
+def test_memory_retrieval_receipt_list_accepts_all_receipt_versions_without_private_content():
+    result = {
+        "schema_version": "threadforge.memory-retrieval-receipt-list.v1",
+        "project_id": "repo:example",
+        "task_id": "task-123",
+        "total": 1,
+        "limit": 50,
+        "offset": 0,
+        "receipts": [{
+            "schema_version": "threadforge.memory-retrieval-receipt.v3",
+            "id": "retrieval-9123456789abcdef0123456789abcdef",
+            "project_id": "repo:example",
+            "task_id": "task-123",
+            "target_kind": "fact",
+            "target_id": "build-invariant",
+            "target_revision": 2,
+            "tool": "threadforge_memory_inject",
+            "host": "codex-cli",
+            "freshness": "verified",
+            "guidance_included": True,
+            "observation_boundary": "hook_response_prepared",
+            "created_at": "2026-10-28T12:00:00Z",
+        }],
+    }
+    validator = _validator("memory-retrieval-receipt-list-v1.schema.json")
+    validator.validate(result)
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "private_prompt": "must not be serialized"})
+
+
 def test_context_response_schema_accepts_bounded_mixed_task_scoped_receipts():
     response = {
         "schema_version": "threadforge.context-response.v2",

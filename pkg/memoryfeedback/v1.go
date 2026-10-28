@@ -12,16 +12,18 @@ import (
 )
 
 const (
-	SchemaVersion             = "threadforge.memory-feedback.v1"
-	RecordResultVersion       = "threadforge.memory-feedback-result.v1"
-	ListResultVersion         = "threadforge.memory-feedback-list.v1"
-	SummaryResultVersion      = "threadforge.memory-feedback-summary.v1"
-	RetrievalReceiptVersion   = "threadforge.memory-retrieval-receipt.v1"
-	RetrievalReceiptVersionV2 = "threadforge.memory-retrieval-receipt.v2"
-	EvidenceSelfReported      = "self_reported"
-	MaxProjectRecords         = 100000
-	MaxSummaryRecords         = 10000
-	MaxRetrievalReceiptBatch  = 32
+	SchemaVersion               = "threadforge.memory-feedback.v1"
+	RecordResultVersion         = "threadforge.memory-feedback-result.v1"
+	ListResultVersion           = "threadforge.memory-feedback-list.v1"
+	SummaryResultVersion        = "threadforge.memory-feedback-summary.v1"
+	RetrievalReceiptVersion     = "threadforge.memory-retrieval-receipt.v1"
+	RetrievalReceiptVersionV2   = "threadforge.memory-retrieval-receipt.v2"
+	RetrievalReceiptVersionV3   = "threadforge.memory-retrieval-receipt.v3"
+	RetrievalReceiptListVersion = "threadforge.memory-retrieval-receipt-list.v1"
+	EvidenceSelfReported        = "self_reported"
+	MaxProjectRecords           = 100000
+	MaxSummaryRecords           = 10000
+	MaxRetrievalReceiptBatch    = 32
 )
 
 type TargetKind string
@@ -73,10 +75,10 @@ type Feedback struct {
 	CreatedAt               string     `json:"created_at"`
 }
 
-// RetrievalReceipt proves only that the local MCP handler prepared a result
-// containing (or withholding) one approved memory revision. V1 is procedure-
-// only; V2 adds exact project-memory reads and an outcome status. Neither can
-// prove transport delivery, model exposure, interpretation, or use.
+// RetrievalReceipt records a local observation boundary for one approved
+// memory revision. V1 is procedure-only; V2 adds exact project-memory reads;
+// V3 records host-hook response preparation. None proves transport delivery,
+// model exposure, interpretation, or use.
 type RetrievalReceipt struct {
 	SchemaVersion       string     `json:"schema_version"`
 	ID                  string     `json:"id"`
@@ -87,11 +89,30 @@ type RetrievalReceipt struct {
 	TargetID            string     `json:"target_id"`
 	TargetRevision      int        `json:"target_revision"`
 	Tool                string     `json:"tool"`
+	Host                string     `json:"host,omitempty"`
 	Freshness           string     `json:"freshness"`
 	ResultStatus        string     `json:"result_status,omitempty"`
 	GuidanceIncluded    bool       `json:"guidance_included"`
 	ObservationBoundary string     `json:"observation_boundary"`
 	CreatedAt           string     `json:"created_at"`
+}
+
+type RetrievalReceiptFilter struct {
+	ProjectID string
+	TaskID    string
+	TargetID  string
+	Limit     int
+	Offset    int
+}
+
+type RetrievalReceiptListResult struct {
+	SchemaVersion string             `json:"schema_version"`
+	ProjectID     string             `json:"project_id"`
+	TaskID        string             `json:"task_id"`
+	Total         int                `json:"total"`
+	Limit         int                `json:"limit"`
+	Offset        int                `json:"offset"`
+	Receipts      []RetrievalReceipt `json:"receipts"`
 }
 
 type Filter struct {
@@ -234,7 +255,8 @@ func ValidateRetrievalReceipt(value RetrievalReceipt) error {
 	var problems []string
 	isV1 := value.SchemaVersion == RetrievalReceiptVersion
 	isV2 := value.SchemaVersion == RetrievalReceiptVersionV2
-	if !isV1 && !isV2 {
+	isV3 := value.SchemaVersion == RetrievalReceiptVersionV3
+	if !isV1 && !isV2 && !isV3 {
 		problems = append(problems, "unsupported schema_version")
 	}
 	if !retrievalReceiptID.MatchString(value.ID) {
@@ -299,13 +321,40 @@ func ValidateRetrievalReceipt(value RetrievalReceipt) error {
 			problems = append(problems, "incomplete freshness must withhold guidance")
 		}
 	}
-	if value.ObservationBoundary != "mcp_handler_result_prepared" {
+	if isV3 {
+		if value.TargetKind != TargetProcedure && value.TargetKind != TargetFact && value.TargetKind != TargetDecision && value.TargetKind != TargetPolicy {
+			problems = append(problems, "v3 receipts must identify a procedure, fact, decision, or policy")
+		}
+		if value.Tool != "threadforge_memory_inject" {
+			problems = append(problems, "v3 receipts must use threadforge_memory_inject")
+		}
+		switch value.Host {
+		case "claude-code", "codex-cli", "gemini-cli", "cursor", "qwen-code", "antigravity", "opencode", "copilot-cli":
+		default:
+			problems = append(problems, "v3 host must identify a supported prompt-memory host")
+		}
+		if value.ResultStatus != "" {
+			problems = append(problems, "v3 hook receipts do not include result_status")
+		}
+		if value.Freshness != "verified" && value.Freshness != "unverified" && value.Freshness != "stale" &&
+			value.Freshness != "incomplete" && value.Freshness != "not_tracked" {
+			problems = append(problems, "v3 freshness must be verified, unverified, stale, incomplete, or not_tracked")
+		}
+		if value.Freshness == "stale" && value.GuidanceIncluded {
+			problems = append(problems, "stale hook guidance must not be marked included")
+		}
+	} else if value.Host != "" {
+		problems = append(problems, "v1 and v2 receipts do not include host")
+	}
+	if isV3 && value.ObservationBoundary != "hook_response_prepared" {
+		problems = append(problems, "v3 observation_boundary must be hook_response_prepared")
+	} else if !isV3 && value.ObservationBoundary != "mcp_handler_result_prepared" {
 		problems = append(problems, "observation_boundary must be mcp_handler_result_prepared")
 	}
 	if _, err := time.Parse(time.RFC3339Nano, value.CreatedAt); err != nil {
 		problems = append(problems, "created_at must use RFC3339")
 	}
-	for _, field := range []string{value.ID, value.ProjectID, value.TaskID, value.SessionID, string(value.TargetKind), value.TargetID, value.Tool, value.Freshness, value.ObservationBoundary} {
+	for _, field := range []string{value.ID, value.ProjectID, value.TaskID, value.SessionID, string(value.TargetKind), value.TargetID, value.Tool, value.Host, value.Freshness, value.ObservationBoundary} {
 		if privacy.ContainsCredentialText(field) {
 			problems = append(problems, "retrieval receipt contains credential material")
 			break
@@ -340,6 +389,27 @@ func ValidateFilter(filter Filter) error {
 	for _, field := range []string{filter.ProjectID, filter.TaskID, string(filter.TargetKind), filter.TargetID, filter.Harness} {
 		if privacy.ContainsCredentialText(field) {
 			return errors.New("feedback filter contains credential material")
+		}
+	}
+	return nil
+}
+
+func ValidateRetrievalReceiptFilter(filter RetrievalReceiptFilter) error {
+	if !bounded(filter.ProjectID, 256) {
+		return errors.New("project_id must contain 1 to 256 characters")
+	}
+	if !stableID.MatchString(filter.TaskID) {
+		return errors.New("task_id must be a lowercase stable identifier")
+	}
+	if filter.TargetID != "" && !stableID.MatchString(filter.TargetID) {
+		return errors.New("target_id must be a lowercase stable identifier when set")
+	}
+	if filter.Limit < 1 || filter.Limit > 500 || filter.Offset < 0 || filter.Offset > MaxProjectRecords {
+		return fmt.Errorf("limit must be 1-500 and offset must be 0-%d", MaxProjectRecords)
+	}
+	for _, field := range []string{filter.ProjectID, filter.TaskID, filter.TargetID} {
+		if privacy.ContainsCredentialText(field) {
+			return errors.New("memory retrieval receipt filter contains credential material")
 		}
 	}
 	return nil

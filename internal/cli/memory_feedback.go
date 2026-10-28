@@ -22,7 +22,7 @@ import (
 
 func runMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory feedback <record|list|summary>")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory feedback <record|list|summary|receipts>")
 		return 2
 	}
 	switch args[0] {
@@ -32,10 +32,54 @@ func runMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 		return listMemoryFeedback(args[1:], stdout, stderr)
 	case "summary":
 		return summarizeMemoryFeedback(args[1:], stdout, stderr)
+	case "receipts":
+		return listMemoryRetrievalReceipts(args[1:], stdout, stderr)
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown memory feedback command %q\n", args[0])
 		return 2
 	}
+}
+
+func listMemoryRetrievalReceipts(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("memory feedback receipts", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	projectID := fs.String("project-id", "", "exact project scope to list")
+	taskID := fs.String("task-id", "", "exact task scope to list")
+	targetID := fs.String("target-id", "", "optional memory identifier filter")
+	limit := fs.Int("limit", 50, "maximum content-free receipts (1-500)")
+	offset := fs.Int("offset", 0, "number of newest receipts to skip")
+	database := fs.String("db", "", "SQLite path (defaults under the local Threadforge data directory)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	filter := memoryfeedback.RetrievalReceiptFilter{
+		ProjectID: *projectID, TaskID: *taskID, TargetID: *targetID, Limit: *limit, Offset: *offset,
+	}
+	if fs.NArg() != 0 {
+		_, _ = fmt.Fprintln(stderr, "memory feedback receipts does not accept positional arguments")
+		return 2
+	}
+	if err := memoryfeedback.ValidateRetrievalReceiptFilter(filter); err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 2
+	}
+	databaseStore, closeStore, err := openContinuityStore(*database)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	defer closeStore()
+	items, total, err := databaseStore.ListMemoryRetrievalReceipts(context.Background(), filter)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	result := memoryfeedback.RetrievalReceiptListResult{
+		SchemaVersion: memoryfeedback.RetrievalReceiptListVersion,
+		ProjectID:     filter.ProjectID, TaskID: filter.TaskID, Total: total,
+		Limit: filter.Limit, Offset: filter.Offset, Receipts: items,
+	}
+	return writeIndentedJSON(stdout, result, stderr)
 }
 
 func recordMemoryFeedback(args []string, stdout, stderr io.Writer) int {

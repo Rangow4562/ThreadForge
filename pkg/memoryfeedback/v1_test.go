@@ -109,6 +109,48 @@ func TestValidateProjectMemoryRetrievalReceiptV2CarriesFreshnessAndReadStatus(t 
 	}
 }
 
+func TestValidateHookRetrievalReceiptV3UsesHostPreparationBoundary(t *testing.T) {
+	receipt := RetrievalReceipt{
+		SchemaVersion: RetrievalReceiptVersionV3, ID: "retrieval-4123456789abcdef0123456789abcdef",
+		ProjectID: "repo:example", TaskID: "task-1", SessionID: "session-1",
+		TargetKind: TargetFact, TargetID: "build-invariant", TargetRevision: 2,
+		Tool: "threadforge_memory_inject", Host: "codex-cli", Freshness: "verified",
+		GuidanceIncluded: true, ObservationBoundary: "hook_response_prepared", CreatedAt: "2026-10-28T12:00:00Z",
+	}
+	if err := ValidateRetrievalReceipt(receipt); err != nil {
+		t.Fatal(err)
+	}
+	receipt.Freshness = "stale"
+	if err := ValidateRetrievalReceipt(receipt); err == nil {
+		t.Fatal("stale hook receipt claiming included guidance was accepted")
+	}
+	receipt.Freshness = "verified"
+	receipt.GuidanceIncluded = false
+	if err := ValidateRetrievalReceipt(receipt); err != nil {
+		t.Fatalf("hook response that withheld guidance should remain auditable: %v", err)
+	}
+	receipt.Host = "unknown-host"
+	if err := ValidateRetrievalReceipt(receipt); err == nil {
+		t.Fatal("unsupported hook host was accepted")
+	}
+}
+
+func TestValidateRetrievalReceiptFilterRequiresExactTaskScope(t *testing.T) {
+	filter := RetrievalReceiptFilter{ProjectID: "repo:example", TaskID: "task-1", Limit: 50}
+	if err := ValidateRetrievalReceiptFilter(filter); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []RetrievalReceiptFilter{
+		{ProjectID: "repo:example", Limit: 50},
+		{ProjectID: "repo:example", TaskID: "task-1", Limit: 501},
+		{ProjectID: "repo:example", TaskID: "task-1", Limit: 50, Offset: MaxProjectRecords + 1},
+	} {
+		if err := ValidateRetrievalReceiptFilter(invalid); err == nil {
+			t.Fatalf("expected invalid receipt filter to fail: %+v", invalid)
+		}
+	}
+}
+
 func TestValidateFilterIsBoundedAndProjectScoped(t *testing.T) {
 	if err := ValidateFilter(Filter{ProjectID: "repo:example", Limit: 50}); err != nil {
 		t.Fatal(err)

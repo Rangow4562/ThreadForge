@@ -23,10 +23,13 @@ import (
 	"github.com/threadforge-ai/threadforge/internal/appdata"
 	"github.com/threadforge-ai/threadforge/internal/mcp"
 	"github.com/threadforge-ai/threadforge/internal/procedurefiles"
+	"github.com/threadforge-ai/threadforge/internal/projectfiles"
+	"github.com/threadforge-ai/threadforge/internal/service"
 	"github.com/threadforge-ai/threadforge/internal/sourcefingerprint"
 	"github.com/threadforge-ai/threadforge/internal/store"
 	"github.com/threadforge-ai/threadforge/pkg/continuity"
 	"github.com/threadforge-ai/threadforge/pkg/decision"
+	"github.com/threadforge-ai/threadforge/pkg/memoryfeedback"
 	"github.com/threadforge-ai/threadforge/pkg/migrationbackup"
 	"github.com/threadforge-ai/threadforge/pkg/migrationcoverage"
 	"github.com/threadforge-ai/threadforge/pkg/proceduregraph"
@@ -5217,6 +5220,157 @@ func TestClaudeMemoryInjectReturnsApprovedGuidanceAndWithholdsUnscopedMemory(t *
 		"--threadforge-memory=antigravity-v1", "--task-id", "task-not-allowed"}, bytes.NewReader(antigravityInput), &out, &stderr)
 	if code != 0 || strings.Contains(out.String(), "task-not-allowed") || !strings.Contains(stderr.String(), "task_or_session_not_found") {
 		t.Fatalf("explicit Antigravity task lookup should fail open without exposing an unknown task: code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+}
+
+func TestTaskScopedMemoryHookReceiptsAreContentFreeAndLinkable(t *testing.T) {
+	projectRoot := t.TempDir()
+	t.Setenv("THREADFORGE_HOME", t.TempDir())
+	projectStore, err := projectfiles.New(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = projectStore.Publish(projectmemory.Candidate{
+		SchemaVersion: projectmemory.SchemaVersion, ID: "hook-memory-fact", ProjectID: "demo-project",
+		Kind: projectmemory.KindFact, Title: "Private retrieval title",
+		Content:  json.RawMessage(`{"note":"PRIVATE_MEMORY_BODY_73"}`),
+		Evidence: []projectmemory.Evidence{{Origin: "human", ContentSHA256: strings.Repeat("a", 64), Redacted: true}},
+	}, 0, "reviewer", "approved task-scoped hook test record", true, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, closeDatabase, err := openContinuityStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	task := continuity.Task{
+		SchemaVersion: continuity.SchemaVersion, ID: "task-hook-receipt", ProjectID: "demo-project", Owner: "local-user",
+		Title: "Verify hook receipt", Objective: "Link a local hook receipt to a self-reported outcome",
+		AcceptanceCriteria: []string{"The receipt is content-free and task-scoped"}, Status: continuity.TaskOpen,
+		Revision: 1, CreatedAt: stamp, UpdatedAt: stamp,
+	}
+	if err := database.CreateTask(context.Background(), task, "local-user", "create hook receipt test task"); err != nil {
+		closeDatabase()
+		t.Fatal(err)
+	}
+	closeDatabase()
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"session", "start", "--id", "session-hook-receipt", "--task-id", task.ID, "--harness", "codex-cli"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("session start code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	hookInput, err := json.Marshal(userPromptMemoryHookInput{
+		HookEventName: "UserPromptSubmit", CWD: projectRoot, Prompt: "PRIVATE_PROMPT_91",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hookArgs := []string{"memory", "inject-codex", "--project-id", "demo-project",
+		"--threadforge-managed-codex-memory=v1", "--threadforge-memory=codex-v1"}
+	if code := RunWithInput(hookArgs, bytes.NewReader(hookInput), &stdout, &stderr); code != 0 {
+		t.Fatalf("unscoped memory inject code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	listArgs := []string{"memory", "feedback", "receipts", "--project-id", "demo-project", "--task-id", task.ID}
+	if code := Run(listArgs, &stdout, &stderr); code != 0 {
+		t.Fatalf("list unscoped receipts code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var listed memoryfeedback.RetrievalReceiptListResult
+	if err := json.Unmarshal(stdout.Bytes(), &listed); err != nil || listed.Total != 0 {
+		t.Fatalf("unscoped hook created receipts: result=%+v err=%v output=%s", listed, err, stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	taskArgs := append(append([]string(nil), hookArgs...), "--task-id", task.ID, "--session-id", "session-hook-receipt")
+	if code := RunWithInput(taskArgs, bytes.NewReader(hookInput), &stdout, &stderr); code != 0 {
+		t.Fatalf("task-scoped memory inject code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stdout.String(), "retrieval-") || strings.Contains(stdout.String(), "PRIVATE_PROMPT_91") {
+		t.Fatalf("host response leaked receipt IDs or prompt: %s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run(listArgs, &stdout, &stderr); code != 0 {
+		t.Fatalf("list task-scoped receipts code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &listed); err != nil || listed.Total != 1 || len(listed.Receipts) != 1 {
+		t.Fatalf("unexpected receipt list: result=%+v err=%v output=%s", listed, err, stdout.String())
+	}
+	receipt := listed.Receipts[0]
+	if receipt.SchemaVersion != memoryfeedback.RetrievalReceiptVersionV3 || receipt.Host != "codex-cli" ||
+		receipt.ObservationBoundary != "hook_response_prepared" || receipt.TaskID != task.ID ||
+		receipt.SessionID != "session-hook-receipt" || receipt.TargetKind != memoryfeedback.TargetFact ||
+		receipt.TargetID != "hook-memory-fact" || !receipt.GuidanceIncluded ||
+		strings.Contains(stdout.String(), "PRIVATE_MEMORY_BODY_73") || strings.Contains(stdout.String(), "Private retrieval title") {
+		t.Fatalf("unexpected or content-bearing hook receipt: %+v output=%s", receipt, stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	feedbackArgs := []string{"memory", "feedback", "record", "--project-root", projectRoot,
+		"--project-id", task.ProjectID, "--task-id", task.ID, "--session-id", "session-hook-receipt",
+		"--retrieval-receipt-id", receipt.ID, "--target-kind", "fact", "--target-id", "hook-memory-fact",
+		"--target-revision", "1", "--exposure", "shown_not_used", "--utility", "not_assessed",
+		"--task-result", "passed", "--harness", "codex-cli"}
+	if code := Run(feedbackArgs, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), receipt.ID) {
+		t.Fatalf("feedback receipt link code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	discoveryArgs := append(append([]string(nil), hookArgs...), "--discover-active-task")
+	if strings.Contains(strings.Join(discoveryArgs, " "), "--task-id") || strings.Contains(strings.Join(discoveryArgs, " "), "--session-id") {
+		t.Fatalf("discovery args unexpectedly include explicit selection: %q", discoveryArgs)
+	}
+	if code := RunWithInput(discoveryArgs, bytes.NewReader(hookInput), &stdout, &stderr); code != 0 {
+		t.Fatalf("unique task discovery inject code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	discoveryOutput := stdout.String()
+	if !strings.Contains(discoveryOutput, "exactly one eligible task matched") {
+		t.Fatalf("task discovery did not produce its unique-selection response: %s", discoveryOutput)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run(listArgs, &stdout, &stderr); code != 0 {
+		t.Fatalf("list discovered-task receipts code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	listed = memoryfeedback.RetrievalReceiptListResult{}
+	if err := json.Unmarshal(stdout.Bytes(), &listed); err != nil || listed.Total != 2 || len(listed.Receipts) != 2 {
+		t.Fatalf("unique discovery receipt missing: result=%+v err=%v output=%s", listed, err, stdout.String())
+	}
+	foundExplicitReceipt, foundDiscoveryReceipt := false, false
+	for _, item := range listed.Receipts {
+		if item.TaskID != task.ID {
+			t.Fatalf("hook receipt crossed task scope: %+v", item)
+		}
+		if item.ID == receipt.ID {
+			foundExplicitReceipt = item.SessionID == "session-hook-receipt"
+			continue
+		}
+		foundDiscoveryReceipt = item.SessionID == ""
+	}
+	if !foundExplicitReceipt || !foundDiscoveryReceipt {
+		t.Fatalf("explicit and discovery session scopes were not distinguished: %+v", listed.Receipts)
+	}
+}
+
+func TestHookReceiptBoundaryDoesNotMatchTaskTextDecoy(t *testing.T) {
+	item := service.MemoryContextItem{
+		ID: "receipt-boundary-fact", Kind: "fact", Revision: 1, Title: "Boundary fixture",
+		Freshness: "verified", Content: json.RawMessage(`{"statement":"Keep the full item together"}`),
+	}
+	response := service.ContextResponse{Status: "complete", Memory: []service.MemoryContextItem{item}}
+	memoryContext, boundaries := formatApprovedMemoryContextForWithBoundaries(response, "the current request")
+	decoy := strings.TrimSpace(formatProjectMemoryContextItem(item))
+	taskContext := "Task notes contain an identical-looking block:\n" + decoy + "\n" + strings.Repeat("task-padding ", maxMemoryContextChars)
+	combined, boundaries := combinePromptContextsWithBoundaries(taskContext, memoryContext, boundaries)
+	if !strings.Contains(combined, decoy) {
+		t.Fatal("fixture must preserve the task-text decoy inside the bounded output")
+	}
+	if len(boundaries) != 1 || boundaries[0].Included {
+		t.Fatalf("task text falsely marked the truncated project-memory item included: %+v", boundaries)
 	}
 }
 

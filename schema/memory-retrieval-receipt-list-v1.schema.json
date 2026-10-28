@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/memory-retrieval-receipt-list-v1.schema.json",
+  "title": "Threadforge bounded task-scoped retrieval receipt list",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_id", "task_id", "total", "limit", "offset", "receipts"],
+  "properties": {
+    "schema_version": { "const": "threadforge.memory-retrieval-receipt-list.v1" },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "task_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "total": { "type": "integer", "minimum": 0 },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
+    "offset": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "receipts": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "oneOf": [
+          { "$ref": "memory-retrieval-receipt-v1.schema.json" },
+          { "$ref": "memory-retrieval-receipt-v2.schema.json" },
+          { "$ref": "memory-retrieval-receipt-v3.schema.json" }
+        ]
+      }
+    }
+  }
+}

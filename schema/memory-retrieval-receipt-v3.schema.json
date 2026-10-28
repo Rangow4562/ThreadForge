@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/memory-retrieval-receipt-v3.schema.json",
+  "title": "Threadforge local host-hook response preparation receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "project_id", "task_id", "target_kind", "target_id", "target_revision", "tool", "host", "freshness", "guidance_included", "observation_boundary", "created_at"],
+  "properties": {
+    "schema_version": { "const": "threadforge.memory-retrieval-receipt.v3" },
+    "id": { "type": "string", "pattern": "^retrieval-[a-f0-9]{32}$" },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "task_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "session_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "target_kind": { "enum": ["procedure", "fact", "decision", "policy"] },
+    "target_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "target_revision": { "type": "integer", "minimum": 1 },
+    "tool": { "const": "threadforge_memory_inject" },
+    "host": { "enum": ["claude-code", "codex-cli", "gemini-cli", "cursor", "qwen-code", "antigravity", "opencode", "copilot-cli"] },
+    "freshness": { "enum": ["verified", "unverified", "stale", "incomplete", "not_tracked"] },
+    "guidance_included": { "type": "boolean" },
+    "observation_boundary": { "const": "hook_response_prepared" },
+    "created_at": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "freshness": { "const": "stale" } }, "required": ["freshness"] },
+      "then": { "properties": { "guidance_included": { "const": false } } }
+    }
+  ]
+}

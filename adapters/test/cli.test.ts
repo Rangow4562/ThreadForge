@@ -262,6 +262,60 @@ test('adapter CLI explicitly installs and removes GitHub Copilot CLI approved-me
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'unchanged');
 
+    result = await invoke([
+      'copilot', 'memory', 'update', '--project-root', root,
+      '--bash-command', bashCommand, '--powershell-command', powershellCommand,
+      '--task-id', 'copilot-task', '--session-id', 'copilot-session', '--max-task-entries', '2',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    const explicitBashCommand = bashCommand.replace(
+      marker, `--task-id copilot-task --session-id copilot-session --max-task-entries 2 ${marker}`,
+    );
+    const explicitPowerShellCommand = powershellCommand.replace(
+      marker, `--task-id copilot-task --session-id copilot-session --max-task-entries 2 ${marker}`,
+    );
+    config = JSON.parse(await readFile(configPath, 'utf8'));
+    assert.deepEqual(config.hooks.userPromptTransformed, [{
+      type: 'command', bash: explicitBashCommand, powershell: explicitPowerShellCommand, timeoutSec: 3,
+    }]);
+
+    result = await invoke([
+      'copilot', 'memory', 'update', '--project-root', root,
+      '--bash-command', bashCommand, '--powershell-command', powershellCommand, '--discover-active-task',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    const discoveryBashCommand = bashCommand.replace(marker, `--discover-active-task --max-task-entries 6 ${marker}`);
+    const discoveryPowerShellCommand = powershellCommand.replace(marker, `--discover-active-task --max-task-entries 6 ${marker}`);
+    config = JSON.parse(await readFile(configPath, 'utf8'));
+    assert.deepEqual(config.hooks.userPromptTransformed, [{
+      type: 'command', bash: discoveryBashCommand, powershell: discoveryPowerShellCommand, timeoutSec: 3,
+    }]);
+
+    const beforeInvalidOptions = await readFile(configPath, 'utf8');
+    for (const [invalidOptions, expectedError] of [
+      [['--task-id', 'copilot-task', '--discover-active-task'], /mutually exclusive/],
+      [['--session-id', 'copilot-session'], /requires --task-id/],
+      [['--task-id', 'Copilot/Task'], /--task-id must match/],
+      [['--discover-active-task', '--max-task-entries', '21'], /between 1 and 20/],
+      [['--max-task-entries', '2'], /requires --task-id or --discover-active-task/],
+    ] as const) {
+      result = await invoke([
+        'copilot', 'memory', 'update', '--project-root', root,
+        '--bash-command', bashCommand, '--powershell-command', powershellCommand, ...invalidOptions,
+      ]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, expectedError);
+    }
+    assert.equal(await readFile(configPath, 'utf8'), beforeInvalidOptions);
+    result = await invoke([
+      'copilot', 'memory', 'update', '--project-root', root,
+      '--bash-command', `${bashCommand} --task-id copilot-manual-task`, '--powershell-command', powershellCommand,
+      '--discover-active-task',
+    ]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /already contains task-resume options/);
+    assert.equal(await readFile(configPath, 'utf8'), beforeInvalidOptions);
+
     result = await invoke(['copilot', 'memory', 'uninstall', '--project-root', root]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'removed');

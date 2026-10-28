@@ -1608,9 +1608,15 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       rejectUnexpected(options, ['project-root']);
       result = await removeCopilotProjectPlanGateHook(projectRoot);
     } else if (family === 'copilot' && copilotSubsystem === 'memory' && (action === 'install' || action === 'update')) {
-      rejectUnexpected(options, ['project-root', 'command', 'bash-command', 'powershell-command']);
+      rejectUnexpected(options,
+        ['project-root', 'command', 'bash-command', 'powershell-command', 'task-id', 'session-id', 'max-task-entries'],
+        [], ['discover-active-task']);
       const commands = copilotMemoryHookCommands(options);
-      result = await installCopilotProjectMemoryHook({ ...commands, projectRoot });
+      result = await installCopilotProjectMemoryHook({
+        bashCommand: addTaskAwareMemoryOptions(commands.bashCommand, options, 'GitHub Copilot', '--threadforge-memory=copilot-v1'),
+        powershellCommand: addTaskAwareMemoryOptions(commands.powershellCommand, options, 'GitHub Copilot', '--threadforge-memory=copilot-v1'),
+        projectRoot,
+      });
       warning = 'Copilot CLI userPromptTransformed rewrites model-bound text and may persist in session history; the host may call it for preceding messages in a batched submission. Retrieval is advisory, and this installer does not change Copilot trust or permissions.';
     } else if (family === 'copilot' && copilotSubsystem === 'memory' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
@@ -1730,7 +1736,15 @@ function taskAwareMemoryHookCommand(
   host: 'Antigravity' | 'Claude Code' | 'Codex' | 'Cursor' | 'Gemini' | 'Qwen',
   runtimeMarker: string,
 ): string {
-  const command = required(options, 'command');
+  return addTaskAwareMemoryOptions(required(options, 'command'), options, host, runtimeMarker);
+}
+
+function addTaskAwareMemoryOptions(
+  command: string,
+  options: ParsedOptions,
+  host: 'Antigravity' | 'Claude Code' | 'Codex' | 'Cursor' | 'Gemini' | 'GitHub Copilot' | 'Qwen',
+  runtimeMarker: string,
+): string {
   const taskId = options.values.get('task-id');
   const sessionId = options.values.get('session-id');
   const discoverActiveTask = options.switches.has('discover-active-task');
@@ -1861,7 +1875,7 @@ function usage(): string {
     '  npm run adapter -- qwen plan-gate uninstall --scope project --project-root <absolute-path>',
     '  npm run adapter -- copilot plan-gate install|update --project-root <absolute-path> (--command <shared-shell-command> | --bash-command <command> --powershell-command <command>)',
     '  npm run adapter -- copilot plan-gate uninstall --project-root <absolute-path>',
-    '  npm run adapter -- copilot memory install|update --project-root <absolute-path> (--command <shared-shell-command> | --bash-command <command> --powershell-command <command>)',
+    '  npm run adapter -- copilot memory install|update --project-root <absolute-path> (--command <shared-shell-command> | --bash-command <command> --powershell-command <command>) [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]',
     '  npm run adapter -- copilot memory uninstall --project-root <absolute-path>',
     '  npm run adapter -- kimi install|update --command <shell-command-with-marker> [--kimi-code-home <absolute-path>]',
     '  npm run adapter -- kimi uninstall [--kimi-code-home <absolute-path>]',

@@ -5319,6 +5319,37 @@ func TestPromptMemoryHookTaskResumeIsExplicitProjectScopedAndAdvisory(t *testing
 		}
 	}
 
+	copilotInput, err := json.Marshal(copilotUserPromptTransformedMemoryHookInput{
+		CWD: projectRoot, Prompt: "Copilot current prompt must not be echoed", TransformedPrompt: "Runtime-transformed request body.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	copilotTaskArgs := []string{"memory", "inject-copilot", "--project-id", "demo-project",
+		"--threadforge-managed-copilot-memory=v1", "--threadforge-memory=copilot-v1", "--task-id", "resume-task"}
+	stdout.Reset()
+	stderr.Reset()
+	if code := RunWithInput(copilotTaskArgs, bytes.NewReader(copilotInput), &stdout, &stderr); code != 0 {
+		t.Fatalf("Copilot explicit task-resume code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var copilotResumeResponse struct {
+		ModifiedTransformedPrompt string `json:"modifiedTransformedPrompt"`
+	}
+	if json.Unmarshal(stdout.Bytes(), &copilotResumeResponse) != nil ||
+		!strings.HasPrefix(copilotResumeResponse.ModifiedTransformedPrompt, "Runtime-transformed request body.\n\n") {
+		t.Fatalf("Copilot task-resume response malformed: %s", stdout.String())
+	}
+	for _, expected := range []string{"Resume parser fix", "Fix the parser without changing generated output", "plan_only", "Plan-only reminder", "advisory context only"} {
+		if !strings.Contains(copilotResumeResponse.ModifiedTransformedPrompt, expected) {
+			t.Errorf("Copilot task-resume context missing %q: %s", expected, copilotResumeResponse.ModifiedTransformedPrompt)
+		}
+	}
+	for _, withheld := range []string{"resume-session", "PRIVATE_SESSION_PROGRESS", "PRIVATE_SESSION_NEXT_ACTION", "PRIVATE_SESSION_HANDOFF", "Copilot current prompt must not be echoed"} {
+		if strings.Contains(stdout.String(), withheld) {
+			t.Errorf("Copilot task-resume output leaked private session/prompt data %q: %s", withheld, stdout.String())
+		}
+	}
+
 	qwenDiscoveryArgs := append(append([]string(nil), qwenBaseArgs...), "--discover-active-task")
 	stdout.Reset()
 	stderr.Reset()

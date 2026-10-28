@@ -4243,7 +4243,7 @@ Commands:
   memory inject-qwen --project-id <id> --threadforge-managed-qwen-memory=v1 --threadforge-memory=qwen-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory inject-antigravity --project-id <id> --threadforge-managed-antigravity-memory=v1 --threadforge-memory=antigravity-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory inject-opencode --project-id <id> --threadforge-managed-opencode-memory=v1 --threadforge-memory=opencode-v1 [--max-items 1-32] [--max-tokens 1-16000]
-  memory inject-copilot --project-id <id> --threadforge-managed-copilot-memory=v1 --threadforge-memory=copilot-v1 [--max-items 1-32] [--max-tokens 1-16000]
+  memory inject-copilot --project-id <id> --threadforge-managed-copilot-memory=v1 --threadforge-memory=copilot-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory fingerprint --project-root <root> --path <relative-source-file> [--path <relative-source-file> ...]
   memory publish --project-root <root> --file <candidate.json> --expected-revision <n> --reviewer <name> --reason <reason> --privacy-reviewed
   memory read --project-root <root> --project-id <id> --kind <fact|decision|policy> --id <record-id> [--path <relative-path> ...] [--module <module-id> ...]

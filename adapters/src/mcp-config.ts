@@ -9,7 +9,7 @@ import {
   updateManagedQwenProjectMcpServer,
   updateQwenProjectMcpServer,
 } from './qwen-hooks-config.ts';
-import { managedMcpArgument } from './mcp-contract.ts';
+import { looksCredentialLikeMcpValue, managedMcpArgument } from './mcp-contract.ts';
 
 export { managedMcpArgument } from './mcp-contract.ts';
 
@@ -17,6 +17,7 @@ export const projectMcpHosts = {
   'claude-code': '.mcp.json',
   'command-code': '.mcp.json',
   'github-copilot': '.mcp.json',
+  qoder: '.mcp.json',
   cursor: path.join('.cursor', 'mcp.json'),
   antigravity: path.join('.agents', 'mcp_config.json'),
   'gemini-cli': path.join('.gemini', 'settings.json'),
@@ -293,8 +294,11 @@ function validateServerForHost(host: ProjectMcpHost, value: McpServerConfig): vo
   if (host === 'gemini-cli' && value.trust !== false) {
     throw new Error('Gemini MCP config must explicitly set trust to false');
   }
-  if (host === 'qwen-code' && Object.keys(value).some((key) => key !== 'command' && key !== 'args')) {
-    throw new Error('Qwen project MCP config only accepts command and args; Threadforge does not set trust, cwd, or environment');
+  if ((host === 'qwen-code' || host === 'qoder') && Object.keys(value).some((key) => key !== 'command' && key !== 'args')) {
+    throw new Error(`${host} project MCP config only accepts command and args; Threadforge does not set trust, cwd, or environment`);
+  }
+  if (host === 'qoder' && [value.command, ...value.args].some(looksCredentialLikeMcpValue)) {
+    throw new Error('Qoder project MCP values must not contain credential-like text');
   }
 }
 

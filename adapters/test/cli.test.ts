@@ -519,6 +519,32 @@ test('adapter CLI configures GitHub Copilot project MCP in the shared workspace 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('adapter CLI configures Qoder project MCP in the shared workspace config', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-qoder-mcp-cli-'));
+  const configPath = path.join(root, '.mcp.json');
+  try {
+    await writeFile(configPath, JSON.stringify({ mcpServers: { analytics: { command: 'analytics', args: ['serve'] } } }));
+    const result = await invoke([
+      'mcp', 'install', '--host', 'qoder', '--project-root', root,
+      '--command', 'threadforge', '--arg', 'mcp', '--arg', 'serve',
+      '--arg', '--project-root', '--arg', root,
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    const config = JSON.parse(await readFile(configPath, 'utf8'));
+    assert.deepEqual(config.mcpServers.threadforge, {
+      command: 'threadforge',
+      args: ['mcp', 'serve', '--project-root', root, '--threadforge-managed-mcp=v1'],
+    });
+    const removed = await invoke(['mcp', 'uninstall', '--host', 'qoder', '--project-root', root]);
+    assert.equal(removed.code, 0, removed.stderr);
+    assert.deepEqual(JSON.parse(await readFile(configPath, 'utf8')), {
+      mcpServers: { analytics: { command: 'analytics', args: ['serve'] } },
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('adapter CLI installs and removes only the reviewed GitHub Copilot IDE prompt file', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-copilot-prompt-cli-'));
   try {
@@ -1947,14 +1973,14 @@ test('VS Code OTLP CLI prints local settings guidance and validates JSONC-backed
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('project MCP bootstrap plans without writes, installs eleven host IDs across shared MCP/Codex configs, and uninstalls only owned entries', async () => {
+test('project MCP bootstrap plans without writes, installs twelve host IDs across shared MCP/Codex configs, and uninstalls only owned entries', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-bootstrap-mcp-'));
   const canonicalRoot = await realpath(root);
-  const hostList = 'claude-code,command-code,github-copilot,cursor,antigravity,gemini-cli,qwen-code,codex-cli,chatgpt-desktop-codex,codex-ide,opencode';
+  const hostList = 'claude-code,command-code,github-copilot,qoder,cursor,antigravity,gemini-cli,qwen-code,codex-cli,chatgpt-desktop-codex,codex-ide,opencode';
   const args = ['--project-root', root, '--hosts', hostList, '--command', 'threadforge.exe',
     '--arg', 'mcp', '--arg', 'serve', '--arg', '--project-root', '--arg', root];
   const configPaths = [
-    '.mcp.json', '.mcp.json', '.mcp.json', path.join('.cursor', 'mcp.json'), path.join('.agents', 'mcp_config.json'),
+    '.mcp.json', '.mcp.json', '.mcp.json', '.mcp.json', path.join('.cursor', 'mcp.json'), path.join('.agents', 'mcp_config.json'),
     path.join('.gemini', 'settings.json'), path.join('.qwen', 'settings.json'), path.join('.codex', 'config.toml'),
     path.join('.codex', 'config.toml'), path.join('.codex', 'config.toml'), 'opencode.json',
   ];
@@ -1983,7 +2009,7 @@ test('project MCP bootstrap plans without writes, installs eleven host IDs acros
     assert.equal(installValue.schema_version, 'threadforge.project-bootstrap-result.v1');
     assert.equal(installValue.status, 'complete');
     assert.equal(installValue.host_trust_changed, false);
-    assert.deepEqual(installValue.hosts.map((entry) => entry.result), ['installed', 'unchanged', 'unchanged', 'installed', 'installed', 'installed', 'installed', 'installed', 'unchanged', 'unchanged', 'installed']);
+    assert.deepEqual(installValue.hosts.map((entry) => entry.result), ['installed', 'unchanged', 'unchanged', 'unchanged', 'installed', 'installed', 'installed', 'installed', 'installed', 'unchanged', 'unchanged', 'installed']);
 
     const gemini = JSON.parse(await readFile(path.join(root, '.gemini', 'settings.json'), 'utf8'));
     assert.equal(gemini.mcpServers.threadforge.trust, false);
@@ -2003,12 +2029,12 @@ test('project MCP bootstrap plans without writes, installs eleven host IDs acros
     const repeated = await invoke(['bootstrap', 'mcp', 'install', ...args]);
     assert.equal(repeated.code, 0, repeated.stderr);
     const repeatedValue = JSON.parse(repeated.stdout) as { hosts: { result: string }[] };
-    assert.deepEqual(repeatedValue.hosts.map((entry) => entry.result), Array(11).fill('unchanged'));
+    assert.deepEqual(repeatedValue.hosts.map((entry) => entry.result), Array(12).fill('unchanged'));
 
     const updated = await invoke(['bootstrap', 'mcp', 'update', ...args.map((value, index) => index === args.indexOf('threadforge.exe') ? 'threadforge-next.exe' : value)]);
     assert.equal(updated.code, 0, updated.stderr);
     const updateValue = JSON.parse(updated.stdout) as { hosts: { result: string }[] };
-    assert.deepEqual(updateValue.hosts.map((entry) => entry.result), ['updated', 'unchanged', 'unchanged', 'updated', 'updated', 'updated', 'updated', 'updated', 'unchanged', 'unchanged', 'updated']);
+    assert.deepEqual(updateValue.hosts.map((entry) => entry.result), ['updated', 'unchanged', 'unchanged', 'unchanged', 'updated', 'updated', 'updated', 'updated', 'updated', 'unchanged', 'unchanged', 'updated']);
     const updatedCodex = await readFile(path.join(root, '.codex', 'config.toml'), 'utf8');
     assert.equal(updatedCodex.includes('threadforge-next.exe'), true);
     const updatedQwen = JSON.parse(await readFile(qwenSettingsPath, 'utf8'));
@@ -2019,7 +2045,7 @@ test('project MCP bootstrap plans without writes, installs eleven host IDs acros
     assert.equal(removed.code, 0, removed.stderr);
     const removedValue = JSON.parse(removed.stdout) as { status: string; hosts: { result: string }[] };
     assert.equal(removedValue.status, 'complete');
-    assert.deepEqual(removedValue.hosts.map((entry) => entry.result), ['removed', 'absent', 'absent', 'removed', 'removed', 'removed', 'removed', 'removed', 'absent', 'absent', 'removed']);
+    assert.deepEqual(removedValue.hosts.map((entry) => entry.result), ['removed', 'absent', 'absent', 'absent', 'removed', 'removed', 'removed', 'removed', 'removed', 'absent', 'absent', 'removed']);
     assert.deepEqual(JSON.parse(await readFile(qwenSettingsPath, 'utf8')), qwenSettings);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

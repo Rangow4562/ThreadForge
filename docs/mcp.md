@@ -166,6 +166,18 @@ npm.cmd --prefix adapters run adapter -- mcp uninstall --host qwen-code --projec
 
 The manager changes only `mcpServers.threadforge`, stores only `command` and bounded `args`, and requires the reserved Threadforge marker plus the same canonical project root. It rejects environment, `cwd`, trust fields, inline credential-like values, unowned collisions, malformed settings, symlink paths, and entries whose ownership marker has been removed. Operations share `.threadforge-qwen-hooks.lock` with Qwen hook and project-memory settings updates to prevent lost updates; no trust or permission setting is written. The Qwen executable is unavailable in this environment, so live project-config loading, tool discovery, and memory retrieval remain unverified.
 
+## Qoder CLI project MCP
+
+Qoder CLI supports project-scoped MCP servers in the project's `.mcp.json` under `mcpServers`. The manager below changes only `mcpServers.threadforge`; it writes a bounded `command` and `args` array with the ownership marker and preserves other servers and top-level settings.
+
+```powershell
+npm.cmd --prefix adapters run adapter -- mcp install --host qoder --project-root <project-root> --command <threadforge-executable> --arg mcp --arg serve --arg --project-root --arg <project-root>
+npm.cmd --prefix adapters run adapter -- mcp update --host qoder --project-root <project-root> --command <threadforge-executable> --arg mcp --arg serve --arg --project-root --arg <project-root>
+npm.cmd --prefix adapters run adapter -- mcp uninstall --host qoder --project-root <project-root>
+```
+
+Threadforge does not write environment secrets, `cwd`, trust, or permission settings. The generic `.mcp.json` lock protects the merge from concurrent Threadforge config writes; a collision without the ownership marker is refused. Qoder's documented `--scope project` config surface is represented here, but live Qoder config discovery, MCP tool invocation, and memory retrieval remain unverified.
+
 ## Claude Code command hooks
 
 `@threadforge/adapter-contracts/claude-hook` accepts Claude Code command-hook JSON on stdin and maps supported lifecycle events to the local `/v1/events` intake. By default, prompt and tool payloads are not forwarded: only a bounded SHA-256 digest and byte count are retained, and digests are omitted for values larger than 64 KiB. Session and call identifiers are hashed before logging; tool/agent labels are bounded and credential-like labels are omitted. Working directories, transcript paths, raw prompts, tool arguments, and tool outputs are not retained. Permission requests remain requests, and the mapper does not invent approval decisions or process exit codes. Capture errors are fail-open so this observational hook cannot block or authorize an agent action.

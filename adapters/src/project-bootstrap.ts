@@ -25,6 +25,7 @@ export const projectBootstrapMcpTargets = {
   'claude-code': '.mcp.json',
   'command-code': '.mcp.json',
   'github-copilot': '.mcp.json',
+  qoder: '.mcp.json',
   cursor: path.join('.cursor', 'mcp.json'),
   antigravity: path.join('.agents', 'mcp_config.json'),
   'gemini-cli': path.join('.gemini', 'settings.json'),

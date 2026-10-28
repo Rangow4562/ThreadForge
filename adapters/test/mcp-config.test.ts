@@ -32,6 +32,7 @@ test('uses project-local config paths for supported MCP hosts', () => {
   assert.equal(projectMcpConfigPath(root, 'claude-code'), path.join(root, '.mcp.json'));
   assert.equal(projectMcpConfigPath(root, 'command-code'), path.join(root, '.mcp.json'));
   assert.equal(projectMcpConfigPath(root, 'github-copilot'), path.join(root, '.mcp.json'));
+  assert.equal(projectMcpConfigPath(root, 'qoder'), path.join(root, '.mcp.json'));
   assert.equal(projectMcpConfigPath(root, 'cursor'), path.join(root, '.cursor', 'mcp.json'));
   assert.equal(projectMcpConfigPath(root, 'antigravity'), path.join(root, '.agents', 'mcp_config.json'));
   assert.equal(projectMcpConfigPath(root, 'gemini-cli'), path.join(root, '.gemini', 'settings.json'));
@@ -74,6 +75,33 @@ test('GitHub Copilot CLI shares the project .mcp.json contract and preserves adj
     assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), {
       mcpServers: { analytics: { command: 'analytics', args: ['serve'] } },
     });
+  });
+});
+
+test('Qoder project MCP shares .mcp.json and preserves neighboring server entries', async () => {
+  await withProject(async (root) => {
+    const file = projectMcpConfigPath(root, 'qoder');
+    const original = { mcpServers: { analytics: { command: 'analytics', args: ['serve'] } }, projectSetting: true };
+    await writeFile(file, JSON.stringify(original, null, 2));
+    const qoderServer: McpServerConfig = {
+      command: 'threadforge', args: ['mcp', 'serve', '--project-root', root, managedMcpArgument],
+    };
+
+    assert.equal(await installProjectMcpServer(root, 'qoder', 'threadforge', qoderServer), 'installed');
+    assert.equal(await installProjectMcpServer(root, 'qoder', 'threadforge', qoderServer), 'unchanged');
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), {
+      ...original,
+      mcpServers: { ...original.mcpServers, threadforge: qoderServer },
+    });
+    await assert.rejects(installProjectMcpServer(root, 'qoder', 'other', { ...qoderServer, cwd: root }), /only accepts command and args/);
+    await assert.rejects(installProjectMcpServer(root, 'qoder', 'other', {
+      ...qoderServer, command: 'threadforge api_key=fixture-secret',
+    }), /credential-like/);
+    assert.equal(await updateManagedProjectMcpServer(root, 'qoder', 'threadforge', {
+      ...qoderServer, command: 'threadforge-next',
+    }), 'updated');
+    assert.equal(await removeManagedProjectMcpServer(root, 'qoder', 'threadforge'), 'removed');
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), original);
   });
 });
 

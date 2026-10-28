@@ -325,12 +325,7 @@ func backupFixture(t *testing.T) (string, string) {
 	backupRoot := filepath.Join(backupParent, "backup")
 	t.Cleanup(func() {
 		for _, root := range []string{sourceRoot, backupParent} {
-			_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-				if err == nil && d != nil && !d.IsDir() {
-					_ = os.Chmod(p, 0o600)
-				}
-				return nil
-			})
+			makeBackupFixtureTreeWritable(root)
 		}
 	})
 	return sourceRoot, backupRoot
@@ -408,14 +403,23 @@ func copyBackupFixtureTree(t *testing.T, sourceRoot, backupRoot string) {
 		return os.Chmod(destination, info.Mode().Perm())
 	})
 	t.Cleanup(func() {
-		_ = filepath.WalkDir(backupRoot, func(p string, d fs.DirEntry, err error) error {
-			if err == nil && d != nil && !d.IsDir() {
-				_ = os.Chmod(p, 0o600)
-			}
-			return nil
-		})
+		makeBackupFixtureTreeWritable(backupRoot)
 	})
 	if err != nil {
 		t.Fatalf("copy backup test tree: %v", err)
 	}
+}
+
+func makeBackupFixtureTreeWritable(root string) {
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d == nil || d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		mode := os.FileMode(0o600)
+		if d.IsDir() {
+			mode = 0o700
+		}
+		_ = os.Chmod(p, mode)
+		return nil
+	})
 }

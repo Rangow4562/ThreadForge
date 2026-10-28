@@ -2836,9 +2836,14 @@ func makeTreeWritableForCleanup(t *testing.T, root string) {
 	t.Helper()
 	t.Cleanup(func() {
 		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err == nil && d != nil && !d.IsDir() {
-				_ = os.Chmod(p, 0o600)
+			if err != nil || d == nil || d.Type()&os.ModeSymlink != 0 {
+				return nil
 			}
+			mode := os.FileMode(0o600)
+			if d.IsDir() {
+				mode = 0o700
+			}
+			_ = os.Chmod(p, mode)
 			return nil
 		})
 	})

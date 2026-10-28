@@ -1574,10 +1574,10 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
         ...(antigravityScope === 'project' ? { projectRoot } : {}),
       });
     } else if (family === 'qwen' && qwenSubsystem === 'memory' && (action === 'install' || action === 'update')) {
-      rejectUnexpected(options, ['scope', 'project-root', 'command']);
+      rejectUnexpected(options, ['scope', 'project-root', 'command', 'task-id', 'session-id', 'max-task-entries'], [], ['discover-active-task']);
       if (options.values.get('scope') !== 'project') throw new Error('Qwen memory requires explicit --scope project');
-      result = await installQwenProjectMemoryHook({ command: required(options, 'command'), projectRoot });
-      warning = 'Qwen UserPromptExpansion adds task-context memory as advisory guidance; project hooks require trusted-folder approval, and Threadforge does not change trust.';
+      result = await installQwenProjectMemoryHook({ command: qwenMemoryHookCommand(options), projectRoot });
+      warning = 'Qwen UserPromptExpansion adds approved memory and optionally selected task context as advisory guidance; project hooks require trusted-folder approval, and Threadforge does not change trust.';
     } else if (family === 'qwen' && qwenSubsystem === 'memory' && action === 'uninstall') {
       rejectUnexpected(options, ['scope', 'project-root']);
       if (options.values.get('scope') !== 'project') throw new Error('Qwen memory requires explicit --scope project');
@@ -1692,7 +1692,7 @@ function parseOptions(args: string[]): ParsedOptions {
     if (!key?.startsWith('--') || key.length < 3) throw new Error('adapter options must use --name value form');
     const name = key.slice(2);
     if (name === 'print' || name === 'include-content' || name === 'watch' || name === 'acknowledge-local-source' ||
-        name === 'memory-discover-active-task' ||
+        name === 'memory-discover-active-task' || name === 'discover-active-task' ||
         name === 'json' || name === 'capture-content' || name === 'allow-remote') {
       if (switches.has(name)) throw new Error(`adapter option --${name} was repeated`);
       switches.add(name);
@@ -1715,6 +1715,41 @@ function required(options: ParsedOptions, key: string): string {
   const value = options.values.get(key)?.trim();
   if (!value) throw new Error(`adapter option --${key} is required`);
   return value;
+}
+
+function qwenMemoryHookCommand(options: ParsedOptions): string {
+  const command = required(options, 'command');
+  const taskId = options.values.get('task-id');
+  const sessionId = options.values.get('session-id');
+  const discoverActiveTask = options.switches.has('discover-active-task');
+  const hasTaskSelection = taskId !== undefined || discoverActiveTask;
+  if (sessionId !== undefined && taskId === undefined) throw new Error('--session-id requires --task-id');
+  if (taskId !== undefined && discoverActiveTask) throw new Error('--task-id and --discover-active-task are mutually exclusive');
+  if (options.values.has('max-task-entries') && !hasTaskSelection) {
+    throw new Error('--max-task-entries requires --task-id or --discover-active-task');
+  }
+  if (taskId !== undefined && !/^[a-z][a-z0-9-]{0,63}$/.test(taskId)) {
+    throw new Error('--task-id must match [a-z][a-z0-9-]{0,63}');
+  }
+  if (sessionId !== undefined && !/^[a-z][a-z0-9-]{0,63}$/.test(sessionId)) {
+    throw new Error('--session-id must match [a-z][a-z0-9-]{0,63}');
+  }
+  if (!hasTaskSelection) return command;
+  if (/(?:^|\s|["'])--(?:task-id|session-id|discover-active-task|max-task-entries)(?=$|\s|["'=])/.test(command)) {
+    throw new Error('Qwen memory command already contains task-resume options; choose either command arguments or installer options');
+  }
+  const maxTaskEntries = Number(options.values.get('max-task-entries') ?? 6);
+  if (!Number.isInteger(maxTaskEntries) || maxTaskEntries < 1 || maxTaskEntries > 20) {
+    throw new Error('--max-task-entries must be between 1 and 20');
+  }
+  const selected = taskId === undefined ? '--discover-active-task' : `--task-id ${taskId}`;
+  const session = sessionId === undefined ? '' : ` --session-id ${sessionId}`;
+  const runtimeMarker = '--threadforge-memory=qwen-v1';
+  const runtimeMarkers = [...command.matchAll(/(?:^|\s)--threadforge-memory=qwen-v1(?=$|\s)/g)];
+  if (runtimeMarkers.length !== 1) throw new Error('Qwen task selection requires exactly one unquoted Threadforge memory runtime marker');
+  const markerIndex = command.indexOf(runtimeMarker);
+  const selection = `${selected}${session} --max-task-entries ${maxTaskEntries} `;
+  return `${command.slice(0, markerIndex)}${selection}${command.slice(markerIndex)}`;
 }
 
 function copilotPlanGateCommands(options: ParsedOptions): { bashCommand: string; powershellCommand: string } {
@@ -1806,7 +1841,7 @@ function usage(): string {
     '  npm run adapter -- antigravity plan-gate uninstall --scope project --project-root <absolute-path>',
     '  npm run adapter -- qwen install|update [--scope user|project] [--project-root <absolute-path>] --command <bash-command-with-marker>',
     '  npm run adapter -- qwen uninstall [--scope user|project] [--project-root <absolute-path>]',
-    '  npm run adapter -- qwen memory install|update --scope project --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers>',
+    '  npm run adapter -- qwen memory install|update --scope project --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers> [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]',
     '  npm run adapter -- qwen memory uninstall --scope project --project-root <absolute-path>',
     '  npm run adapter -- qwen plan-gate install|update --scope project --project-root <absolute-path> --command <threadforge-deny-only-plan-gate-command-with-markers>',
     '  npm run adapter -- qwen plan-gate uninstall --scope project --project-root <absolute-path>',

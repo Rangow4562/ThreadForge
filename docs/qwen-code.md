@@ -46,14 +46,21 @@ npm.cmd --prefix adapters run adapter -- qwen memory install `
   --command 'threadforge memory inject-qwen --project-id my-project --threadforge-managed-qwen-memory=v1 --threadforge-memory=qwen-v1'
 ```
 
-Task-resume context is separately opt-in. Configure one of these alternatives on the command:
+Task-resume context is separately opt-in. The installer can add an explicit task/session selection to the marked command:
 
 ```powershell
---task-id <task-id> [--session-id <session-id>]
---discover-active-task
+npm.cmd --prefix adapters run adapter -- qwen memory update `
+  --scope project `
+  --project-root <absolute-project-path> `
+  --command 'threadforge memory inject-qwen --project-id my-project --threadforge-managed-qwen-memory=v1 --threadforge-memory=qwen-v1' `
+  --task-id <task-id> `
+  --session-id <session-id> `
+  --max-task-entries 6
 ```
 
-Without either option, the hook remains memory-only. An explicit task is checked against the configured `--project-id`; discovery returns task details only when exactly one eligible task exists in that project. Ambiguity is surfaced without task details. `--max-task-entries` defaults to 6 (range 1-20); task text is bounded to 4,200 bytes and the combined hook context is capped at 9,000 characters. Plan-only tasks omit prior session progress and handoffs. Task snapshots are untrusted, advisory context and never grant permissions or authorize execution. `UserPromptExpansion` can also run for model-generated prompt expansion, so the hook does not treat the prompt as proof of user intent; the prompt is used only as the transient memory-retrieval query and is not stored. Since returned memory/task context is model-bound, treat it as potentially retained in Qwen's session history and sent to the provider configured for that Qwen session; Threadforge does not control host retention or provider settings.
+Alternatively, use `--discover-active-task` instead of `--task-id` and `--session-id`; discovery returns details only for one eligible task. Do not combine installer selection flags with task-resume flags already present in `--command`. If no selector is supplied, the hook stays memory-only. The installer accepts only lowercase stable task/session IDs and appends bounded selection arguments to the marked command. Explicit task IDs and optional session IDs are stored in project `.qwen/settings.json`; review the file before committing it.
+
+Configured explicit tasks are checked against the hook command's `--project-id`; discovery returns task details only when exactly one eligible task exists in that project. Ambiguity is surfaced without task details. `--max-task-entries` defaults to 6 (range 1-20); task text is bounded to 4,200 bytes and the combined hook context is capped at 9,000 characters. Plan-only tasks omit prior session progress and handoffs. Task snapshots are untrusted, advisory context and never grant permissions or authorize execution. `UserPromptExpansion` can also run for model-generated prompt expansion, so the hook does not treat the prompt as proof of user intent; the prompt is used only as the transient memory-retrieval query and is not stored. Since returned memory/task context is model-bound, treat it as potentially retained in Qwen's session history and sent to the provider configured for that Qwen session; Threadforge does not control host retention or provider settings.
 
 The injector requires `hook_event_name=UserPromptExpansion`, `cwd`, and a bounded `prompt`. Prompt text is used transiently as the retrieval query (maximum 2,000 bytes); Threadforge does not persist or forward it, call a model, or contact a remote service. Retrieval defaults to eight items and 1,600 approximate tokens, with a 9,000-character output ceiling. Only approved, project-scoped memory and procedures are returned; missing path/module applicability is surfaced and inapplicable material is withheld. The returned context is explicitly advisory and never grants tool permission or authorizes execution. Model-authored commands may also trigger this event, so its prompt is treated as untrusted query text rather than proof of human intent.
 

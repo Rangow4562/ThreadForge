@@ -1406,7 +1406,8 @@ test('adapter CLI manages Qwen hooks and surfaces the trusted-project caveat', a
     assert.match(JSON.parse(result.stdout).warning, /trusted folder/);
     const projectSettings = JSON.parse(await readFile(path.join(project, '.qwen', 'settings.json'), 'utf8'));
     assert.equal(Object.hasOwn(projectSettings, 'trustedFolders'), false);
-    const memoryCommand = 'threadforge memory inject-qwen --project-id demo-project --threadforge-managed-qwen-memory=v1 --threadforge-memory=qwen-v1';
+    const baseMemoryCommand = 'threadforge memory inject-qwen --project-id demo-project --threadforge-managed-qwen-memory=v1 --threadforge-memory=qwen-v1';
+    let memoryCommand = baseMemoryCommand;
     result = await invoke(['qwen', 'memory', 'install', '--scope', 'project', '--project-root', project, '--command', memoryCommand], env);
     assert.equal(result.code, 0, result.stderr);
     assert.match(JSON.parse(result.stdout).warning, /trusted-folder approval/);
@@ -1418,6 +1419,55 @@ test('adapter CLI manages Qwen hooks and surfaces the trusted-project caveat', a
     result = await invoke(['qwen', 'memory', 'update', '--scope', 'project', '--project-root', project, '--command', memoryCommand], env);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'unchanged');
+    result = await invoke([
+      'qwen', 'memory', 'update', '--scope', 'project', '--project-root', project, '--command', baseMemoryCommand,
+      '--task-id', 'qwen-parser-task', '--session-id', 'qwen-parser-session', '--max-task-entries', '3',
+    ], env);
+    assert.equal(result.code, 0, result.stderr);
+    memoryCommand = baseMemoryCommand.replace(
+      '--threadforge-memory=qwen-v1',
+      '--task-id qwen-parser-task --session-id qwen-parser-session --max-task-entries 3 --threadforge-memory=qwen-v1',
+    );
+    installed = JSON.parse(await readFile(path.join(project, '.qwen', 'settings.json'), 'utf8'));
+    const explicitTaskRef = installed.hooks.UserPromptExpansion.flatMap((group: { hooks: Array<Record<string, unknown>> }) => group.hooks)
+      .find((hook: Record<string, unknown>) => hook.command === memoryCommand);
+    assert.ok(explicitTaskRef);
+    result = await invoke([
+      'qwen', 'memory', 'update', '--scope', 'project', '--project-root', project, '--command', baseMemoryCommand,
+      '--discover-active-task',
+    ], env);
+    assert.equal(result.code, 0, result.stderr);
+    memoryCommand = baseMemoryCommand.replace(
+      '--threadforge-memory=qwen-v1',
+      '--discover-active-task --max-task-entries 6 --threadforge-memory=qwen-v1',
+    );
+    installed = JSON.parse(await readFile(path.join(project, '.qwen', 'settings.json'), 'utf8'));
+    const discoveryRef = installed.hooks.UserPromptExpansion.flatMap((group: { hooks: Array<Record<string, unknown>> }) => group.hooks)
+      .find((hook: Record<string, unknown>) => hook.command === memoryCommand);
+    assert.ok(discoveryRef);
+    const beforeInvalidMemoryOptions = await readFile(path.join(project, '.qwen', 'settings.json'), 'utf8');
+    for (const [invalidOptions, expectedError] of [
+      [['--task-id', 'qwen-parser-task', '--discover-active-task'], /mutually exclusive/],
+      [['--session-id', 'qwen-parser-session'], /requires --task-id/],
+      [['--task-id', 'Qwen/Task'], /--task-id must match/],
+      [['--discover-active-task', '--max-task-entries', '21'], /between 1 and 20/],
+      [['--max-task-entries', '3'], /requires --task-id or --discover-active-task/],
+    ] as const) {
+      result = await invoke([
+        'qwen', 'memory', 'update', '--scope', 'project', '--project-root', project, '--command', baseMemoryCommand,
+        ...invalidOptions,
+      ], env);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, expectedError);
+    }
+    assert.equal(await readFile(path.join(project, '.qwen', 'settings.json'), 'utf8'), beforeInvalidMemoryOptions);
+    result = await invoke([
+      'qwen', 'memory', 'update', '--scope', 'project', '--project-root', project,
+      '--command', `${baseMemoryCommand} --task-id qwen-manual-task`, '--discover-active-task',
+    ], env);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /already contains task-resume options/);
+    assert.equal(await readFile(path.join(project, '.qwen', 'settings.json'), 'utf8'), beforeInvalidMemoryOptions);
     result = await invoke(['qwen', 'memory', 'install', '--project-root', project, '--command', memoryCommand], env);
     assert.equal(result.code, 1);
     assert.match(result.stderr, /explicit --scope project/);

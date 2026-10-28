@@ -116,6 +116,8 @@ Threadforge integrates with over 20 AI coding agent harnesses and runtimes, prov
 
 ## Quick Start
 
+Linux `amd64` users can install the published Go CLI without root using the [Linux installer](docs/linux-install.md). Python decision/evolution modules and harness adapters are separate packages.
+
 ### 1. Prerequisites
 - **Go**: `1.25` or newer
 - **Python**: `3.12` or newer (managed via `python/pyproject.toml`)

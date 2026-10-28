@@ -78,6 +78,11 @@ jobs:
         working-directory: third_party/agent-beacon/pkg/asymptoteobserve
         run: go test ./...
 
+      - name: Test the Linux user-local release installer
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash packaging/linux/test-install.sh
+
       - name: Run Python tests, compile check, and lint
         shell: bash
         working-directory: python

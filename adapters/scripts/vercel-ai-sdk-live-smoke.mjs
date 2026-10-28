@@ -81,29 +81,74 @@ const exporter = new otelSDK.InMemorySpanExporter();
 const tracerProvider = new otelSDK.TracerProvider({
   spanProcessors: [new otelSDK.SimpleSpanProcessor({ exporter })],
 });
+const runtimeContextMarker = 'THREADFORGE_PRIVATE_RUNTIME_CONTEXT_MARKER';
+const toolContextMarker = 'THREADFORGE_PRIVATE_TOOL_CONTEXT_MARKER';
+const usage = {
+  inputTokens: { total: 3, noCache: 3, cacheRead: 0, cacheWrite: 0 },
+  outputTokens: { total: 2, text: 2, reasoning: 0 },
+};
+let toolContextSeen = false;
+const toolContextSchema = ai.jsonSchema({
+  type: 'object',
+  properties: { privateMarker: { type: 'string' } },
+  required: ['privateMarker'],
+  additionalProperties: false,
+});
+const tools = {
+  lookup: ai.tool({
+    inputSchema: ai.jsonSchema({ type: 'object', properties: {}, additionalProperties: false }),
+    contextSchema: toolContextSchema,
+    execute: async (_input, { context }) => {
+      assert.ok(context.privateMarker === toolContextMarker, 'the mock tool must receive its private context');
+      toolContextSeen = true;
+      return 'safe local tool result';
+    },
+  }),
+};
 const mockModel = new aiTest.MockLanguageModelV3({
   provider: 'threadforge-smoke',
   modelId: 'mock-model',
-  doGenerate: {
-    content: [{ type: 'text', text: 'THREADFORGE_PRIVATE_OUTPUT_MARKER' }],
-    finishReason: { unified: 'stop', raw: 'stop' },
-    usage: {
-      inputTokens: { total: 3, noCache: 3, cacheRead: 0, cacheWrite: 0 },
-      outputTokens: { total: 2, text: 2, reasoning: 0 },
+  doGenerate: [
+    {
+      content: [{ type: 'tool-call', toolCallId: 'threadforge-smoke-call', toolName: 'lookup', input: '{}' }],
+      finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+      usage,
+      warnings: [],
     },
-    warnings: [],
-  },
+    {
+      content: [{ type: 'text', text: 'THREADFORGE_PRIVATE_OUTPUT_MARKER' }],
+      finishReason: { unified: 'stop', raw: 'stop' },
+      usage,
+      warnings: [],
+    },
+  ],
 });
 
 try {
   ai.registerTelemetry(new otel.OpenTelemetry({
     tracer: tracerProvider.getTracer('threadforge-vercel-ai-sdk-smoke'),
   }));
-  const result = await ai.generateText({
-    model: mockModel,
-    prompt: 'THREADFORGE_PRIVATE_PROMPT_MARKER',
-    telemetry: createThreadforgeVercelTelemetryOptions(),
-  });
+  let result;
+  try {
+    result = await ai.generateText({
+      model: mockModel,
+      prompt: 'THREADFORGE_PRIVATE_PROMPT_MARKER',
+      tools,
+      stopWhen: ai.stepCountIs(2),
+      runtimeContext: { privateMarker: runtimeContextMarker },
+      toolsContext: { lookup: { privateMarker: toolContextMarker } },
+      telemetry: createThreadforgeVercelTelemetryOptions(),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown error';
+    const safeMessage = [
+      'THREADFORGE_PRIVATE_PROMPT_MARKER',
+      'THREADFORGE_PRIVATE_OUTPUT_MARKER',
+      runtimeContextMarker,
+      toolContextMarker,
+    ].reduce((current, marker) => current.replaceAll(marker, '[redacted]'), message);
+    throw new Error(`Vercel AI SDK mock generation or tool execution failed: ${safeMessage}`);
+  }
   await tracerProvider.forceFlush();
 
   const finishedSpans = exporter.getFinishedSpans();
@@ -112,11 +157,14 @@ try {
     attributes: span.attributes,
     events: span.events,
   })));
-  assert.equal(result.text, 'THREADFORGE_PRIVATE_OUTPUT_MARKER');
+  assert.ok(result.text === 'THREADFORGE_PRIVATE_OUTPUT_MARKER', 'mock model output was not returned');
   assert.ok(finishedSpans.length > 0, 'the registered telemetry integration must receive spans');
+  assert.equal(toolContextSeen, true, 'the smoke must execute the tool with its private context');
   assert.equal(serializedSpans.includes('THREADFORGE_PRIVATE_PROMPT_MARKER'), false);
   assert.equal(serializedSpans.includes('THREADFORGE_PRIVATE_OUTPUT_MARKER'), false);
-  assert.equal(mockModel.doGenerateCalls.length, 1);
+  assert.equal(serializedSpans.includes(runtimeContextMarker), false);
+  assert.equal(serializedSpans.includes(toolContextMarker), false);
+  assert.equal(mockModel.doGenerateCalls.length, 2);
 
   process.stdout.write(`${JSON.stringify({
     schema_version: 'threadforge.vercel-ai-sdk-live-smoke.v1',
@@ -124,9 +172,12 @@ try {
     ai_sdk_otel_version: otelManifest.version,
     opentelemetry_sdk_version: otelSDKManifest.version,
     mock_model_calls: mockModel.doGenerateCalls.length,
+    mock_tool_executions: toolContextSeen ? 1 : 0,
     captured_span_count: finishedSpans.length,
     prompt_marker_captured: false,
     output_marker_captured: false,
+    runtime_context_marker_captured: false,
+    tool_context_marker_captured: false,
     real_model_calls: 0,
     real_provider_calls: 0,
   })}\n`);

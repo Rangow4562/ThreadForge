@@ -66,7 +66,7 @@ npm install --prefix $smoke --no-save --package-lock=false `
 node --experimental-strip-types scripts/vercel-ai-sdk-live-smoke.mjs --npm-prefix $smoke
 ```
 
-The optional packages are installed outside the repository; no Threadforge manifest or lockfile changes are needed. The smoke uses `MockLanguageModelV3` plus an in-memory span exporter and prints a content-free version/count receipt. On October 28, 2026, it captured three spans with neither prompt nor output marker present and made zero real model/provider calls. It does not test runtime-context/tool-context payloads, real provider spans, or application-owned exporter filtering, and it is not part of the default adapter suite.
+The optional packages are installed outside the repository; no Threadforge manifest or lockfile changes are needed. The smoke uses `MockLanguageModelV3`, one mock tool execution with private tool context, private runtime context, and an in-memory span exporter; it prints only a content-free version/count/safety receipt. On October 28, 2026, it captured six spans with prompt, output, runtime-context, and tool-context markers absent; it made two mock model calls, one mock tool execution, and zero real model/provider calls. It does not test real provider spans or application-owned exporter filtering, and it is not part of the default adapter suite.
 
 The application owns the telemetry integration, OpenTelemetry provider/exporter, endpoint, and retention policy. Avoid registering another integration that records content or context. The selected-version smoke validates one published-package path only; other package versions, provider-specific span attributes, and application exporter behavior remain unverified.
 

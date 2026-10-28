@@ -21,6 +21,8 @@
     "completion_requests": { "type": "integer", "minimum": 2, "maximum": 12 },
     "auxiliary_completion_requests": { "type": "integer", "minimum": 0, "maximum": 10 },
     "memory_context_injected": { "const": true },
+    "task_resume_context_injected": { "const": true },
+    "task_details_retained_in_report": { "const": false },
     "memory_content_retained_in_report": { "const": false },
     "plugin_messages_transform_observed": { "const": true },
     "approved_memory_readback_verified": { "const": true },

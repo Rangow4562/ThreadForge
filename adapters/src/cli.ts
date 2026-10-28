@@ -1484,17 +1484,33 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       rejectUnexpected(options, ['project-root']);
       result = await removeOpenCodeProjectPlanAgent(required(options, 'project-root'));
     } else if (family === 'opencode' && (action === 'install' || action === 'update')) {
-      rejectUnexpected(options, ['project-root', 'module', 'memory-project-id', 'memory-max-items', 'memory-max-tokens']);
-      const memoryProjectId = options.values.get('memory-project-id');
-      const hasMemoryLimits = options.values.has('memory-max-items') || options.values.has('memory-max-tokens');
-      if (!memoryProjectId && hasMemoryLimits) throw new Error('OpenCode memory limits require --memory-project-id');
+      rejectUnexpected(options,
+        ['project-root', 'module', 'memory-project-id', 'memory-max-items', 'memory-max-tokens', 'memory-task-id', 'memory-session-id', 'memory-max-task-entries'],
+        [], ['memory-discover-active-task']);
+      const memoryProjectId = options.values.has('memory-project-id') ? required(options, 'memory-project-id') : undefined;
+      const taskId = options.values.get('memory-task-id');
+      const sessionId = options.values.get('memory-session-id');
+      const discoverActiveTask = options.switches.has('memory-discover-active-task');
+      const hasMemorySettings = options.values.has('memory-max-items') || options.values.has('memory-max-tokens') ||
+        taskId !== undefined || sessionId !== undefined || discoverActiveTask || options.values.has('memory-max-task-entries');
+      if (!memoryProjectId && hasMemorySettings) throw new Error('OpenCode memory options require --memory-project-id');
+      if (sessionId !== undefined && taskId === undefined) throw new Error('--memory-session-id requires --memory-task-id');
+      if (taskId !== undefined && discoverActiveTask) throw new Error('--memory-task-id and --memory-discover-active-task are mutually exclusive');
+      const hasTaskSelection = taskId !== undefined || discoverActiveTask;
+      if (options.values.has('memory-max-task-entries') && !hasTaskSelection) {
+        throw new Error('--memory-max-task-entries requires --memory-task-id or --memory-discover-active-task');
+      }
       const memory = memoryProjectId ? {
         projectId: memoryProjectId,
         maxItems: Number(options.values.get('memory-max-items') ?? 8),
         maxTokens: Number(options.values.get('memory-max-tokens') ?? 1600),
+        ...(taskId !== undefined ? { taskId } : {}),
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        ...(discoverActiveTask ? { discoverActiveTask: true } : {}),
+        ...(hasTaskSelection ? { maxTaskEntries: Number(options.values.get('memory-max-task-entries') ?? 6) } : {}),
       } : undefined;
       result = await installOpenCodeProjectPlugin(projectRoot, required(options, 'module'), memory);
-      if (memory) warning = 'OpenCode approved-memory retrieval is opt-in and uses the experimental messages-transform hook. Bounded user text is sent to the local Threadforge CLI for ranking; retrieved records remain advisory and do not authorize actions.';
+      if (memory) warning = 'OpenCode approved-memory retrieval is opt-in and uses the experimental messages-transform hook. Bounded user text is sent to the local Threadforge CLI for ranking; optional task snapshots require explicit task selection or unique-task discovery, remain advisory, and do not authorize actions.';
     } else if (family === 'opencode' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
       result = await removeOpenCodeProjectPlugin(projectRoot);
@@ -1676,6 +1692,7 @@ function parseOptions(args: string[]): ParsedOptions {
     if (!key?.startsWith('--') || key.length < 3) throw new Error('adapter options must use --name value form');
     const name = key.slice(2);
     if (name === 'print' || name === 'include-content' || name === 'watch' || name === 'acknowledge-local-source' ||
+        name === 'memory-discover-active-task' ||
         name === 'json' || name === 'capture-content' || name === 'allow-remote') {
       if (switches.has(name)) throw new Error(`adapter option --${name} was repeated`);
       switches.add(name);
@@ -1858,7 +1875,7 @@ function usage(): string {
     '  npm run adapter -- codex sync [--codex-home <absolute-path>] [--state-path <absolute-path>] [--endpoint <loopback-v1-events-url>] [--print] [--include-content]',
     '  npm run adapter -- gemini install|update|uninstall',
     '  npm run adapter -- telemetry install|update|uninstall --host <claude-code|codex-cli>',
-    '  npm run adapter -- opencode install|update --project-root <absolute-path> --module <Threadforge-package-export-or-file-url>',
+    '  npm run adapter -- opencode install|update --project-root <absolute-path> --module <Threadforge-package-export-or-file-url> [--memory-project-id <id> [--memory-task-id <id> [--memory-session-id <id>] | --memory-discover-active-task] [--memory-max-items 1-32] [--memory-max-tokens 1-16000] [--memory-max-task-entries 1-20]]',
     '  npm run adapter -- opencode uninstall --project-root <absolute-path>',
     '  npm run adapter -- mcp install --host <claude-code|command-code|github-copilot|qoder|zcode|kimi-code|cursor|antigravity|gemini-cli|qwen-code|opencode|codex-cli|chatgpt-desktop-codex|codex-ide> --project-root <absolute-path> --command <executable> [--arg <value> ...] [--cwd <path>] [--name threadforge]',
     '  npm run adapter -- mcp update --host <claude-code|command-code|github-copilot|qoder|zcode|kimi-code|cursor|antigravity|gemini-cli|qwen-code|opencode|codex-cli|chatgpt-desktop-codex|codex-ide> --project-root <absolute-path> --command <executable> [--arg <value> ...] [--cwd <path>] [--name threadforge]',

@@ -26,6 +26,10 @@ export interface OpenCodeMemoryOptions {
   projectId: string;
   maxItems?: number;
   maxTokens?: number;
+  taskId?: string;
+  sessionId?: string;
+  discoverActiveTask?: boolean;
+  maxTaskEntries?: number;
 }
 
 export interface OpenCodePluginOptions {
@@ -115,6 +119,10 @@ export function createOpenCodeAdapter(
           projectId: memory.projectId,
           maxItems: memory.maxItems ?? 8,
           maxTokens: memory.maxTokens ?? 1600,
+          ...(memory.taskId ? { taskId: memory.taskId } : {}),
+          ...(memory.sessionId ? { sessionId: memory.sessionId } : {}),
+          ...(memory.discoverActiveTask ? { discoverActiveTask: true } : {}),
+          ...(memory.maxTaskEntries !== undefined ? { maxTaskEntries: memory.maxTaskEntries } : {}),
           prompt,
         });
       } catch { return; }
@@ -178,9 +186,22 @@ function truncateUTF8(value: string, maxBytes: number): string {
 function validMemoryOptions(options: OpenCodeMemoryOptions): boolean {
   const maxItems = options.maxItems ?? 8;
   const maxTokens = options.maxTokens ?? 1600;
-  return /^[a-z][a-z0-9-]{0,63}$/.test(options.projectId) &&
+  const maxTaskEntries = options.maxTaskEntries ?? 6;
+  const hasTaskId = options.taskId !== undefined;
+  const hasSessionId = options.sessionId !== undefined;
+  const discoverActiveTask = options.discoverActiveTask ?? false;
+  const hasTaskSelection = hasTaskId || discoverActiveTask;
+  const taskEntryLimitValid = options.maxTaskEntries === undefined ||
+    (hasTaskSelection && Number.isInteger(maxTaskEntries) && maxTaskEntries >= 1 && maxTaskEntries <= 20);
+  return typeof options.projectId === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(options.projectId) &&
     Number.isInteger(maxItems) && maxItems >= 1 && maxItems <= 32 &&
-    Number.isInteger(maxTokens) && maxTokens >= 1 && maxTokens <= 16000;
+    Number.isInteger(maxTokens) && maxTokens >= 1 && maxTokens <= 16000 &&
+    (!hasTaskId || (typeof options.taskId === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(options.taskId))) &&
+    (!hasSessionId || (typeof options.sessionId === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(options.sessionId))) &&
+    (!hasSessionId || hasTaskId) &&
+    (typeof options.discoverActiveTask === 'undefined' || typeof options.discoverActiveTask === 'boolean') &&
+    (!discoverActiveTask || (!hasTaskId && !hasSessionId)) &&
+    taskEntryLimitValid;
 }
 
 async function retrieveOpenCodeMemory(request: OpenCodeMemoryRequest): Promise<string | undefined> {
@@ -192,11 +213,7 @@ async function retrieveOpenCodeMemory(request: OpenCodeMemoryRequest): Promise<s
     prompt: request.prompt,
   });
   if (Buffer.byteLength(input, 'utf8') > (8 << 10)) return undefined;
-  const args = [
-    'memory', 'inject-opencode', '--project-id', request.projectId,
-    '--max-items', String(request.maxItems ?? 8), '--max-tokens', String(request.maxTokens ?? 1600),
-    '--threadforge-managed-opencode-memory=v1', '--threadforge-memory=opencode-v1',
-  ];
+  const args = buildOpenCodeMemoryArguments(request);
   return new Promise((resolve) => {
     let child;
     try {
@@ -246,6 +263,21 @@ async function retrieveOpenCodeMemory(request: OpenCodeMemoryRequest): Promise<s
     child.stdin.on('error', () => {});
     child.stdin.end(input, 'utf8');
   });
+}
+
+/** Builds the bounded local CLI invocation used by the OpenCode memory transform. */
+export function buildOpenCodeMemoryArguments(request: OpenCodeMemoryRequest): string[] {
+  if (!validMemoryOptions(request)) throw new Error('OpenCode memory request options are invalid');
+  const args = [
+    'memory', 'inject-opencode', '--project-id', request.projectId,
+    '--max-items', String(request.maxItems ?? 8), '--max-tokens', String(request.maxTokens ?? 1600),
+    '--threadforge-managed-opencode-memory=v1', '--threadforge-memory=opencode-v1',
+  ];
+  if (request.taskId) args.push('--task-id', request.taskId);
+  if (request.sessionId) args.push('--session-id', request.sessionId);
+  if (request.discoverActiveTask) args.push('--discover-active-task');
+  if (request.taskId || request.discoverActiveTask) args.push('--max-task-entries', String(request.maxTaskEntries ?? 6));
+  return args;
 }
 
 function localThreadforgeEnvironment(): NodeJS.ProcessEnv {

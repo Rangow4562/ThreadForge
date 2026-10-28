@@ -5386,6 +5386,40 @@ func TestPromptMemoryHookTaskResumeIsExplicitProjectScopedAndAdvisory(t *testing
 		t.Fatalf("task resume output leaked prompt/authorization or exceeded bound: %s", stdout.String())
 	}
 
+	openCodeArgs := []string{"memory", "inject-opencode", "--project-id", "demo-project",
+		"--threadforge-managed-opencode-memory=v1", "--threadforge-memory=opencode-v1", "--task-id", "resume-task", "--session-id", "resume-session"}
+	stdout.Reset()
+	stderr.Reset()
+	if code := RunWithInput(openCodeArgs, bytes.NewReader(input), &stdout, &stderr); code != 0 {
+		t.Fatalf("OpenCode task resume hook code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var openCodeResume struct {
+		System []string `json:"system"`
+	}
+	if json.Unmarshal(stdout.Bytes(), &openCodeResume) != nil || len(openCodeResume.System) != 1 {
+		t.Fatalf("OpenCode task resume response malformed: %s", stdout.String())
+	}
+	openCodeContext := openCodeResume.System[0]
+	for _, expected := range []string{"Resume parser fix", "Fix the parser", "plan_only", "Plan-only reminder", "advisory context only", "does not authorize commands"} {
+		if !strings.Contains(openCodeContext, expected) {
+			t.Errorf("OpenCode task resume context missing %q: %s", expected, openCodeContext)
+		}
+	}
+	for _, withheld := range []string{"resume-session", "PRIVATE_SESSION_PROGRESS", "PRIVATE_SESSION_NEXT_ACTION", "PRIVATE_SESSION_HANDOFF", "do not echo this prompt"} {
+		if strings.Contains(openCodeContext, withheld) {
+			t.Errorf("OpenCode plan-only context retained private value %q: %s", withheld, openCodeContext)
+		}
+	}
+	stdout.Reset()
+	stderr.Reset()
+	openCodeDiscoveryArgs := []string{"memory", "inject-opencode", "--project-id", "demo-project",
+		"--threadforge-managed-opencode-memory=v1", "--threadforge-memory=opencode-v1", "--discover-active-task"}
+	if code := RunWithInput(openCodeDiscoveryArgs, bytes.NewReader(input), &stdout, &stderr); code != 0 ||
+		!strings.Contains(stdout.String(), "multiple active tasks") || strings.Contains(stdout.String(), "Resume parser fix") ||
+		strings.Contains(stdout.String(), "Second active task") {
+		t.Fatalf("OpenCode ambiguous task discovery leaked task details: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+
 	// A configured task identifier cannot cross the configured project boundary.
 	run("task", "create", "--id", "foreign-task", "--project-id", "other-project", "--title", "Foreign task title",
 		"--objective", "Foreign project-only context", "--criterion", "Never disclose across project IDs")

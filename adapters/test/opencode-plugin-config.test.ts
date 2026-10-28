@@ -34,11 +34,23 @@ test('installs and idempotently updates an isolated OpenCode plugin file', async
 test('renders explicitly configured bounded project-memory retrieval without enabling it by default', () => {
   const defaultPlugin = renderOpenCodePlugin(packageSpecifier);
   const memoryPlugin = renderOpenCodePlugin(packageSpecifier, { projectId: 'parser-project', maxItems: 4, maxTokens: 900 });
+  const taskMemoryPlugin = renderOpenCodePlugin(packageSpecifier, {
+    projectId: 'parser-project', taskId: 'task-parser', sessionId: 'session-parser', maxTaskEntries: 3,
+  });
   assert.doesNotMatch(defaultPlugin, /experimental\.chat\.system\.transform|memory:/);
   assert.match(memoryPlugin, /projectId":"parser-project"/);
   assert.match(memoryPlugin, /maxItems":4/);
   assert.match(memoryPlugin, /maxTokens":900/);
   assert.match(memoryPlugin, /ThreadforgeOpenCodePlugin\(context/);
+  assert.match(taskMemoryPlugin, /taskId":"task-parser"/);
+  assert.match(taskMemoryPlugin, /sessionId":"session-parser"/);
+  assert.match(taskMemoryPlugin, /maxTaskEntries":3/);
+  assert.doesNotMatch(memoryPlugin, /taskId|discoverActiveTask/);
+  assert.throws(() => renderOpenCodePlugin(packageSpecifier, { projectId: undefined as unknown as string }), /project ID/);
+  assert.throws(() => renderOpenCodePlugin(packageSpecifier, { projectId: 'parser-project', sessionId: 'session-parser' }), /requires an explicit task ID/);
+  assert.throws(() => renderOpenCodePlugin(packageSpecifier, { projectId: 'parser-project', taskId: 'task-parser', discoverActiveTask: true }), /mutually exclusive/);
+  assert.throws(() => renderOpenCodePlugin(packageSpecifier, { projectId: 'parser-project', discoverActiveTask: true, maxTaskEntries: 21 }), /between 1 and 20/);
+  assert.throws(() => renderOpenCodePlugin(packageSpecifier, { projectId: 'parser-project', maxTaskEntries: 3 }), /requires task resume selection/);
   assert.throws(() => renderOpenCodePlugin(packageSpecifier, { projectId: 'API_KEY=secret' }), /project ID/);
   assert.throws(() => renderOpenCodePlugin(packageSpecifier, { projectId: 'parser-project', maxItems: 33 }), /limits/);
   assert.throws(() => renderOpenCodePlugin(packageSpecifier, { projectId: 'parser-project', maxTokens: 0 }), /limits/);

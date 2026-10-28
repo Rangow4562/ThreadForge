@@ -752,6 +752,7 @@ test('adapter CLI installs and uninstalls the isolated OpenCode project plugin',
     result = await invoke([
       'opencode', 'update', '--project-root', root, '--module', moduleSpecifier,
       '--memory-project-id', 'parser-project', '--memory-max-items', '4', '--memory-max-tokens', '900',
+      '--memory-task-id', 'task-parser', '--memory-session-id', 'session-parser', '--memory-max-task-entries', '3',
     ]);
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, /experimental messages-transform hook/);
@@ -759,6 +760,23 @@ test('adapter CLI installs and uninstalls the isolated OpenCode project plugin',
     assert.match(configuredMemory, /projectId":"parser-project"/);
     assert.match(configuredMemory, /maxItems":4/);
     assert.match(configuredMemory, /maxTokens":900/);
+    assert.match(configuredMemory, /taskId":"task-parser"/);
+    assert.match(configuredMemory, /sessionId":"session-parser"/);
+    assert.match(configuredMemory, /maxTaskEntries":3/);
+    result = await invoke([
+      'opencode', 'update', '--project-root', root, '--module', moduleSpecifier,
+      '--memory-project-id', 'parser-project', '--memory-discover-active-task', '--memory-max-task-entries', '2',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    const discoveredMemory = await readFile(pluginPath, 'utf8');
+    assert.match(discoveredMemory, /discoverActiveTask":true/);
+    assert.match(discoveredMemory, /maxTaskEntries":2/);
+    result = await invoke([
+      'opencode', 'update', '--project-root', root, '--module', moduleSpecifier,
+      '--memory-project-id', 'parser-project', '--memory-task-id', 'task-parser', '--memory-discover-active-task',
+    ]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /mutually exclusive/);
     result = await invoke(['opencode', 'uninstall', '--project-root', root]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'removed');

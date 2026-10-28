@@ -22,6 +22,8 @@ def test_opencode_memory_injection_smoke_is_bounded_and_non_authorizing():
         "completion_requests": 2,
         "auxiliary_completion_requests": 0,
         "memory_context_injected": True,
+        "task_resume_context_injected": True,
+        "task_details_retained_in_report": False,
         "memory_content_retained_in_report": False,
         "plugin_messages_transform_observed": True,
         "approved_memory_readback_verified": True,
@@ -39,3 +41,7 @@ def test_opencode_memory_injection_smoke_is_bounded_and_non_authorizing():
         validator.validate({**result, "system_context": "private project memory"})
     with pytest.raises(ValidationError):
         validator.validate({**result, "completion_requests": 13})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "task_id": "private-task-id"})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "task_resume_context_injected": False})

@@ -10,6 +10,10 @@ export interface OpenCodeMemoryPluginSettings {
   projectId: string;
   maxItems?: number;
   maxTokens?: number;
+  taskId?: string;
+  sessionId?: string;
+  discoverActiveTask?: boolean;
+  maxTaskEntries?: number;
 }
 
 export type OpenCodePluginChange = 'installed' | 'updated' | 'unchanged' | 'removed' | 'absent';
@@ -74,6 +78,10 @@ export function renderOpenCodePlugin(moduleSpecifier: string, memory?: OpenCodeM
       projectId: memory.projectId,
       maxItems: memory.maxItems ?? 8,
       maxTokens: memory.maxTokens ?? 1600,
+      ...(memory.taskId ? { taskId: memory.taskId } : {}),
+      ...(memory.sessionId ? { sessionId: memory.sessionId } : {}),
+      ...(memory.discoverActiveTask ? { discoverActiveTask: true } : {}),
+      ...((memory.taskId || memory.discoverActiveTask) ? { maxTaskEntries: memory.maxTaskEntries ?? 6 } : {}),
     } });
     return [
       `// ${opencodeManagedMarker}`,
@@ -93,7 +101,7 @@ export function renderOpenCodePlugin(moduleSpecifier: string, memory?: OpenCodeM
 }
 
 function validateMemorySettings(memory: OpenCodeMemoryPluginSettings): void {
-  if (!/^[a-z][a-z0-9-]{0,63}$/.test(memory.projectId)) {
+  if (typeof memory.projectId !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(memory.projectId)) {
     throw new Error('OpenCode memory project ID must match [a-z][a-z0-9-]{0,63}');
   }
   const maxItems = memory.maxItems ?? 8;
@@ -101,6 +109,29 @@ function validateMemorySettings(memory: OpenCodeMemoryPluginSettings): void {
   if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 32 ||
       !Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 16000) {
     throw new Error('OpenCode memory limits must be maxItems 1-32 and maxTokens 1-16000');
+  }
+  const hasTaskId = memory.taskId !== undefined;
+  const hasSessionId = memory.sessionId !== undefined;
+  if (hasTaskId && (typeof memory.taskId !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(memory.taskId))) {
+    throw new Error('OpenCode task ID must match [a-z][a-z0-9-]{0,63}');
+  }
+  if (hasSessionId && (typeof memory.sessionId !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(memory.sessionId))) {
+    throw new Error('OpenCode session ID must match [a-z][a-z0-9-]{0,63}');
+  }
+  if (hasSessionId && !hasTaskId) throw new Error('OpenCode session ID requires an explicit task ID');
+  if (memory.discoverActiveTask !== undefined && typeof memory.discoverActiveTask !== 'boolean') {
+    throw new Error('OpenCode active-task discovery must be a boolean');
+  }
+  if (memory.discoverActiveTask && (hasTaskId || hasSessionId)) {
+    throw new Error('OpenCode task ID and active-task discovery are mutually exclusive');
+  }
+  const hasTaskSelection = hasTaskId || memory.discoverActiveTask === true;
+  if (memory.maxTaskEntries !== undefined && !hasTaskSelection) {
+    throw new Error('OpenCode task-entry limit requires task resume selection');
+  }
+  const maxTaskEntries = memory.maxTaskEntries ?? 6;
+  if (!Number.isInteger(maxTaskEntries) || maxTaskEntries < 1 || maxTaskEntries > 20) {
+    throw new Error('OpenCode task-entry limit must be between 1 and 20');
   }
 }
 

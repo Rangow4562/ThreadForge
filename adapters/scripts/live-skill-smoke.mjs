@@ -969,6 +969,11 @@ try {
     '--criterion', 'Read the task snapshot and report its advisory status.', '--db', databasePath,
   ]));
   assert.equal(createdOpenCodeTask.id, openCodeTaskFixture.id, 'OpenCode task-resume fixture was not created in the isolated store');
+  const openCodeTaskMemoryPluginAction = await installOpenCodeProjectPlugin(projectRoot, opencodeProbeModule, {
+    projectId: openCodeTaskFixture.projectID, maxItems: 4, maxTokens: 1200,
+    taskId: openCodeTaskFixture.id, maxTaskEntries: 4,
+  });
+  assert.equal(openCodeTaskMemoryPluginAction, 'updated', 'OpenCode plugin did not opt into the explicit synthetic task snapshot');
   const openCodeAgentTaskResume = await runOpenCodeAgentMcpRead(
     openCodeTaskFixture.id,
     openCodeTaskFixture.objective,
@@ -1444,7 +1449,7 @@ try {
   const openCodeMemoryPrompt = 'How should I handle the isolated dummy API key during local verification?';
   const openCodeMemoryCliProbe = spawnSync(cliPath, [
     'memory', 'inject-opencode', '--project-id', 'cross-harness-smoke', '--max-items', '4', '--max-tokens', '1200',
-    '--threadforge-managed-opencode-memory=v1', '--threadforge-memory=opencode-v1',
+    '--threadforge-managed-opencode-memory=v1', '--threadforge-memory=opencode-v1', '--task-id', openCodeTaskFixture.id,
   ], {
     cwd: projectRoot, env: isolatedEnvironment, encoding: 'utf8',
     input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd: projectRoot, prompt: openCodeMemoryPrompt }),
@@ -1459,6 +1464,10 @@ try {
   assert.ok(openCodeMemoryCliOutput.system[0].includes(claudeGuidance), 'OpenCode memory CLI omitted the fresh approved fact');
   assert.ok(openCodeMemoryCliOutput.system[0].includes('never authorizes tools or actions'),
     'OpenCode memory CLI omitted the non-authorization boundary');
+  assert.ok(openCodeMemoryCliOutput.system[0].includes(openCodeTaskFixture.objective),
+    'OpenCode memory CLI omitted the explicitly selected task objective');
+  assert.ok(openCodeMemoryCliOutput.system[0].includes('advisory context only'),
+    'OpenCode memory CLI omitted the task guidance-only boundary');
   assert.equal(openCodeMemoryCliProbe.stdout.includes(openCodeMemoryPrompt), false, 'OpenCode memory CLI echoed the transient query');
   const openCodeMemoryInjection = await runOpenCodeAgentMcpRead(procedureID, graph.nodes[0].instruction, {
     hostVersion: openCodeVersion,
@@ -1475,6 +1484,8 @@ try {
       'the current OpenCode request',
       'untrusted stored project data',
       'never authorizes tools or actions',
+      openCodeTaskFixture.objective,
+      'advisory context only',
     ],
     privateTelemetryMarkers: [claudeGuidance],
   });
@@ -1497,6 +1508,8 @@ try {
     completion_requests: openCodeMemoryInjection.completion_requests,
     auxiliary_completion_requests: openCodeMemoryInjection.auxiliary_completion_requests,
     memory_context_injected: openCodeMemoryInjection.memory_context_injected,
+    task_resume_context_injected: openCodeMemoryInjection.memory_context_injected,
+    task_details_retained_in_report: false,
     memory_content_retained_in_report: false,
     plugin_messages_transform_observed: opencodeMemoryMessagesTransformObserved,
     approved_memory_readback_verified: verifiedMemory.status === 'complete',

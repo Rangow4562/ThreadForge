@@ -82,6 +82,33 @@ func TestValidateRetrievalReceiptSeparatesHandlerResultFromExposure(t *testing.T
 	}
 }
 
+func TestValidateProjectMemoryRetrievalReceiptV2CarriesFreshnessAndReadStatus(t *testing.T) {
+	receipt := RetrievalReceipt{
+		SchemaVersion: RetrievalReceiptVersionV2, ID: "retrieval-3123456789abcdef0123456789abcdef",
+		ProjectID: "repo:example", TaskID: "task-1", TargetKind: TargetFact,
+		TargetID: "build-invariant", TargetRevision: 2, Tool: "threadforge_project_memory_read_v2",
+		Freshness: "verified", ResultStatus: "complete", GuidanceIncluded: true,
+		ObservationBoundary: "mcp_handler_result_prepared", CreatedAt: "2025-01-02T12:00:00Z",
+	}
+	if err := ValidateRetrievalReceipt(receipt); err != nil {
+		t.Fatal(err)
+	}
+	receipt.ResultStatus = "incomplete"
+	receipt.Freshness = "unverified"
+	if err := ValidateRetrievalReceipt(receipt); err != nil {
+		t.Fatalf("legacy record returned with an unverified caveat should remain valid: %v", err)
+	}
+	receipt.ResultStatus = "stale"
+	receipt.Freshness = "stale"
+	if err := ValidateRetrievalReceipt(receipt); err == nil {
+		t.Fatal("stale project-memory receipt with included guidance was accepted")
+	}
+	receipt.GuidanceIncluded = false
+	if err := ValidateRetrievalReceipt(receipt); err != nil {
+		t.Fatalf("stale project-memory receipt withholding guidance was rejected: %v", err)
+	}
+}
+
 func TestValidateFilterIsBoundedAndProjectScoped(t *testing.T) {
 	if err := ValidateFilter(Filter{ProjectID: "repo:example", Limit: 50}); err != nil {
 		t.Fatal(err)

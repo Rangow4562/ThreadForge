@@ -17,6 +17,7 @@
       { "$ref": "https://threadforge.invalid/schema/project-memory-v1.schema.json" },
       { "$ref": "https://threadforge.invalid/schema/project-memory-v2.schema.json" }
     ] },
+    "retrieval_receipt": { "$ref": "https://threadforge.dev/schema/memory-retrieval-receipt-v2.schema.json" },
     "gaps": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 512 } },
     "action_ready": { "const": false },
     "guidance_only": { "const": true },

@@ -3646,6 +3646,22 @@ def test_project_memory_mcp_index_and_read_contracts_are_advisory_and_bounded():
         "execution_authorized": False,
     }
     read_validator.validate(read)
+    v1_receipt = {
+        "schema_version": "threadforge.memory-retrieval-receipt.v2",
+        "id": "retrieval-6123456789abcdef0123456789abcdef",
+        "project_id": "sample-project",
+        "task_id": "task-policy-read",
+        "target_kind": "policy",
+        "target_id": "build-policy",
+        "target_revision": 2,
+        "tool": "threadforge_project_memory_read",
+        "freshness": "not_tracked",
+        "result_status": "complete",
+        "guidance_included": True,
+        "observation_boundary": "mcp_handler_result_prepared",
+        "created_at": "2026-10-28T12:00:00Z",
+    }
+    read_validator.validate({**read, "retrieval_receipt": v1_receipt})
     with pytest.raises(ValidationError):
         read_validator.validate({**read, "execution_authorized": True})
     with pytest.raises(ValidationError):
@@ -3709,6 +3725,22 @@ def test_project_memory_v2_binds_source_hashes_and_read_v2_surfaces_freshness():
         "execution_authorized": False,
     }
     validate("project-memory-read-v2.schema.json", read)
+    v2_receipt = {
+        "schema_version": "threadforge.memory-retrieval-receipt.v2",
+        "id": "retrieval-7123456789abcdef0123456789abcdef",
+        "project_id": "sample-project",
+        "task_id": "task-policy-read",
+        "target_kind": "policy",
+        "target_id": "source-bound-policy",
+        "target_revision": 1,
+        "tool": "threadforge_project_memory_read_v2",
+        "freshness": "verified",
+        "result_status": "complete",
+        "guidance_included": True,
+        "observation_boundary": "mcp_handler_result_prepared",
+        "created_at": "2026-10-28T12:00:00Z",
+    }
+    validate("project-memory-read-v2.schema.json", {**read, "retrieval_receipt": v2_receipt})
     stale = {**read, "status": "stale", "freshness": "stale"}
     stale.pop("record")
     stale.pop("revision")

@@ -48,6 +48,17 @@ func TestMemoryFeedbackCLIRecordsAndSummarizesScopedSelfReports(t *testing.T) {
 		database.Close()
 		t.Fatal(err)
 	}
+	receipt := memoryfeedback.RetrievalReceipt{
+		SchemaVersion: memoryfeedback.RetrievalReceiptVersionV2,
+		ID:            "retrieval-8123456789abcdef0123456789abcdef", ProjectID: task.ProjectID, TaskID: task.ID,
+		TargetKind: memoryfeedback.TargetFact, TargetID: "memory-fact", TargetRevision: 1,
+		Tool: "threadforge_project_memory_read_v2", Freshness: "verified", ResultStatus: "complete",
+		GuidanceIncluded: true, ObservationBoundary: "mcp_handler_result_prepared", CreatedAt: stamp,
+	}
+	if _, err := database.RecordMemoryRetrievalReceipt(context.Background(), receipt); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +68,7 @@ func TestMemoryFeedbackCLIRecordsAndSummarizesScopedSelfReports(t *testing.T) {
 		"memory", "feedback", "record", "--project-root", projectRoot, "--project-id", "repo-feedback",
 		"--task-id", "task-feedback", "--target-kind", "fact", "--target-id", "memory-fact",
 		"--target-revision", "1", "--exposure", "used", "--utility", "helpful", "--task-result", "passed",
-		"--harness", "codex-cli", "--db", databasePath,
+		"--harness", "codex-cli", "--retrieval-receipt-id", receipt.ID, "--db", databasePath,
 	}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("record exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -69,6 +80,7 @@ func TestMemoryFeedbackCLIRecordsAndSummarizesScopedSelfReports(t *testing.T) {
 	if recorded.SchemaVersion != memoryfeedback.RecordResultVersion || recorded.Status != "recorded" ||
 		recorded.Feedback.EvidenceClass != memoryfeedback.EvidenceSelfReported || recorded.Feedback.CutoverEvidenceEligible ||
 		recorded.Feedback.ExecutionAuthorized || recorded.Feedback.TargetRevision != 1 ||
+		recorded.Feedback.RetrievalReceiptID != receipt.ID ||
 		strings.Contains(stdout.String(), "Use the repository wrapper") {
 		t.Fatalf("unexpected feedback result: %s", stdout.String())
 	}
@@ -99,6 +111,7 @@ func TestMemoryFeedbackCLIRecordsAndSummarizesScopedSelfReports(t *testing.T) {
 		t.Fatal(err)
 	}
 	if summary.Status != "complete" || summary.Records != 1 || len(summary.Groups) != 1 ||
+		summary.RetrievalReceiptLinked != 1 ||
 		summary.Groups[0].TargetID != "memory-fact" || summary.Groups[0].Utility != memoryfeedback.UtilityHelpful ||
 		summary.Groups[0].TaskResult != "passed" || summary.Groups[0].Count != 1 || summary.CutoverEvidenceEligible {
 		t.Fatalf("unexpected summary: %s", stdout.String())

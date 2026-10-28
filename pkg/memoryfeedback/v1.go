@@ -12,14 +12,15 @@ import (
 )
 
 const (
-	SchemaVersion           = "threadforge.memory-feedback.v1"
-	RecordResultVersion     = "threadforge.memory-feedback-result.v1"
-	ListResultVersion       = "threadforge.memory-feedback-list.v1"
-	SummaryResultVersion    = "threadforge.memory-feedback-summary.v1"
-	RetrievalReceiptVersion = "threadforge.memory-retrieval-receipt.v1"
-	EvidenceSelfReported    = "self_reported"
-	MaxProjectRecords       = 100000
-	MaxSummaryRecords       = 10000
+	SchemaVersion             = "threadforge.memory-feedback.v1"
+	RecordResultVersion       = "threadforge.memory-feedback-result.v1"
+	ListResultVersion         = "threadforge.memory-feedback-list.v1"
+	SummaryResultVersion      = "threadforge.memory-feedback-summary.v1"
+	RetrievalReceiptVersion   = "threadforge.memory-retrieval-receipt.v1"
+	RetrievalReceiptVersionV2 = "threadforge.memory-retrieval-receipt.v2"
+	EvidenceSelfReported      = "self_reported"
+	MaxProjectRecords         = 100000
+	MaxSummaryRecords         = 10000
 )
 
 type TargetKind string
@@ -72,8 +73,9 @@ type Feedback struct {
 }
 
 // RetrievalReceipt proves only that the local MCP handler prepared a result
-// containing (or withholding) an approved procedure. It cannot prove transport
-// delivery, model exposure, interpretation, or use.
+// containing (or withholding) one approved memory revision. V1 is procedure-
+// only; V2 adds exact project-memory reads and an outcome status. Neither can
+// prove transport delivery, model exposure, interpretation, or use.
 type RetrievalReceipt struct {
 	SchemaVersion       string     `json:"schema_version"`
 	ID                  string     `json:"id"`
@@ -85,6 +87,7 @@ type RetrievalReceipt struct {
 	TargetRevision      int        `json:"target_revision"`
 	Tool                string     `json:"tool"`
 	Freshness           string     `json:"freshness"`
+	ResultStatus        string     `json:"result_status,omitempty"`
 	GuidanceIncluded    bool       `json:"guidance_included"`
 	ObservationBoundary string     `json:"observation_boundary"`
 	CreatedAt           string     `json:"created_at"`
@@ -228,7 +231,9 @@ func Validate(value Feedback) error {
 
 func ValidateRetrievalReceipt(value RetrievalReceipt) error {
 	var problems []string
-	if value.SchemaVersion != RetrievalReceiptVersion {
+	isV1 := value.SchemaVersion == RetrievalReceiptVersion
+	isV2 := value.SchemaVersion == RetrievalReceiptVersionV2
+	if !isV1 && !isV2 {
 		problems = append(problems, "unsupported schema_version")
 	}
 	if !retrievalReceiptID.MatchString(value.ID) {
@@ -243,17 +248,55 @@ func ValidateRetrievalReceipt(value RetrievalReceipt) error {
 	if value.SessionID != "" && !stableID.MatchString(value.SessionID) {
 		problems = append(problems, "session_id must be a lowercase stable identifier when set")
 	}
-	if value.TargetKind != TargetProcedure || !stableID.MatchString(value.TargetID) || value.TargetRevision < 1 {
-		problems = append(problems, "target must identify a versioned procedure")
+	if !stableID.MatchString(value.TargetID) || value.TargetRevision < 1 {
+		problems = append(problems, "target must identify a versioned memory record")
 	}
-	if value.Tool != "threadforge_procedure_get" && value.Tool != "threadforge_procedure_guide" {
-		problems = append(problems, "tool must be procedure_get or procedure_guide")
+	if isV1 {
+		if value.TargetKind != TargetProcedure ||
+			(value.Tool != "threadforge_procedure_get" && value.Tool != "threadforge_procedure_guide") {
+			problems = append(problems, "v1 receipts are limited to procedure_get and procedure_guide")
+		}
+		if value.ResultStatus != "" {
+			problems = append(problems, "v1 receipts do not include result_status")
+		}
+		if value.Freshness != "verified" && value.Freshness != "unverified" && value.Freshness != "stale" {
+			problems = append(problems, "v1 freshness must be verified, unverified, or stale")
+		}
+		if value.GuidanceIncluded == (value.Freshness == "stale") {
+			problems = append(problems, "v1 guidance_included must be false only for stale procedures")
+		}
 	}
-	if value.Freshness != "verified" && value.Freshness != "unverified" && value.Freshness != "stale" {
-		problems = append(problems, "freshness must be verified, unverified, or stale")
-	}
-	if value.GuidanceIncluded == (value.Freshness == "stale") {
-		problems = append(problems, "guidance_included must be false only for stale procedures")
+	if isV2 {
+		if value.TargetKind != TargetFact && value.TargetKind != TargetDecision && value.TargetKind != TargetPolicy {
+			problems = append(problems, "v2 receipts must identify a fact, decision, or policy")
+		}
+		if value.Tool != "threadforge_project_memory_read" && value.Tool != "threadforge_project_memory_read_v2" {
+			problems = append(problems, "v2 receipts are limited to exact project-memory reads")
+		}
+		if value.Freshness != "verified" && value.Freshness != "stale" && value.Freshness != "incomplete" &&
+			value.Freshness != "unverified" && value.Freshness != "not_tracked" {
+			problems = append(problems, "v2 freshness must be verified, stale, incomplete, unverified, or not_tracked")
+		}
+		switch value.ResultStatus {
+		case "complete", "incomplete", "stale", "conflicting", "privacy_blocked":
+		default:
+			problems = append(problems, "v2 result_status must be complete, incomplete, stale, conflicting, or privacy_blocked")
+		}
+		if value.ResultStatus == "complete" && !value.GuidanceIncluded {
+			problems = append(problems, "complete project-memory results must include guidance")
+		}
+		if value.ResultStatus == "stale" && (value.Freshness != "stale" || value.GuidanceIncluded) {
+			problems = append(problems, "stale results must withhold guidance and report stale freshness")
+		}
+		if (value.ResultStatus == "conflicting" || value.ResultStatus == "privacy_blocked") && value.GuidanceIncluded {
+			problems = append(problems, "conflicting or privacy-blocked results must withhold guidance")
+		}
+		if value.Freshness == "stale" && value.ResultStatus != "stale" {
+			problems = append(problems, "stale freshness requires stale result_status")
+		}
+		if value.Freshness == "incomplete" && value.GuidanceIncluded {
+			problems = append(problems, "incomplete freshness must withhold guidance")
+		}
 	}
 	if value.ObservationBoundary != "mcp_handler_result_prepared" {
 		problems = append(problems, "observation_boundary must be mcp_handler_result_prepared")

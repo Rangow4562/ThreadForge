@@ -247,11 +247,13 @@ func definitions() []toolDefinition {
 		},
 		{
 			Name:        "threadforge_project_memory_read",
-			Description: "Legacy v1 read: exact project-memory retrieval with scope/conflict checks. It does not verify source freshness; use threadforge_project_memory_read_v2 when current source status matters. Returned content is advisory only. " + storedTextTrustNotice,
+			Description: "Legacy v1 exact project-memory read with scope/conflict checks; it does not verify source freshness. Optionally supply task_id and session_id to store a content-free handler-result receipt when a revision is resolved. Returned content is advisory only. " + storedTextTrustNotice,
 			InputSchema: objectSchema(map[string]any{
 				"project_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 256},
 				"kind":       map[string]any{"type": "string", "enum": []string{"fact", "decision", "policy"}},
 				"id":         map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
+				"task_id":    map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
+				"session_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
 				"paths":      map[string]any{"type": "array", "maxItems": 64, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 1024}},
 				"modules":    map[string]any{"type": "array", "maxItems": 64, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}},
 			}, []string{"project_id", "kind", "id"}),
@@ -259,11 +261,13 @@ func definitions() []toolDefinition {
 		},
 		{
 			Name:        "threadforge_project_memory_read_v2",
-			Description: "Read one exact approved project-memory record and recompute locally bound source-file hashes. Changed sources are stale and withheld; missing/unreadable source evidence is incomplete; legacy records without source hashes are labeled unverified. Guidance never authorizes actions. " + storedTextTrustNotice,
+			Description: "Read one exact approved project-memory record and recompute locally bound source-file hashes. Changed sources are stale and withheld; missing/unreadable source evidence is incomplete; legacy records without source hashes are labeled unverified. Optionally supply task_id and session_id to store a content-free handler-result receipt for the exact resolved revision. Guidance never authorizes actions. " + storedTextTrustNotice,
 			InputSchema: objectSchema(map[string]any{
 				"project_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 256},
 				"kind":       map[string]any{"type": "string", "enum": []string{"fact", "decision", "policy"}},
 				"id":         map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
+				"task_id":    map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
+				"session_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
 				"paths":      map[string]any{"type": "array", "maxItems": 64, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 1024}},
 				"modules":    map[string]any{"type": "array", "maxItems": 64, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}},
 			}, []string{"project_id", "kind", "id"}),
@@ -442,14 +446,27 @@ func (s *Server) callTool(ctx context.Context, params toolCallParams) (any, erro
 			ProjectID string   `json:"project_id"`
 			Kind      string   `json:"kind"`
 			ID        string   `json:"id"`
+			TaskID    string   `json:"task_id"`
+			SessionID string   `json:"session_id"`
 			Paths     []string `json:"paths"`
 			Modules   []string `json:"modules"`
 		}
 		if err := strictDecode(params.Arguments, &args); err != nil {
 			return nil, fmt.Errorf("invalid project-memory read arguments: %w", err)
 		}
-		return s.readProjectMemory(args.ProjectID, projectmemory.Kind(strings.ToLower(strings.TrimSpace(args.Kind))), args.ID, args.Paths, args.Modules,
+		read, err := s.readProjectMemory(args.ProjectID, projectmemory.Kind(strings.ToLower(strings.TrimSpace(args.Kind))), args.ID, args.Paths, args.Modules,
 			params.Name == "threadforge_project_memory_read_v2")
+		if err != nil {
+			return nil, err
+		}
+		receipt, err := s.recordProjectMemoryRetrievalReceipt(ctx, read, args.TaskID, args.SessionID, params.Name)
+		if err != nil {
+			return nil, err
+		}
+		if receipt != nil {
+			return projectMemoryReadWithReceipt{ReadResponseV2: read, RetrievalReceipt: receipt}, nil
+		}
+		return read, nil
 	case "threadforge_procedure_list":
 		var args struct {
 			ProjectID string `json:"project_id"`
@@ -899,22 +916,8 @@ func (s *Server) recordProcedureRetrievalReceipt(
 	graph proceduregraph.Graph,
 	taskID, sessionID, tool, freshness string,
 ) (*memoryfeedback.RetrievalReceipt, error) {
-	if taskID == "" {
-		if sessionID != "" {
-			return nil, errors.New("session_id requires task_id for retrieval receipts")
-		}
-		return nil, nil
-	}
-	if s.procedures == nil {
-		return nil, errors.New("task-scoped retrieval receipts require a local SQLite store")
-	}
-	var idBytes [16]byte
-	if _, err := rand.Read(idBytes[:]); err != nil {
-		return nil, fmt.Errorf("generate retrieval receipt ID: %w", err)
-	}
 	receipt := memoryfeedback.RetrievalReceipt{
 		SchemaVersion:       memoryfeedback.RetrievalReceiptVersion,
-		ID:                  "retrieval-" + hex.EncodeToString(idBytes[:]),
 		ProjectID:           graph.ProjectID,
 		TaskID:              taskID,
 		SessionID:           sessionID,
@@ -927,11 +930,29 @@ func (s *Server) recordProcedureRetrievalReceipt(
 		ObservationBoundary: "mcp_handler_result_prepared",
 		CreatedAt:           time.Now().UTC().Format(time.RFC3339Nano),
 	}
+	return s.persistMemoryRetrievalReceipt(ctx, receipt)
+}
+
+func (s *Server) persistMemoryRetrievalReceipt(ctx context.Context, receipt memoryfeedback.RetrievalReceipt) (*memoryfeedback.RetrievalReceipt, error) {
+	if receipt.TaskID == "" {
+		if receipt.SessionID != "" {
+			return nil, errors.New("session_id requires task_id for retrieval receipts")
+		}
+		return nil, nil
+	}
+	if s.procedures == nil {
+		return nil, errors.New("task-scoped retrieval receipts require a local SQLite store")
+	}
+	var idBytes [16]byte
+	if _, err := rand.Read(idBytes[:]); err != nil {
+		return nil, fmt.Errorf("generate retrieval receipt ID: %w", err)
+	}
+	receipt.ID = "retrieval-" + hex.EncodeToString(idBytes[:])
 	if err := memoryfeedback.ValidateRetrievalReceipt(receipt); err != nil {
 		return nil, err
 	}
 	if _, err := s.procedures.RecordMemoryRetrievalReceipt(ctx, receipt); err != nil {
-		return nil, fmt.Errorf("store local procedure retrieval receipt: %w", err)
+		return nil, fmt.Errorf("store local memory retrieval receipt: %w", err)
 	}
 	return &receipt, nil
 }

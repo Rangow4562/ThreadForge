@@ -138,3 +138,34 @@ def test_memory_retrieval_receipt_schema_is_scoped_and_does_not_claim_delivery()
     ):
         with pytest.raises(ValidationError):
             validator.validate(invalid)
+
+
+def test_memory_retrieval_receipt_v2_records_project_memory_read_status():
+    receipt = {
+        "schema_version": "threadforge.memory-retrieval-receipt.v2",
+        "id": "retrieval-5123456789abcdef0123456789abcdef",
+        "project_id": "repo:example",
+        "task_id": "task-123",
+        "session_id": "session-123",
+        "target_kind": "fact",
+        "target_id": "build-invariant",
+        "target_revision": 2,
+        "tool": "threadforge_project_memory_read_v2",
+        "freshness": "verified",
+        "result_status": "complete",
+        "guidance_included": True,
+        "observation_boundary": "mcp_handler_result_prepared",
+        "created_at": "2026-10-28T12:00:00Z",
+    }
+    validator = _validator("memory-retrieval-receipt-v2.schema.json")
+    validator.validate(receipt)
+    validator.validate({**receipt, "freshness": "stale", "result_status": "stale", "guidance_included": False})
+    validator.validate({**receipt, "freshness": "unverified", "result_status": "incomplete"})
+    for invalid in (
+        {**receipt, "freshness": "stale"},
+        {**receipt, "result_status": "conflicting"},
+        {**receipt, "guidance_included": False},
+        {**receipt, "record": {"content": "memory body"}},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)

@@ -45,7 +45,7 @@ func recordMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 	projectID := fs.String("project-id", "", "exact project scope shared with the task and memory")
 	taskID := fs.String("task-id", "", "existing Threadforge task associated with this report")
 	sessionID := fs.String("session-id", "", "optional session belonging to the task")
-	retrievalReceiptID := fs.String("retrieval-receipt-id", "", "optional local MCP handler-result receipt returned with procedure guidance")
+	retrievalReceiptID := fs.String("retrieval-receipt-id", "", "optional local MCP handler-result receipt returned with memory guidance")
 	targetKind := fs.String("target-kind", "", "approved memory kind: procedure, fact, decision, or policy")
 	targetID := fs.String("target-id", "", "stable identifier of the approved memory revision")
 	targetRevision := fs.Int("target-revision", 0, "exact approved memory revision referenced by the report")

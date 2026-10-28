@@ -1,13 +1,16 @@
 package mcp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/threadforge-ai/threadforge/internal/projectfiles"
+	"github.com/threadforge-ai/threadforge/pkg/memoryfeedback"
 	"github.com/threadforge-ai/threadforge/pkg/privacy"
 	"github.com/threadforge-ai/threadforge/pkg/proceduregraph"
 	"github.com/threadforge-ai/threadforge/pkg/projectmemory"
@@ -52,6 +55,11 @@ type projectMemoryIndexResponse struct {
 }
 
 type projectMemoryReadResponse = projectmemory.ReadResponseV2
+
+type projectMemoryReadWithReceipt struct {
+	projectmemory.ReadResponseV2
+	RetrievalReceipt *memoryfeedback.RetrievalReceipt `json:"retrieval_receipt,omitempty"`
+}
 
 func (s *Server) indexProjectMemory(projectID string, kind projectmemory.Kind, limit, offset int) (projectMemoryIndexResponse, error) {
 	if strings.TrimSpace(projectID) == "" || len(projectID) > 256 || privacy.ContainsCredentialText(projectID) {
@@ -234,6 +242,39 @@ func (s *Server) readProjectMemory(projectID string, kind projectmemory.Kind, id
 	response.Status = "complete"
 	response.Record = &record
 	return response, nil
+}
+
+func (s *Server) recordProjectMemoryRetrievalReceipt(
+	ctx context.Context,
+	read projectMemoryReadResponse,
+	taskID, sessionID, tool string,
+) (*memoryfeedback.RetrievalReceipt, error) {
+	if taskID == "" {
+		return s.persistMemoryRetrievalReceipt(ctx, memoryfeedback.RetrievalReceipt{SessionID: sessionID})
+	}
+	if s.procedures == nil {
+		return nil, errors.New("task-scoped retrieval receipts require a local SQLite store")
+	}
+	if read.Revision < 1 {
+		return nil, nil
+	}
+	if read.Record != nil && (read.Record.ProjectID != read.ProjectID || read.Record.ID != read.ID ||
+		read.Record.Kind != read.Kind || read.Record.Revision != read.Revision || read.Record.Status != "approved") {
+		return nil, errors.New("project-memory read did not return the exact approved target revision")
+	}
+	freshness := read.Freshness
+	if freshness == "not_tracked_by_project_memory_v1" {
+		freshness = "not_tracked"
+	}
+	receipt := memoryfeedback.RetrievalReceipt{
+		SchemaVersion: memoryfeedback.RetrievalReceiptVersionV2,
+		ProjectID:     read.ProjectID, TaskID: taskID, SessionID: sessionID,
+		TargetKind: memoryfeedback.TargetKind(read.Kind), TargetID: read.ID, TargetRevision: read.Revision,
+		Tool: tool, Freshness: freshness, ResultStatus: read.Status,
+		GuidanceIncluded: read.Record != nil, ObservationBoundary: "mcp_handler_result_prepared",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	return s.persistMemoryRetrievalReceipt(ctx, receipt)
 }
 
 func sameProjectMemoryIndex(record projectmemory.Record, entry projectfiles.IndexEntry) bool {

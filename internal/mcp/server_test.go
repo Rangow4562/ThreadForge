@@ -846,6 +846,158 @@ func TestMCPProcedureRetrievalReceiptBindsTaskAndWithholdsStaleGuidance(t *testi
 	}
 }
 
+func TestMCPProjectMemoryReadsReturnTaskScopedVersion2Receipts(t *testing.T) {
+	root := t.TempDir()
+	database, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	memory, err := projectfiles.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	task := continuity.Task{
+		SchemaVersion: continuity.SchemaVersion, ID: "task-memory-read", ProjectID: "repo-memory-read", Owner: "local-user",
+		Title: "Read approved project memory", Objective: "Check task-bound project memory receipts",
+		AcceptanceCriteria: []string{"Receipt binds the exact read revision and freshness"}, Status: continuity.TaskOpen,
+		Revision: 1, CreatedAt: stamp, UpdatedAt: stamp,
+	}
+	if err := database.CreateTask(ctx, task, "local-user", "create project-memory read task"); err != nil {
+		t.Fatal(err)
+	}
+	session := continuity.Session{
+		SchemaVersion: continuity.SchemaVersion, ID: "session-memory-read", ProjectID: task.ProjectID,
+		TaskID: task.ID, Harness: "codex-cli", Status: continuity.SessionActive, Revision: 1,
+		StartedAt: stamp, UpdatedAt: stamp,
+	}
+	if err := database.StartSession(ctx, session, "local-user", "start project-memory read session"); err != nil {
+		t.Fatal(err)
+	}
+	legacyCandidate := projectmemory.Candidate{
+		SchemaVersion: projectmemory.SchemaVersion, ID: "legacy-memory-fact", ProjectID: task.ProjectID,
+		Kind: projectmemory.KindFact, Title: "Legacy approved fact", Content: json.RawMessage(`{"fact":"bounded legacy guidance"}`),
+		Evidence: []projectmemory.Evidence{{Origin: "human", ContentSHA256: strings.Repeat("a", 64), Redacted: true}},
+	}
+	if _, err := memory.Publish(legacyCandidate, 0, "reviewer", "approved legacy fact", true, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(root, "docs", "source.md")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("verified source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fingerprints, err := procedurefiles.FingerprintSources(root, []string{"docs/source.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceCandidate := projectmemory.Candidate{
+		SchemaVersion: projectmemory.SchemaVersionV2, ID: "source-memory-fact", ProjectID: task.ProjectID,
+		Kind: projectmemory.KindFact, Title: "Source-bound fact", Content: json.RawMessage(`{"fact":"fresh source guidance"}`),
+		Evidence: []projectmemory.Evidence{{Origin: "document", ContentSHA256: strings.Repeat("b", 64), Redacted: true,
+			SourceFiles: []projectmemory.SourceFile{{Path: fingerprints[0].Path, SHA256: fingerprints[0].SHA256}}}},
+	}
+	if _, err := memory.Publish(sourceCandidate, 0, "reviewer", "approved source-bound fact", true, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	server := NewWithProjectStores(database, memory, nil, root)
+	callRead := func(tool, memoryID, sessionID, taskID string) (projectMemoryReadResponse, memoryfeedback.RetrievalReceipt, string, error) {
+		t.Helper()
+		arguments, err := json.Marshal(map[string]string{
+			"project_id": task.ProjectID, "kind": "fact", "id": memoryID,
+			"task_id": taskID, "session_id": sessionID,
+		})
+		if err != nil {
+			return projectMemoryReadResponse{}, memoryfeedback.RetrievalReceipt{}, "", err
+		}
+		value, err := server.callTool(ctx, toolCallParams{Name: tool, Arguments: arguments})
+		if err != nil {
+			return projectMemoryReadResponse{}, memoryfeedback.RetrievalReceipt{}, "", err
+		}
+		data, err := json.Marshal(value)
+		if err != nil {
+			return projectMemoryReadResponse{}, memoryfeedback.RetrievalReceipt{}, "", err
+		}
+		var read projectMemoryReadResponse
+		if err := json.Unmarshal(data, &read); err != nil {
+			return projectMemoryReadResponse{}, memoryfeedback.RetrievalReceipt{}, "", err
+		}
+		var envelope struct {
+			Receipt memoryfeedback.RetrievalReceipt `json:"retrieval_receipt"`
+		}
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			return projectMemoryReadResponse{}, memoryfeedback.RetrievalReceipt{}, "", err
+		}
+		return read, envelope.Receipt, string(data), nil
+	}
+
+	legacyRead, legacyReceipt, legacyJSON, err := callRead("threadforge_project_memory_read_v2", legacyCandidate.ID, session.ID, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyReceiptJSON, err := json.Marshal(legacyReceipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyRead.Status != "incomplete" || legacyRead.Freshness != "unverified" || legacyRead.Record == nil ||
+		legacyReceipt.SchemaVersion != memoryfeedback.RetrievalReceiptVersionV2 || legacyReceipt.Tool != "threadforge_project_memory_read_v2" ||
+		legacyReceipt.TargetKind != memoryfeedback.TargetFact || legacyReceipt.TargetID != legacyCandidate.ID ||
+		legacyReceipt.TargetRevision != legacyRead.Record.Revision || legacyReceipt.SessionID != session.ID ||
+		legacyReceipt.Freshness != "unverified" || legacyReceipt.ResultStatus != "incomplete" || !legacyReceipt.GuidanceIncluded ||
+		!strings.Contains(legacyJSON, "retrieval_receipt") || strings.Contains(string(legacyReceiptJSON), "bounded legacy guidance") {
+		t.Fatalf("legacy project-memory receipt lost its exact scope or freshness caveat: %s", legacyJSON)
+	}
+	feedback := memoryfeedback.Feedback{
+		SchemaVersion: memoryfeedback.SchemaVersion, ID: "memory-feedback-3123456789abcdef0123456789abcdef",
+		ProjectID: task.ProjectID, TaskID: task.ID, SessionID: session.ID, RetrievalReceiptID: legacyReceipt.ID,
+		TargetKind: memoryfeedback.TargetFact, TargetID: legacyCandidate.ID, TargetRevision: legacyReceipt.TargetRevision,
+		Exposure: memoryfeedback.ExposureUsed, Utility: memoryfeedback.UtilityHelpful, TaskResult: "passed",
+		Harness: "codex-cli", Actor: "local-user", EvidenceClass: memoryfeedback.EvidenceSelfReported, CreatedAt: stamp,
+	}
+	if _, err := database.RecordMemoryFeedback(ctx, feedback); err != nil {
+		t.Fatalf("feedback did not accept its matching project-memory receipt: %v", err)
+	}
+	legacyV1Read, legacyV1Receipt, legacyV1JSON, err := callRead("threadforge_project_memory_read", legacyCandidate.ID, session.ID, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyV1Read.Status != "complete" || legacyV1Read.Freshness != "not_tracked_by_project_memory_v1" ||
+		legacyV1Receipt.SchemaVersion != memoryfeedback.RetrievalReceiptVersionV2 || legacyV1Receipt.Tool != "threadforge_project_memory_read" ||
+		legacyV1Receipt.Freshness != "not_tracked" || legacyV1Receipt.ResultStatus != "complete" || !legacyV1Receipt.GuidanceIncluded ||
+		!strings.Contains(legacyV1JSON, "retrieval_receipt") {
+		t.Fatalf("legacy project-memory read did not return a not-tracked v2 receipt: %s", legacyV1JSON)
+	}
+
+	if err := os.WriteFile(sourcePath, []byte("changed source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	staleRead, staleReceipt, staleJSON, err := callRead("threadforge_project_memory_read_v2", sourceCandidate.ID, "", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if staleRead.Status != "stale" || staleRead.Freshness != "stale" || staleRead.Record != nil ||
+		staleReceipt.ResultStatus != "stale" || staleReceipt.Freshness != "stale" || staleReceipt.GuidanceIncluded ||
+		strings.Contains(staleJSON, "fresh source guidance") {
+		t.Fatalf("stale project-memory receipt did not record withheld guidance: %s", staleJSON)
+	}
+
+	foreignTask := task
+	foreignTask.ID = "task-memory-foreign"
+	foreignTask.ProjectID = "repo-other"
+	foreignTask.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	foreignTask.UpdatedAt = foreignTask.CreatedAt
+	if err := database.CreateTask(ctx, foreignTask, "local-user", "create foreign project-memory task"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := callRead("threadforge_project_memory_read", legacyCandidate.ID, "", foreignTask.ID); err == nil {
+		t.Fatal("project-memory receipt with a foreign task/project scope was accepted")
+	}
+}
+
 func TestMCPProjectRootFingerprintsSourcesAndIgnoresCallerClaims(t *testing.T) {
 	root := t.TempDir()
 	sourcePath := filepath.Join(root, "src", "app.go")

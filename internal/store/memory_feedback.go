@@ -13,7 +13,7 @@ import (
 )
 
 // RecordMemoryRetrievalReceipt appends a local-only record that binds one
-// procedure response to an existing task in the same project. The receipt
+// memory response to an existing task in the same project. The receipt
 // describes the MCP handler result, not client delivery or model exposure.
 func (s *Store) RecordMemoryRetrievalReceipt(ctx context.Context, receipt memoryfeedback.RetrievalReceipt) (int64, error) {
 	if err := memoryfeedback.ValidateRetrievalReceipt(receipt); err != nil {

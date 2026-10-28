@@ -1,5 +1,5 @@
 /**
- * Create content-minimizing per-call telemetry settings for Vercel AI SDK v7.
+ * Create content-minimizing per-call telemetry settings for Vercel AI SDK v7.0.114+.
  * The application registers its telemetry integration and configures any
  * OpenTelemetry provider/exporter; this helper performs no global setup.
  */

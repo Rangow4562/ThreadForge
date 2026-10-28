@@ -963,6 +963,64 @@ test('adapter CLI installs Gemini project memory independently and preserves MCP
     result = await invoke(['gemini', 'memory', 'update', '--project-root', root, '--command', command]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'unchanged');
+
+    const explicitTaskResult = await invoke([
+      'gemini', 'memory', 'update', '--project-root', root, '--command', command,
+      '--task-id', 'gemini-task', '--session-id', 'gemini-session', '--max-task-entries', '3',
+    ]);
+    assert.equal(explicitTaskResult.code, 0, explicitTaskResult.stderr);
+    const explicitTaskCommand = command.replace(
+      '--threadforge-memory=gemini-v1',
+      '--task-id gemini-task --session-id gemini-session --max-task-entries 3 --threadforge-memory=gemini-v1',
+    );
+    next = JSON.parse(await readFile(settingsPath, 'utf8'));
+    assert.equal(next.hooks.BeforeAgent[1].hooks[0].command, explicitTaskCommand);
+
+    result = await invoke([
+      'gemini', 'memory', 'update', '--project-root', root, '--command', command, '--discover-active-task',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    const discoveryCommand = command.replace(
+      '--threadforge-memory=gemini-v1',
+      '--discover-active-task --max-task-entries 6 --threadforge-memory=gemini-v1',
+    );
+    next = JSON.parse(await readFile(settingsPath, 'utf8'));
+    assert.equal(next.hooks.BeforeAgent[1].hooks[0].command, discoveryCommand);
+
+    const quotedMarkerDecoy = `echo '--threadforge-memory=gemini-v1' && ${command}`;
+    result = await invoke([
+      'gemini', 'memory', 'update', '--project-root', root, '--command', quotedMarkerDecoy,
+      '--task-id', 'gemini-task',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    const actualMarkerIndex = quotedMarkerDecoy.lastIndexOf('--threadforge-memory=gemini-v1');
+    const expectedAfterQuotedDecoy = `${quotedMarkerDecoy.slice(0, actualMarkerIndex)}--task-id gemini-task --max-task-entries 6 ${quotedMarkerDecoy.slice(actualMarkerIndex)}`;
+    next = JSON.parse(await readFile(settingsPath, 'utf8'));
+    assert.equal(next.hooks.BeforeAgent[1].hooks[0].command, expectedAfterQuotedDecoy);
+
+    const beforeInvalidOptions = await readFile(settingsPath, 'utf8');
+    for (const [invalidOptions, expectedError] of [
+      [['--task-id', 'gemini-task', '--discover-active-task'], /mutually exclusive/],
+      [['--session-id', 'gemini-session'], /requires --task-id/],
+      [['--task-id', 'Gemini/Task'], /--task-id must match/],
+      [['--discover-active-task', '--max-task-entries', '21'], /between 1 and 20/],
+      [['--max-task-entries', '3'], /requires --task-id or --discover-active-task/],
+    ] as const) {
+      result = await invoke([
+        'gemini', 'memory', 'update', '--project-root', root, '--command', command, ...invalidOptions,
+      ]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, expectedError);
+    }
+    assert.equal(await readFile(settingsPath, 'utf8'), beforeInvalidOptions);
+    result = await invoke([
+      'gemini', 'memory', 'update', '--project-root', root,
+      '--command', `${command} --task-id gemini-manual-task`, '--discover-active-task',
+    ]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /already contains task-resume options/);
+    assert.equal(await readFile(settingsPath, 'utf8'), beforeInvalidOptions);
+
     result = await invoke(['gemini', 'memory', 'uninstall', '--project-root', root]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'removed');

@@ -1422,8 +1422,9 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       else if (host === 'codex-cli') result = await removeCodexTelemetry();
       else throw new Error('unsupported telemetry host');
     } else if (family === 'gemini' && geminiSubsystem === 'memory' && (action === 'install' || action === 'update')) {
-      rejectUnexpected(options, ['project-root', 'command']);
-      result = await installGeminiProjectMemoryHook(projectRoot, required(options, 'command'));
+      rejectUnexpected(options, ['project-root', 'command', 'task-id', 'session-id', 'max-task-entries'], [], ['discover-active-task']);
+      result = await installGeminiProjectMemoryHook(projectRoot,
+        taskAwareMemoryHookCommand(options, 'Gemini', '--threadforge-memory=gemini-v1'));
       warning = 'Gemini BeforeAgent adds approved project memory as guidance only; review Gemini project trust, and Threadforge does not change trust or telemetry settings.';
     } else if (family === 'gemini' && geminiSubsystem === 'memory' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
@@ -1576,7 +1577,9 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
     } else if (family === 'qwen' && qwenSubsystem === 'memory' && (action === 'install' || action === 'update')) {
       rejectUnexpected(options, ['scope', 'project-root', 'command', 'task-id', 'session-id', 'max-task-entries'], [], ['discover-active-task']);
       if (options.values.get('scope') !== 'project') throw new Error('Qwen memory requires explicit --scope project');
-      result = await installQwenProjectMemoryHook({ command: qwenMemoryHookCommand(options), projectRoot });
+      result = await installQwenProjectMemoryHook({
+        command: taskAwareMemoryHookCommand(options, 'Qwen', '--threadforge-memory=qwen-v1'), projectRoot,
+      });
       warning = 'Qwen UserPromptExpansion adds approved memory and optionally selected task context as advisory guidance; project hooks require trusted-folder approval, and Threadforge does not change trust.';
     } else if (family === 'qwen' && qwenSubsystem === 'memory' && action === 'uninstall') {
       rejectUnexpected(options, ['scope', 'project-root']);
@@ -1717,7 +1720,7 @@ function required(options: ParsedOptions, key: string): string {
   return value;
 }
 
-function qwenMemoryHookCommand(options: ParsedOptions): string {
+function taskAwareMemoryHookCommand(options: ParsedOptions, host: 'Gemini' | 'Qwen', runtimeMarker: string): string {
   const command = required(options, 'command');
   const taskId = options.values.get('task-id');
   const sessionId = options.values.get('session-id');
@@ -1736,7 +1739,7 @@ function qwenMemoryHookCommand(options: ParsedOptions): string {
   }
   if (!hasTaskSelection) return command;
   if (/(?:^|\s|["'])--(?:task-id|session-id|discover-active-task|max-task-entries)(?=$|\s|["'=])/.test(command)) {
-    throw new Error('Qwen memory command already contains task-resume options; choose either command arguments or installer options');
+    throw new Error(`${host} memory command already contains task-resume options; choose either command arguments or installer options`);
   }
   const maxTaskEntries = Number(options.values.get('max-task-entries') ?? 6);
   if (!Number.isInteger(maxTaskEntries) || maxTaskEntries < 1 || maxTaskEntries > 20) {
@@ -1744,10 +1747,12 @@ function qwenMemoryHookCommand(options: ParsedOptions): string {
   }
   const selected = taskId === undefined ? '--discover-active-task' : `--task-id ${taskId}`;
   const session = sessionId === undefined ? '' : ` --session-id ${sessionId}`;
-  const runtimeMarker = '--threadforge-memory=qwen-v1';
-  const runtimeMarkers = [...command.matchAll(/(?:^|\s)--threadforge-memory=qwen-v1(?=$|\s)/g)];
-  if (runtimeMarkers.length !== 1) throw new Error('Qwen task selection requires exactly one unquoted Threadforge memory runtime marker');
-  const markerIndex = command.indexOf(runtimeMarker);
+  const runtimeMarkers = [...command.matchAll(new RegExp(`(?:^|\\s)${runtimeMarker}(?=$|\\s)`, 'g'))];
+  const runtimeMarkerMatch = runtimeMarkers[0];
+  if (runtimeMarkers.length !== 1 || !runtimeMarkerMatch) {
+    throw new Error(`${host} task selection requires exactly one unquoted Threadforge memory runtime marker`);
+  }
+  const markerIndex = (runtimeMarkerMatch.index ?? 0) + runtimeMarkerMatch[0].lastIndexOf(runtimeMarker);
   const selection = `${selected}${session} --max-task-entries ${maxTaskEntries} `;
   return `${command.slice(0, markerIndex)}${selection}${command.slice(markerIndex)}`;
 }
@@ -1937,7 +1942,7 @@ function usage(): string {
     '  npm run adapter -- codex memory uninstall --project-root <absolute-path>',
     '  npm run adapter -- codex plan-gate install|update --project-root <absolute-path> --command <threadforge-deny-only-plan-gate-command-with-markers>',
     '  npm run adapter -- codex plan-gate uninstall --project-root <absolute-path>',
-    '  npm run adapter -- gemini memory install|update --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers>',
+    '  npm run adapter -- gemini memory install|update --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers> [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]',
     '  npm run adapter -- gemini memory uninstall --project-root <absolute-path>',
     '  npm run adapter -- gemini plan-gate install|update --project-root <absolute-path> --command <threadforge-deny-only-plan-gate-command-with-markers>',
     '  npm run adapter -- gemini plan-gate uninstall --project-root <absolute-path>',

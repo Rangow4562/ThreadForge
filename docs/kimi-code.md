@@ -18,6 +18,18 @@ Prompt text, tool arguments/results, paths, diffs, task descriptions, and approv
 
 The TOML updater validates the structure it edits and fails closed on inline `hooks` values, unsupported hook fields, malformed strings, and unbalanced arrays/inline tables. It caps config at 8 MiB, rejects symlink paths, locks and atomically replaces changes, and preserves config file modes. Adapter tests cover mapper privacy, event/tool/approval behavior, loopback delivery, byte preservation, install/update/uninstall, conflicts, invalid TOML, symlinks, locks, and size limits.
 
+## Project-scoped MCP
+
+Kimi Code's project-level MCP config is `.kimi-code/mcp.json`, using the standard `mcpServers` object. Threadforge manages only `mcpServers.threadforge` and binds it to the selected project root:
+
+```powershell
+npm.cmd --prefix adapters run adapter -- mcp install --host kimi-code --project-root <absolute-project-path> --command <threadforge-executable> --arg mcp --arg serve --arg --project-root --arg <absolute-project-path>
+npm.cmd --prefix adapters run adapter -- mcp update --host kimi-code --project-root <absolute-project-path> --command <threadforge-executable> --arg mcp --arg serve --arg --project-root --arg <absolute-project-path>
+npm.cmd --prefix adapters run adapter -- mcp uninstall --host kimi-code --project-root <absolute-project-path>
+```
+
+The manager writes only `command` and `args`, includes the Threadforge ownership marker, preserves sibling entries, and rejects credential-like values. It does not set workspace trust or Kimi permission options; Kimi Code may require the user to trust the project before loading its project MCP config. The Kimi CLI is unavailable in this environment, so config discovery and MCP tool retrieval are not live-verified. See Kimi Code's official [MCP documentation](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/mcp.html).
+
 ## Approved project procedure skills
 
 Kimi Code documents project-level skills in `.kimi-code/skills/<name>/SKILL.md` (and also recognizes the shared `.agents/skills/` directory). Threadforge provides an explicit project-scoped installer for the native path:

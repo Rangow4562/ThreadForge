@@ -12,13 +12,13 @@
     "hosts": {
       "type": "array",
       "minItems": 1,
-      "maxItems": 12,
+      "maxItems": 13,
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["host", "config_path", "action"],
         "properties": {
-          "host": { "enum": ["claude-code", "command-code", "github-copilot", "qoder", "cursor", "antigravity", "gemini-cli", "qwen-code", "codex-cli", "chatgpt-desktop-codex", "codex-ide", "opencode"] },
+          "host": { "enum": ["claude-code", "command-code", "github-copilot", "qoder", "kimi-code", "cursor", "antigravity", "gemini-cli", "qwen-code", "codex-cli", "chatgpt-desktop-codex", "codex-ide", "opencode"] },
           "config_path": { "type": "string", "minLength": 1, "maxLength": 128 },
           "action": { "const": "install_or_match" }
         }

@@ -25,6 +25,7 @@ def test_project_bootstrap_plan_is_explicit_and_non_mutating():
             {"host": "command-code", "config_path": ".mcp.json", "action": "install_or_match"},
             {"host": "github-copilot", "config_path": ".mcp.json", "action": "install_or_match"},
             {"host": "qoder", "config_path": ".mcp.json", "action": "install_or_match"},
+            {"host": "kimi-code", "config_path": ".kimi-code/mcp.json", "action": "install_or_match"},
             {"host": "qwen-code", "config_path": ".qwen/settings.json", "action": "install_or_match"},
             {"host": "chatgpt-desktop-codex", "config_path": ".codex/config.toml", "action": "install_or_match"},
             {"host": "codex-ide", "config_path": ".codex/config.toml", "action": "install_or_match"},
@@ -53,6 +54,7 @@ def test_project_bootstrap_result_exposes_partial_effects_and_denies_authority()
             {"host": "claude-code", "config_path": ".mcp.json", "result": "installed"},
             {"host": "github-copilot", "config_path": ".mcp.json", "result": "unchanged"},
             {"host": "qoder", "config_path": ".mcp.json", "result": "unchanged"},
+            {"host": "kimi-code", "config_path": ".kimi-code/mcp.json", "result": "unchanged"},
             {"host": "qwen-code", "config_path": ".qwen/settings.json", "result": "installed"},
             {
                 "host": "cursor",

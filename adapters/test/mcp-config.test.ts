@@ -33,6 +33,7 @@ test('uses project-local config paths for supported MCP hosts', () => {
   assert.equal(projectMcpConfigPath(root, 'command-code'), path.join(root, '.mcp.json'));
   assert.equal(projectMcpConfigPath(root, 'github-copilot'), path.join(root, '.mcp.json'));
   assert.equal(projectMcpConfigPath(root, 'qoder'), path.join(root, '.mcp.json'));
+  assert.equal(projectMcpConfigPath(root, 'kimi-code'), path.join(root, '.kimi-code', 'mcp.json'));
   assert.equal(projectMcpConfigPath(root, 'cursor'), path.join(root, '.cursor', 'mcp.json'));
   assert.equal(projectMcpConfigPath(root, 'antigravity'), path.join(root, '.agents', 'mcp_config.json'));
   assert.equal(projectMcpConfigPath(root, 'gemini-cli'), path.join(root, '.gemini', 'settings.json'));
@@ -101,6 +102,34 @@ test('Qoder project MCP shares .mcp.json and preserves neighboring server entrie
       ...qoderServer, command: 'threadforge-next',
     }), 'updated');
     assert.equal(await removeManagedProjectMcpServer(root, 'qoder', 'threadforge'), 'removed');
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), original);
+  });
+});
+
+test('Kimi Code project MCP uses its native project file and rejects credential-like config', async () => {
+  await withProject(async (root) => {
+    const file = projectMcpConfigPath(root, 'kimi-code');
+    const original = { mcpServers: { analytics: { command: 'analytics', args: ['serve'] } }, projectSetting: true };
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify(original, null, 2));
+    const kimiServer: McpServerConfig = {
+      command: 'threadforge', args: ['mcp', 'serve', '--project-root', root, managedMcpArgument],
+    };
+
+    assert.equal(await installProjectMcpServer(root, 'kimi-code', 'threadforge', kimiServer), 'installed');
+    assert.equal(await installProjectMcpServer(root, 'kimi-code', 'threadforge', kimiServer), 'unchanged');
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), {
+      ...original,
+      mcpServers: { ...original.mcpServers, threadforge: kimiServer },
+    });
+    await assert.rejects(installProjectMcpServer(root, 'kimi-code', 'other', { ...kimiServer, cwd: root }), /only accepts command and args/);
+    await assert.rejects(installProjectMcpServer(root, 'kimi-code', 'other', {
+      ...kimiServer, args: [...kimiServer.args, 'api_key=fixture-secret'],
+    }), /credential-like/);
+    assert.equal(await updateManagedProjectMcpServer(root, 'kimi-code', 'threadforge', {
+      ...kimiServer, command: 'threadforge-next',
+    }), 'updated');
+    assert.equal(await removeManagedProjectMcpServer(root, 'kimi-code', 'threadforge'), 'removed');
     assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), original);
   });
 });

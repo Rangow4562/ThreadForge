@@ -18,6 +18,7 @@ export const projectMcpHosts = {
   'command-code': '.mcp.json',
   'github-copilot': '.mcp.json',
   qoder: '.mcp.json',
+  'kimi-code': path.join('.kimi-code', 'mcp.json'),
   cursor: path.join('.cursor', 'mcp.json'),
   antigravity: path.join('.agents', 'mcp_config.json'),
   'gemini-cli': path.join('.gemini', 'settings.json'),
@@ -294,11 +295,12 @@ function validateServerForHost(host: ProjectMcpHost, value: McpServerConfig): vo
   if (host === 'gemini-cli' && value.trust !== false) {
     throw new Error('Gemini MCP config must explicitly set trust to false');
   }
-  if ((host === 'qwen-code' || host === 'qoder') && Object.keys(value).some((key) => key !== 'command' && key !== 'args')) {
+  if ((host === 'qwen-code' || host === 'qoder' || host === 'kimi-code') &&
+      Object.keys(value).some((key) => key !== 'command' && key !== 'args')) {
     throw new Error(`${host} project MCP config only accepts command and args; Threadforge does not set trust, cwd, or environment`);
   }
-  if (host === 'qoder' && [value.command, ...value.args].some(looksCredentialLikeMcpValue)) {
-    throw new Error('Qoder project MCP values must not contain credential-like text');
+  if ((host === 'qoder' || host === 'kimi-code') && [value.command, ...value.args].some(looksCredentialLikeMcpValue)) {
+    throw new Error(`${host} project MCP values must not contain credential-like text`);
   }
 }
 

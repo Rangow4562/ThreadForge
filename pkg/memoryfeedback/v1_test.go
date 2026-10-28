@@ -55,6 +55,33 @@ func TestValidateShownMemoryCanBeMarkedNotUsed(t *testing.T) {
 	}
 }
 
+func TestValidateRetrievalReceiptSeparatesHandlerResultFromExposure(t *testing.T) {
+	receipt := RetrievalReceipt{
+		SchemaVersion: RetrievalReceiptVersion, ID: "retrieval-0123456789abcdef0123456789abcdef",
+		ProjectID: "repo:example", TaskID: "task-1", TargetKind: TargetProcedure,
+		TargetID: "build-recovery", TargetRevision: 2, Tool: "threadforge_procedure_get",
+		Freshness: "verified", GuidanceIncluded: true, ObservationBoundary: "mcp_handler_result_prepared",
+		CreatedAt: "2025-01-02T12:00:00Z",
+	}
+	if err := ValidateRetrievalReceipt(receipt); err != nil {
+		t.Fatal(err)
+	}
+	receipt.Freshness = "stale"
+	if err := ValidateRetrievalReceipt(receipt); err == nil {
+		t.Fatal("stale receipt claiming included guidance was accepted")
+	}
+	receipt.Freshness = "verified"
+	receipt.GuidanceIncluded = false
+	if err := ValidateRetrievalReceipt(receipt); err == nil {
+		t.Fatal("verified receipt claiming withheld guidance was accepted")
+	}
+	receipt.GuidanceIncluded = true
+	receipt.ID = "not-a-retrieval-receipt"
+	if err := ValidateRetrievalReceipt(receipt); err == nil {
+		t.Fatal("non-random receipt identifier was accepted")
+	}
+}
+
 func TestValidateFilterIsBoundedAndProjectScoped(t *testing.T) {
 	if err := ValidateFilter(Filter{ProjectID: "repo:example", Limit: 50}); err != nil {
 		t.Fatal(err)

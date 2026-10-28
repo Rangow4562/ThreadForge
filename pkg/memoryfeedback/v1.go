@@ -12,13 +12,14 @@ import (
 )
 
 const (
-	SchemaVersion        = "threadforge.memory-feedback.v1"
-	RecordResultVersion  = "threadforge.memory-feedback-result.v1"
-	ListResultVersion    = "threadforge.memory-feedback-list.v1"
-	SummaryResultVersion = "threadforge.memory-feedback-summary.v1"
-	EvidenceSelfReported = "self_reported"
-	MaxProjectRecords    = 100000
-	MaxSummaryRecords    = 10000
+	SchemaVersion           = "threadforge.memory-feedback.v1"
+	RecordResultVersion     = "threadforge.memory-feedback-result.v1"
+	ListResultVersion       = "threadforge.memory-feedback-list.v1"
+	SummaryResultVersion    = "threadforge.memory-feedback-summary.v1"
+	RetrievalReceiptVersion = "threadforge.memory-retrieval-receipt.v1"
+	EvidenceSelfReported    = "self_reported"
+	MaxProjectRecords       = 100000
+	MaxSummaryRecords       = 10000
 )
 
 type TargetKind string
@@ -55,6 +56,7 @@ type Feedback struct {
 	ProjectID               string     `json:"project_id"`
 	TaskID                  string     `json:"task_id"`
 	SessionID               string     `json:"session_id,omitempty"`
+	RetrievalReceiptID      string     `json:"retrieval_receipt_id,omitempty"`
 	TargetKind              TargetKind `json:"target_kind"`
 	TargetID                string     `json:"target_id"`
 	TargetRevision          int        `json:"target_revision"`
@@ -67,6 +69,25 @@ type Feedback struct {
 	CutoverEvidenceEligible bool       `json:"cutover_evidence_eligible"`
 	ExecutionAuthorized     bool       `json:"execution_authorized"`
 	CreatedAt               string     `json:"created_at"`
+}
+
+// RetrievalReceipt proves only that the local MCP handler prepared a result
+// containing (or withholding) an approved procedure. It cannot prove transport
+// delivery, model exposure, interpretation, or use.
+type RetrievalReceipt struct {
+	SchemaVersion       string     `json:"schema_version"`
+	ID                  string     `json:"id"`
+	ProjectID           string     `json:"project_id"`
+	TaskID              string     `json:"task_id"`
+	SessionID           string     `json:"session_id,omitempty"`
+	TargetKind          TargetKind `json:"target_kind"`
+	TargetID            string     `json:"target_id"`
+	TargetRevision      int        `json:"target_revision"`
+	Tool                string     `json:"tool"`
+	Freshness           string     `json:"freshness"`
+	GuidanceIncluded    bool       `json:"guidance_included"`
+	ObservationBoundary string     `json:"observation_boundary"`
+	CreatedAt           string     `json:"created_at"`
 }
 
 type Filter struct {
@@ -114,6 +135,7 @@ type SummaryResult struct {
 	Status                  string         `json:"status"`
 	ProjectID               string         `json:"project_id"`
 	Records                 int            `json:"records"`
+	RetrievalReceiptLinked  int            `json:"retrieval_receipt_linked"`
 	Groups                  []SummaryGroup `json:"groups"`
 	EvidenceClass           string         `json:"evidence_class"`
 	CutoverEvidenceEligible bool           `json:"cutover_evidence_eligible"`
@@ -121,6 +143,7 @@ type SummaryResult struct {
 }
 
 var stableID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
+var retrievalReceiptID = regexp.MustCompile(`^retrieval-[a-f0-9]{32}$`)
 
 func Validate(value Feedback) error {
 	var problems []string
@@ -138,6 +161,9 @@ func Validate(value Feedback) error {
 	}
 	if value.SessionID != "" && !stableID.MatchString(value.SessionID) {
 		problems = append(problems, "session_id must be a lowercase stable identifier when set")
+	}
+	if value.RetrievalReceiptID != "" && !retrievalReceiptID.MatchString(value.RetrievalReceiptID) {
+		problems = append(problems, "retrieval_receipt_id must be a valid local receipt ID when set")
 	}
 	switch value.TargetKind {
 	case TargetProcedure, TargetFact, TargetDecision, TargetPolicy:
@@ -188,9 +214,56 @@ func Validate(value Feedback) error {
 	if _, err := time.Parse(time.RFC3339Nano, value.CreatedAt); err != nil {
 		problems = append(problems, "created_at must use RFC3339")
 	}
-	for _, field := range []string{value.ID, value.ProjectID, value.TaskID, value.SessionID, string(value.TargetKind), value.TargetID, string(value.Exposure), string(value.Utility), value.TaskResult, value.Harness, value.Actor} {
+	for _, field := range []string{value.ID, value.ProjectID, value.TaskID, value.SessionID, value.RetrievalReceiptID, string(value.TargetKind), value.TargetID, string(value.Exposure), string(value.Utility), value.TaskResult, value.Harness, value.Actor} {
 		if privacy.ContainsCredentialText(field) {
 			problems = append(problems, "feedback contains credential material")
+			break
+		}
+	}
+	if len(problems) != 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+func ValidateRetrievalReceipt(value RetrievalReceipt) error {
+	var problems []string
+	if value.SchemaVersion != RetrievalReceiptVersion {
+		problems = append(problems, "unsupported schema_version")
+	}
+	if !retrievalReceiptID.MatchString(value.ID) {
+		problems = append(problems, "id must be a valid local receipt ID")
+	}
+	if !bounded(value.ProjectID, 256) {
+		problems = append(problems, "project_id must contain 1 to 256 characters")
+	}
+	if !stableID.MatchString(value.TaskID) {
+		problems = append(problems, "task_id must be a lowercase stable identifier")
+	}
+	if value.SessionID != "" && !stableID.MatchString(value.SessionID) {
+		problems = append(problems, "session_id must be a lowercase stable identifier when set")
+	}
+	if value.TargetKind != TargetProcedure || !stableID.MatchString(value.TargetID) || value.TargetRevision < 1 {
+		problems = append(problems, "target must identify a versioned procedure")
+	}
+	if value.Tool != "threadforge_procedure_get" && value.Tool != "threadforge_procedure_guide" {
+		problems = append(problems, "tool must be procedure_get or procedure_guide")
+	}
+	if value.Freshness != "verified" && value.Freshness != "unverified" && value.Freshness != "stale" {
+		problems = append(problems, "freshness must be verified, unverified, or stale")
+	}
+	if value.GuidanceIncluded == (value.Freshness == "stale") {
+		problems = append(problems, "guidance_included must be false only for stale procedures")
+	}
+	if value.ObservationBoundary != "mcp_handler_result_prepared" {
+		problems = append(problems, "observation_boundary must be mcp_handler_result_prepared")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, value.CreatedAt); err != nil {
+		problems = append(problems, "created_at must use RFC3339")
+	}
+	for _, field := range []string{value.ID, value.ProjectID, value.TaskID, value.SessionID, string(value.TargetKind), value.TargetID, value.Tool, value.Freshness, value.ObservationBoundary} {
+		if privacy.ContainsCredentialText(field) {
+			problems = append(problems, "retrieval receipt contains credential material")
 			break
 		}
 	}

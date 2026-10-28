@@ -12,6 +12,83 @@ import (
 	"github.com/threadforge-ai/threadforge/pkg/memoryfeedback"
 )
 
+// RecordMemoryRetrievalReceipt appends a local-only record that binds one
+// procedure response to an existing task in the same project. The receipt
+// describes the MCP handler result, not client delivery or model exposure.
+func (s *Store) RecordMemoryRetrievalReceipt(ctx context.Context, receipt memoryfeedback.RetrievalReceipt) (int64, error) {
+	if err := memoryfeedback.ValidateRetrievalReceipt(receipt); err != nil {
+		return 0, err
+	}
+	payload, err := json.Marshal(receipt)
+	if err != nil {
+		return 0, err
+	}
+	var sequence int64
+	err = s.withTx(ctx, func(tx *sql.Tx) error {
+		task, err := readTask(ctx, tx, receipt.TaskID)
+		if err != nil {
+			return err
+		}
+		if task.ProjectID != receipt.ProjectID {
+			return errors.New("memory retrieval receipt project_id does not match its task")
+		}
+		if receipt.SessionID != "" {
+			session, err := readSession(ctx, tx, receipt.SessionID)
+			if err != nil {
+				return err
+			}
+			if session.TaskID != receipt.TaskID || session.ProjectID != receipt.ProjectID {
+				return errors.New("memory retrieval receipt session does not belong to its task and project")
+			}
+		}
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_retrieval_receipts WHERE project_id = ?`, receipt.ProjectID).Scan(&count); err != nil {
+			return err
+		}
+		if count >= memoryfeedback.MaxProjectRecords {
+			return fmt.Errorf("project memory retrieval receipt limit reached (%d)", memoryfeedback.MaxProjectRecords)
+		}
+		result, err := tx.ExecContext(ctx,
+			`INSERT INTO memory_retrieval_receipts(id, project_id, task_id, target_id, target_revision, created_at, receipt_json)
+			 VALUES(?, ?, ?, ?, ?, ?, ?)`, receipt.ID, receipt.ProjectID, receipt.TaskID,
+			receipt.TargetID, receipt.TargetRevision, receipt.CreatedAt, string(payload))
+		if err != nil {
+			return fmt.Errorf("append memory retrieval receipt: %w", err)
+		}
+		sequence, err = result.LastInsertId()
+		return err
+	})
+	return sequence, err
+}
+
+func validateMemoryFeedbackReceipt(ctx context.Context, tx *sql.Tx, feedback memoryfeedback.Feedback) error {
+	if feedback.RetrievalReceiptID == "" {
+		return nil
+	}
+	var payload string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT receipt_json FROM memory_retrieval_receipts WHERE id = ? AND project_id = ? AND task_id = ?`,
+		feedback.RetrievalReceiptID, feedback.ProjectID, feedback.TaskID).Scan(&payload); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("memory retrieval receipt was not found in the same project and task")
+		}
+		return err
+	}
+	var receipt memoryfeedback.RetrievalReceipt
+	if err := decodeStrictJSON(payload, &receipt); err != nil {
+		return fmt.Errorf("decode memory retrieval receipt: %w", err)
+	}
+	if err := memoryfeedback.ValidateRetrievalReceipt(receipt); err != nil {
+		return fmt.Errorf("validate memory retrieval receipt: %w", err)
+	}
+	if receipt.ID != feedback.RetrievalReceiptID || receipt.ProjectID != feedback.ProjectID || receipt.TaskID != feedback.TaskID ||
+		receipt.SessionID != feedback.SessionID || receipt.TargetKind != feedback.TargetKind || receipt.TargetID != feedback.TargetID ||
+		receipt.TargetRevision != feedback.TargetRevision || !receipt.GuidanceIncluded {
+		return errors.New("memory retrieval receipt does not match the reported task, session, and approved memory revision")
+	}
+	return nil
+}
+
 // RecordMemoryFeedback appends a local-only, task-scoped report. It validates
 // task and optional session ownership in the same transaction as the insert.
 func (s *Store) RecordMemoryFeedback(ctx context.Context, feedback memoryfeedback.Feedback) (int64, error) {
@@ -39,6 +116,9 @@ func (s *Store) RecordMemoryFeedback(ctx context.Context, feedback memoryfeedbac
 			if session.TaskID != feedback.TaskID || session.ProjectID != feedback.ProjectID {
 				return errors.New("memory feedback session does not belong to its task and project")
 			}
+		}
+		if err := validateMemoryFeedbackReceipt(ctx, tx, feedback); err != nil {
+			return err
 		}
 		var count int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_feedback_events WHERE project_id = ?`, feedback.ProjectID).Scan(&count); err != nil {
@@ -120,6 +200,9 @@ func (s *Store) ListMemoryFeedback(ctx context.Context, filter memoryfeedback.Fi
 			feedback.TargetRevision != revision || feedback.Harness != harness || feedback.CreatedAt != createdAt {
 			return nil, 0, errors.New("stored memory feedback index does not match its validated payload")
 		}
+		if err := validateMemoryFeedbackReceipt(ctx, tx, feedback); err != nil {
+			return nil, 0, fmt.Errorf("validate linked memory retrieval receipt: %w", err)
+		}
 		items = append(items, feedback)
 	}
 	if err := rows.Err(); err != nil {
@@ -173,6 +256,7 @@ func (s *Store) SummarizeMemoryFeedback(ctx context.Context, projectID string, m
 	}
 	groups := make(map[groupKey]int)
 	var scanned int
+	var receiptLinked int
 	truncated := false
 	for rows.Next() {
 		var sequence int64
@@ -197,9 +281,16 @@ func (s *Store) SummarizeMemoryFeedback(ctx context.Context, projectID string, m
 			_ = rows.Close()
 			return memoryfeedback.SummaryResult{}, errors.New("stored memory feedback index does not match its validated payload")
 		}
+		if err := validateMemoryFeedbackReceipt(ctx, tx, feedback); err != nil {
+			_ = rows.Close()
+			return memoryfeedback.SummaryResult{}, fmt.Errorf("validate linked memory retrieval receipt: %w", err)
+		}
 		groups[groupKey{kind: string(feedback.TargetKind), id: feedback.TargetID, revision: feedback.TargetRevision,
 			harness: feedback.Harness, exposure: string(feedback.Exposure), utility: string(feedback.Utility),
 			taskResult: feedback.TaskResult}]++
+		if feedback.RetrievalReceiptID != "" {
+			receiptLinked++
+		}
 		scanned++
 	}
 	if err := rows.Err(); err != nil {
@@ -216,6 +307,7 @@ func (s *Store) SummarizeMemoryFeedback(ctx context.Context, projectID string, m
 		return memoryfeedback.SummaryResult{}, err
 	}
 	result.Records = scanned
+	result.RetrievalReceiptLinked = receiptLinked
 	if truncated {
 		result.Status = "truncated"
 	}

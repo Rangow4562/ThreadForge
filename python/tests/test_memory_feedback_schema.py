@@ -51,6 +51,7 @@ def _validator(name):
 def test_memory_feedback_schema_is_typed_and_non_authorizing():
     validator = _validator("memory-feedback-v1.schema.json")
     validator.validate(_feedback())
+    validator.validate({**_feedback(), "retrieval_receipt_id": "retrieval-0123456789abcdef0123456789abcdef"})
 
     shown_not_used = {**_feedback(), "exposure": "shown_not_used", "utility": "not_assessed"}
     validator.validate(shown_not_used)
@@ -60,6 +61,7 @@ def test_memory_feedback_schema_is_typed_and_non_authorizing():
         {**_feedback(), "execution_authorized": True},
         {**_feedback(), "evidence_class": "verified"},
         {**_feedback(), "exposure": "shown_not_used", "utility": "helpful"},
+        {**_feedback(), "retrieval_receipt_id": "../receipt"},
         {**_feedback(), "prompt": "raw prompt must not be stored"},
     ]
     for value in invalid:
@@ -91,6 +93,7 @@ def test_memory_feedback_result_list_and_summary_schemas_validate():
             "status": "complete",
             "project_id": "repo:example",
             "records": 1,
+            "retrieval_receipt_linked": 0,
             "groups": [
                 {
                     "target_kind": "procedure",
@@ -108,3 +111,30 @@ def test_memory_feedback_result_list_and_summary_schemas_validate():
             "execution_authorized": False,
         }
     )
+
+
+def test_memory_retrieval_receipt_schema_is_scoped_and_does_not_claim_delivery():
+    receipt = {
+        "schema_version": "threadforge.memory-retrieval-receipt.v1",
+        "id": "retrieval-0123456789abcdef0123456789abcdef",
+        "project_id": "repo:example",
+        "task_id": "task-123",
+        "target_kind": "procedure",
+        "target_id": "build-recovery",
+        "target_revision": 2,
+        "tool": "threadforge_procedure_get",
+        "freshness": "verified",
+        "guidance_included": True,
+        "observation_boundary": "mcp_handler_result_prepared",
+        "created_at": "2026-10-28T12:00:00Z",
+    }
+    validator = _validator("memory-retrieval-receipt-v1.schema.json")
+    validator.validate(receipt)
+    validator.validate({**receipt, "freshness": "stale", "guidance_included": False})
+    for invalid in (
+        {**receipt, "freshness": "stale"},
+        {**receipt, "delivered_to_model": True},
+        {**receipt, "procedure_body": "private instructions"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)

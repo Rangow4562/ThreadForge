@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -288,7 +289,7 @@ func TestSchemaUpgradeFromV1AndRejectsNewerDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.Exec(`PRAGMA user_version = 13`); err != nil {
+	if _, err := raw.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, CurrentSchemaVersion+1)); err != nil {
 		t.Fatal(err)
 	}
 	if err := raw.Close(); err != nil {

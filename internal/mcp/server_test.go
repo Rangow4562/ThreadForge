@@ -17,6 +17,7 @@ import (
 	"github.com/threadforge-ai/threadforge/internal/projectfiles"
 	"github.com/threadforge-ai/threadforge/internal/store"
 	"github.com/threadforge-ai/threadforge/pkg/continuity"
+	"github.com/threadforge-ai/threadforge/pkg/memoryfeedback"
 	"github.com/threadforge-ai/threadforge/pkg/proceduregraph"
 	"github.com/threadforge-ai/threadforge/pkg/projectmemory"
 	"github.com/threadforge-ai/threadforge/pkg/teamauth"
@@ -777,6 +778,71 @@ func TestMCPProcedureReadsSurfaceFreshnessAndWithholdStaleGuidance(t *testing.T)
 	duplicateArgs := `{"procedure_id":"freshness-proc","path_fingerprints":[` + matched + `,` + matched + `]}`
 	if _, err := server.callTool(context.Background(), toolCallParams{Name: "threadforge_procedure_get", Arguments: json.RawMessage(duplicateArgs)}); err == nil {
 		t.Fatal("duplicate path fingerprints were accepted")
+	}
+}
+
+func TestMCPProcedureRetrievalReceiptBindsTaskAndWithholdsStaleGuidance(t *testing.T) {
+	procedures, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer procedures.Close()
+	graph := addApprovedProcedureWithSources(t, procedures, "receipt-procedure", []proceduregraph.PathFingerprint{
+		{Path: "src/app.go", SHA256: strings.Repeat("a", 64)},
+	})
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	task := continuity.Task{
+		SchemaVersion: continuity.SchemaVersion, ID: "task-receipt-mcp", ProjectID: graph.ProjectID, Owner: "local-user",
+		Title: "Use approved build guidance", Objective: "Check handler receipt scope",
+		AcceptanceCriteria: []string{"Receipt binds one exact approved revision"}, Status: continuity.TaskOpen,
+		Revision: 1, CreatedAt: stamp, UpdatedAt: stamp,
+	}
+	if err := procedures.CreateTask(context.Background(), task, "local-user", "create MCP receipt test task"); err != nil {
+		t.Fatal(err)
+	}
+	server := New(procedures)
+	call := func(arguments string) (memoryfeedback.RetrievalReceipt, string, error) {
+		t.Helper()
+		value, callErr := server.callTool(context.Background(), toolCallParams{
+			Name: "threadforge_procedure_get", Arguments: json.RawMessage(arguments),
+		})
+		if callErr != nil {
+			return memoryfeedback.RetrievalReceipt{}, "", callErr
+		}
+		data, err := json.Marshal(value)
+		if err != nil {
+			return memoryfeedback.RetrievalReceipt{}, "", err
+		}
+		var result struct {
+			Receipt memoryfeedback.RetrievalReceipt `json:"retrieval_receipt"`
+		}
+		if err := json.Unmarshal(data, &result); err != nil {
+			return memoryfeedback.RetrievalReceipt{}, "", err
+		}
+		return result.Receipt, string(data), nil
+	}
+	verifiedArgs := `{"procedure_id":"receipt-procedure","task_id":"task-receipt-mcp","path_fingerprints":[{"path":"src/app.go","sha256":"` + strings.Repeat("a", 64) + `"}]}`
+	receipt, response, err := call(verifiedArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.ID == "" || receipt.ProjectID != graph.ProjectID || receipt.TaskID != task.ID ||
+		receipt.TargetID != graph.ID || receipt.TargetRevision != graph.Revision || receipt.Tool != "threadforge_procedure_get" ||
+		receipt.Freshness != "verified" || !receipt.GuidanceIncluded ||
+		receipt.ObservationBoundary != "mcp_handler_result_prepared" ||
+		strings.Contains(response, "model_exposure_confirmed") || strings.Contains(response, "delivery_confirmed") {
+		t.Fatalf("receipt overstated or lost handler-result provenance: %s", response)
+	}
+	staleArgs := `{"procedure_id":"receipt-procedure","task_id":"task-receipt-mcp","path_fingerprints":[{"path":"src/app.go","sha256":"` + strings.Repeat("b", 64) + `"}]}`
+	stale, staleResponse, err := call(staleArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale.Freshness != "stale" || stale.GuidanceIncluded || strings.Contains(staleResponse, "Run go test ./... before merging.") {
+		t.Fatalf("stale receipt did not reflect withheld guidance: %s", staleResponse)
+	}
+	if _, _, err := call(`{"procedure_id":"receipt-procedure","task_id":"missing-task"}`); err == nil {
+		t.Fatal("retrieval receipt for an unknown task was accepted")
 	}
 }
 

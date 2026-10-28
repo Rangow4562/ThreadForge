@@ -11,6 +11,7 @@
     "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
     "task_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
     "session_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "retrieval_receipt_id": { "type": "string", "pattern": "^retrieval-[a-f0-9]{32}$" },
     "target_kind": { "enum": ["procedure", "fact", "decision", "policy"] },
     "target_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
     "target_revision": { "type": "integer", "minimum": 1 },

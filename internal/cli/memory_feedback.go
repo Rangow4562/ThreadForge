@@ -45,6 +45,7 @@ func recordMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 	projectID := fs.String("project-id", "", "exact project scope shared with the task and memory")
 	taskID := fs.String("task-id", "", "existing Threadforge task associated with this report")
 	sessionID := fs.String("session-id", "", "optional session belonging to the task")
+	retrievalReceiptID := fs.String("retrieval-receipt-id", "", "optional local MCP handler-result receipt returned with procedure guidance")
 	targetKind := fs.String("target-kind", "", "approved memory kind: procedure, fact, decision, or policy")
 	targetID := fs.String("target-id", "", "stable identifier of the approved memory revision")
 	targetRevision := fs.Int("target-revision", 0, "exact approved memory revision referenced by the report")
@@ -61,7 +62,7 @@ func recordMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 		strings.TrimSpace(*targetKind) == "" || strings.TrimSpace(*targetID) == "" || *targetRevision < 1 ||
 		strings.TrimSpace(*exposure) == "" || strings.TrimSpace(*utility) == "" || strings.TrimSpace(*taskResult) == "" ||
 		strings.TrimSpace(*harness) == "" || strings.TrimSpace(*actor) == "" || fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory feedback record --project-root <absolute-root> --project-id <id> --task-id <id> [--session-id <id>] --target-kind <procedure|fact|decision|policy> --target-id <id> --target-revision <n> --exposure <used|shown_not_used> --utility <helpful|neutral|harmful|not_assessed> --task-result <passed|failed|inconclusive> --harness <id> [--actor local-user] [--db <path>]")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory feedback record --project-root <absolute-root> --project-id <id> --task-id <id> [--session-id <id>] [--retrieval-receipt-id <id>] --target-kind <procedure|fact|decision|policy> --target-id <id> --target-revision <n> --exposure <used|shown_not_used> --utility <helpful|neutral|harmful|not_assessed> --task-result <passed|failed|inconclusive> --harness <id> [--actor local-user] [--db <path>]")
 		return 2
 	}
 	feedbackID, err := newMemoryFeedbackID()
@@ -72,7 +73,8 @@ func recordMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 	feedback := memoryfeedback.Feedback{
 		SchemaVersion: memoryfeedback.SchemaVersion,
 		ID:            feedbackID, ProjectID: *projectID, TaskID: *taskID, SessionID: *sessionID,
-		TargetKind: memoryfeedback.TargetKind(*targetKind), TargetID: *targetID, TargetRevision: *targetRevision,
+		RetrievalReceiptID: *retrievalReceiptID,
+		TargetKind:         memoryfeedback.TargetKind(*targetKind), TargetID: *targetID, TargetRevision: *targetRevision,
 		Exposure: memoryfeedback.Exposure(*exposure), Utility: memoryfeedback.Utility(*utility), TaskResult: *taskResult,
 		Harness: *harness, Actor: *actor, EvidenceClass: memoryfeedback.EvidenceSelfReported,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),

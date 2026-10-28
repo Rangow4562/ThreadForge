@@ -41,7 +41,7 @@ var (
 	ErrRecoveryStaged                = errors.New("database is a staged recovery and cannot be used as an active store")
 )
 
-const CurrentSchemaVersion = 13
+const CurrentSchemaVersion = 14
 
 type Store struct {
 	db             *sql.DB
@@ -571,7 +571,23 @@ func (s *Store) initialize(ctx context.Context) error {
 			ON memory_feedback_events(project_id, task_id, sequence)`,
 		`CREATE TRIGGER IF NOT EXISTS memory_feedback_events_no_update BEFORE UPDATE ON memory_feedback_events BEGIN SELECT RAISE(ABORT, 'memory feedback is append-only'); END`,
 		`CREATE TRIGGER IF NOT EXISTS memory_feedback_events_no_delete BEFORE DELETE ON memory_feedback_events BEGIN SELECT RAISE(ABORT, 'memory feedback is append-only'); END`,
-		`PRAGMA user_version = 13`,
+		`CREATE TABLE IF NOT EXISTS memory_retrieval_receipts (
+			sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+			id TEXT NOT NULL UNIQUE,
+			project_id TEXT NOT NULL,
+			task_id TEXT NOT NULL REFERENCES continuity_tasks(id),
+			target_id TEXT NOT NULL,
+			target_revision INTEGER NOT NULL,
+			created_at TEXT NOT NULL,
+			receipt_json TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS memory_retrieval_project_target
+			ON memory_retrieval_receipts(project_id, target_id, target_revision, sequence)`,
+		`CREATE INDEX IF NOT EXISTS memory_retrieval_project_task
+			ON memory_retrieval_receipts(project_id, task_id, sequence)`,
+		`CREATE TRIGGER IF NOT EXISTS memory_retrieval_receipts_no_update BEFORE UPDATE ON memory_retrieval_receipts BEGIN SELECT RAISE(ABORT, 'memory retrieval receipts are append-only'); END`,
+		`CREATE TRIGGER IF NOT EXISTS memory_retrieval_receipts_no_delete BEFORE DELETE ON memory_retrieval_receipts BEGIN SELECT RAISE(ABORT, 'memory retrieval receipts are append-only'); END`,
+		`PRAGMA user_version = 14`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {

@@ -211,6 +211,16 @@ func TestMemoryFeedbackCLIRecordsApprovedSQLiteProcedureTarget(t *testing.T) {
 		database.Close()
 		t.Fatal(err)
 	}
+	receipt := memoryfeedback.RetrievalReceipt{
+		SchemaVersion: memoryfeedback.RetrievalReceiptVersion, ID: "retrieval-0123456789abcdef0123456789abcdef",
+		ProjectID: task.ProjectID, TaskID: task.ID, TargetKind: memoryfeedback.TargetProcedure,
+		TargetID: approved.ID, TargetRevision: approved.Revision, Tool: "threadforge_procedure_get",
+		Freshness: "verified", GuidanceIncluded: true, ObservationBoundary: "mcp_handler_result_prepared", CreatedAt: stamp,
+	}
+	if _, err := database.RecordMemoryRetrievalReceipt(ctx, receipt); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +229,7 @@ func TestMemoryFeedbackCLIRecordsApprovedSQLiteProcedureTarget(t *testing.T) {
 		"memory", "feedback", "record", "--project-root", projectRoot, "--project-id", task.ProjectID,
 		"--task-id", task.ID, "--target-kind", "procedure", "--target-id", approved.ID,
 		"--target-revision", fmt.Sprint(approved.Revision), "--exposure", "used", "--utility", "harmful",
-		"--task-result", "failed", "--harness", "claude-code", "--db", databasePath,
+		"--task-result", "failed", "--harness", "claude-code", "--retrieval-receipt-id", receipt.ID, "--db", databasePath,
 	}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("record exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -229,7 +239,8 @@ func TestMemoryFeedbackCLIRecordsApprovedSQLiteProcedureTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Feedback.TargetKind != memoryfeedback.TargetProcedure || result.Feedback.TargetRevision != approved.Revision ||
-		result.Feedback.Utility != memoryfeedback.UtilityHarmful || result.Feedback.TaskResult != "failed" {
+		result.Feedback.Utility != memoryfeedback.UtilityHarmful || result.Feedback.TaskResult != "failed" ||
+		result.Feedback.RetrievalReceiptID != receipt.ID {
 		t.Fatalf("recorded feedback does not bind the approved procedure: %+v", result)
 	}
 }

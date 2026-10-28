@@ -4093,3 +4093,32 @@ def test_mancode_legacy_workflow_summary_is_inert_and_identity_reduced():
     ):
         with pytest.raises(ValidationError):
             validator.validate(invalid)
+
+
+def test_memory_retrieval_receipt_is_content_free_and_does_not_claim_model_exposure():
+    schema = json.loads((SCHEMA_DIRECTORY / "memory-retrieval-receipt-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    receipt = {
+        "schema_version": "threadforge.memory-retrieval-receipt.v1",
+        "id": "retrieval-0123456789abcdef0123456789abcdef",
+        "project_id": "repo:example",
+        "task_id": "task-123",
+        "target_kind": "procedure",
+        "target_id": "build-recovery",
+        "target_revision": 2,
+        "tool": "threadforge_procedure_get",
+        "freshness": "verified",
+        "guidance_included": True,
+        "observation_boundary": "mcp_handler_result_prepared",
+        "created_at": "2026-10-28T12:00:00Z",
+    }
+    validator.validate(receipt)
+    validator.validate({**receipt, "freshness": "stale", "guidance_included": False})
+    for invalid in (
+        {**receipt, "freshness": "stale"},
+        {**receipt, "prompt": "private prompt"},
+        {**receipt, "observation_boundary": "model_received"},
+        {**receipt, "target_revision": 0},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)

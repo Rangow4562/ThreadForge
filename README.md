@@ -6,7 +6,7 @@
 
 **Local-first memory, task continuity, calibrated typed decisions, and procedural learning for AI coding agents.**
 
-[![Release](https://img.shields.io/badge/Release-v0.4.0-2563eb?style=flat-square&logo=github)](https://github.com/Rangow4562/ThreadForge/releases/tag/v0.4.0)
+[![Release](https://img.shields.io/badge/Release-v0.4.5-2563eb?style=flat-square&logo=github)](https://github.com/Rangow4562/ThreadForge/releases/tag/v0.4.5)
 [![License](https://img.shields.io/badge/License-Apache--2.0-2f855a?style=flat-square)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=flat-square&logo=go&logoColor=white)](go.mod)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white)](python/pyproject.toml)
@@ -98,7 +98,7 @@ Threadforge integrates with over 20 AI coding agent harnesses and runtimes, prov
 | **Cursor** | Extension + MCP | `sessionStart` Bootstrap | Deny-only `Write` plan gate | Composer DB & Transcripts | Verified Composer Sync ([`docs/cursor-history.md`](docs/cursor-history.md)) |
 | **Gemini CLI** | Project Hooks + MCP | `BeforeAgent` Hook | Deny-only `BeforeTool` guard | Loopback OTLP Intake | Verified Tool Guard ([`docs/gemini-cli.md`](docs/gemini-cli.md)) |
 | **Antigravity** | PreInvocation Hook | Invocation 0 Bootstrap | Scoped project-task context | Local Telemetry Slices | Verified Hook Transport ([`docs/antigravity-cli.md`](docs/antigravity-cli.md)) |
-| **OpenCode** | Plugin + Transform | Opt-in prompt-time project memory ([`docs/opencode-memory.md`](docs/opencode-memory.md)) | Project-scoped planning profile | Session CLI Poller | Verified Prompt-Memory Transport ([`docs/opencode-history.md`](docs/opencode-history.md)) |
+| **OpenCode** | Plugin + Transform | Opt-in prompt-time memory & task resume ([`docs/opencode-memory.md`](docs/opencode-memory.md)) | Project-scoped planning profile | Session CLI Poller | Verified Prompt-Memory Transport ([`docs/opencode-history.md`](docs/opencode-history.md)) |
 | **Cline** | Plugin + Global MCP | `.cline/skills/` + advisory project rule | Optional CLI `editor`/`apply_patch` task-plan gate | Task/Session/Kanban stores | Verified Package Build; gate dispatch unverified ([`docs/cline.md`](docs/cline.md)) |
 | **Qwen Code** | Project Hooks + MCP | `UserPromptExpansion` | Best-effort deny-only file guard | Loopback OTLP Intake | Verified Settings Lock ([`docs/qwen-code.md`](docs/qwen-code.md)) |
 | **GitHub Copilot CLI** | Prompts + Skills + MCP | Opt-in prompt-time approved memory ([`docs/copilot-cli-memory.md`](docs/copilot-cli-memory.md)) | Deny-only command hook | Events JSONL Poller | Verified Prompt Installer ([`docs/copilot-prompts.md`](docs/copilot-prompts.md)) |
@@ -221,8 +221,9 @@ threadforge bootstrap mcp install --host claude-code --project-root .
 - **Deterministic Scaffolding**: Generate plan scaffolds with `threadforge task plan template --id <task-id>`, edit repository-scoped file inclusion/exclusion rules, and store via `threadforge task plan revise`.
 - **Deny-Only Guardrails**: For Claude Code, Qwen Code, Gemini CLI, and GitHub Copilot CLI, Threadforge installs optional local hooks that deny unauthorized direct file modifications outside confirmed plan scopes. These hooks **never grant execution permissions** and operate purely as defense-in-depth safety checks.
 
-### 2. Cryptographic Provenance & Team Sync
+### 2. Cryptographic Provenance, Retrieval Receipts & Team Sync
 - **Ed25519 Signatures**: Shared procedure records require signing keys pinned out-of-band by team administrators. Unsigned, altered, or stale records are withheld during retrieval.
+- **Task-Scoped Retrieval Receipts & Outcome Feedback**: Memory and procedure reads via CLI, hooks, MCP, and `/v2/context` record bounded local retrieval receipts when a task scope is active, enabling structured local outcome feedback via `threadforge memory feedback` ([`docs/memory-feedback.md`](docs/memory-feedback.md)).
 - **Git-Ref Sync**: `threadforge team sync pull|push` synchronizes only signed, sanitized JSON records through a dedicated Git ref. Raw traces, session transcripts, local SQLite state, credentials, and worktrees are **never** transferred.
 - **Audited Decommissioning**: Team scopes can be frozen via `threadforge team scope decommission`, halting continuity writes while permanently preserving append-only audit logs.
 
@@ -289,6 +290,8 @@ npm run test:package
 - [Feature Parity Ledger](docs/feature-parity.md) — Line-by-line feature tracking against legacy Beacon, Mancode, AnyJev, and RRSI.
 - [Host Source Matrix](docs/source-matrix.md) — Detailed coverage analysis for each supported agent harness.
 - [Aider Procedure Access](docs/aider.md) — Digest-checked portable procedure loading with Aider's explicit read-only file option.
+- [Memory Outcome Feedback & Receipts](docs/memory-feedback.md) — Task-scoped retrieval receipts and local memory outcome evaluation.
+- [Linux User Installer](docs/linux-install.md) — Rootless checksum-verified installation guide for Linux `amd64`.
 - [Model Context Protocol (MCP) Setup](docs/mcp.md) — Guide to configuring MCP tools, resources, and handoffs.
 - [Team Authorization & Sync](docs/team-authorization.md) — Ed25519 cryptographic trust policies, revision control, and Git-ref sync.
 - [Task Continuity & Handoffs](docs/task-handoffs.md) — Cross-session continuity, session stores, and brief exports.

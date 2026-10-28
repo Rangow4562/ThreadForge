@@ -7,10 +7,10 @@ From a Threadforge checkout:
 ```bash
 # Defaults to the latest release. Pin a reviewed version when reproducibility matters.
 bash packaging/linux/install.sh
-THREADFORGE_VERSION=0.4.0 bash packaging/linux/install.sh
+THREADFORGE_VERSION=0.4.5 bash packaging/linux/install.sh
 
 # Optional absolute destination instead of $HOME/.local/bin.
-THREADFORGE_INSTALL_DIR="$HOME/bin" THREADFORGE_VERSION=0.4.0 bash packaging/linux/install.sh
+THREADFORGE_INSTALL_DIR="$HOME/bin" THREADFORGE_VERSION=0.4.5 bash packaging/linux/install.sh
 ```
 
 The installer currently supports Linux `x86_64`/`amd64`, matching the published release asset. It refuses other operating systems and architectures rather than guessing an asset. The install directory must be absolute; the existing `threadforge` executable is replaced atomically after the downloaded binary passes its version check.

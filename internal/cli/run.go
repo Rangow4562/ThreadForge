@@ -31,6 +31,8 @@ import (
 	"github.com/threadforge-ai/threadforge/pkg/continuity"
 	"github.com/threadforge-ai/threadforge/pkg/cutover"
 	"github.com/threadforge-ai/threadforge/pkg/migrationbackup"
+	"github.com/threadforge-ai/threadforge/pkg/migrationcoverage"
+	"github.com/threadforge-ai/threadforge/pkg/migrationreview"
 	"github.com/threadforge-ai/threadforge/pkg/privacy"
 	"github.com/threadforge-ai/threadforge/pkg/proceduregraph"
 	"github.com/threadforge-ai/threadforge/pkg/projectmemory"
@@ -342,7 +344,7 @@ func validSeverityName(value beacon.Severity) bool {
 
 func runCutover(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "assess" {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--repository-root <clean-checkout>]")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-trust.json>] [--repository-root <clean-checkout>]")
 		return 2
 	}
 	fs := flag.NewFlagSet("cutover assess", flag.ContinueOnError)
@@ -350,12 +352,13 @@ func runCutover(args []string, stdout, stderr io.Writer) int {
 	reportPath := fs.String("report", "", "cutover evidence report JSON")
 	evidenceRoot := fs.String("evidence-root", "", "directory containing report evidence artifacts")
 	trustedEvaluatorPath := fs.String("trusted-evaluators", "", "out-of-repository evaluator trust policy JSON")
+	trustedMigrationReviewerPath := fs.String("trusted-migration-reviewers", "", "out-of-repository trusted Mancode plan-reviewer policy JSON")
 	repositoryRoot := fs.String("repository-root", ".", "clean Threadforge git checkout under assessment")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
 	if *reportPath == "" || *evidenceRoot == "" || fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--repository-root <clean-checkout>]")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-trust.json>] [--repository-root <clean-checkout>]")
 		return 2
 	}
 	var report cutover.Report
@@ -387,13 +390,37 @@ func runCutover(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
-	assessment, err := cutover.AssessWithTrust(report, *evidenceRoot, trustedEvaluators)
+	trustedMigrationReviewers := migrationreview.TrustStore{}
+	trustedMigrationReviewerDigest := ""
+	if *trustedMigrationReviewerPath != "" {
+		trustPath, err := filepath.EvalSymlinks(*trustedMigrationReviewerPath)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "resolve trusted migration reviewer file:", err)
+			return 1
+		}
+		repositoryPath, _ := filepath.EvalSymlinks(*repositoryRoot)
+		evidencePath, _ := filepath.EvalSymlinks(*evidenceRoot)
+		if pathIsWithin(repositoryPath, trustPath) || pathIsWithin(evidencePath, trustPath) {
+			_, _ = fmt.Fprintln(stderr, "trusted migration reviewer file must be outside the candidate repository and evidence root")
+			return 1
+		}
+		trustedMigrationReviewers, trustedMigrationReviewerDigest, err = migrationreview.ReadTrustStore(*trustedMigrationReviewerPath)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
+	assessment, err := cutover.AssessWithTrustAndMigrationReviewers(report, *evidenceRoot, trustedEvaluators, trustedMigrationReviewers)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 	if trustedEvaluatorDigest != "" && assessment.TrustedEvaluatorsSHA256 != trustedEvaluatorDigest {
 		_, _ = fmt.Fprintln(stderr, "trusted evaluator policy fingerprint changed during assessment")
+		return 1
+	}
+	if trustedMigrationReviewerDigest != "" && assessment.TrustedMigrationReviewersSHA256 != trustedMigrationReviewerDigest {
+		_, _ = fmt.Fprintln(stderr, "trusted migration reviewer policy fingerprint changed during assessment")
 		return 1
 	}
 	if code := writeIndentedJSON(stdout, assessment, stderr); code != 0 {
@@ -2601,7 +2628,7 @@ func historyProjectMemory(args []string, stdout, stderr io.Writer) int {
 
 func runMigrate(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "migration action required: inspect, snapshot, backup-verify, coverage, apply, verify, rollback, status, or records")
+		_, _ = fmt.Fprintln(stderr, "migration action required: inspect, snapshot, backup-verify, coverage, review-plan, apply, verify, rollback, status, or records")
 		return 2
 	}
 	switch args[0] {
@@ -2611,6 +2638,8 @@ func runMigrate(args []string, stdout, stderr io.Writer) int {
 		return snapshotMigration(args[1:], stdout, stderr)
 	case "coverage":
 		return migrationFormatCoverage(args[1:], stdout, stderr)
+	case "review-plan":
+		return migrationReviewPlan(args[1:], stdout, stderr)
 	case "backup-verify":
 		return migrationSourceBackupVerification(args[1:], stdout, stderr)
 	case "apply":
@@ -2627,6 +2656,211 @@ func runMigrate(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "unknown migrate action %q\n", args[0])
 		return 2
 	}
+}
+
+func migrationReviewPlan(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("migrate review-plan", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	manifestName := fs.String("manifest", "", "verified local Mancode migration snapshot manifest")
+	backupRoot := fs.String("backup-root", "", "independent source backup already reconciled to the snapshot")
+	previousCoveragePath := fs.String("previous-coverage", "", "optional earlier reviewed coverage generated from the same snapshot")
+	outputPath := fs.String("output", "", "new output coverage path; existing files are never overwritten")
+	workflowID := fs.String("workflow-id-sha256", "", "path-redacted workflow ID commitment to review")
+	identityPath := fs.String("identity-key", "", "trusted reviewer's private Ed25519 identity file")
+	trustPath := fs.String("trusted-reviewers", "", "separately administered Mancode plan-review trust policy JSON")
+	confirm := fs.Bool("confirm-reviewed-pairing", false, "confirm the exact source/backup pair was manually reviewed and the plan belongs to the declared workflow/version")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 || *manifestName == "" || *backupRoot == "" || *outputPath == "" || *workflowID == "" ||
+		*identityPath == "" || *trustPath == "" || !*confirm {
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge migrate review-plan --manifest <snapshot\\manifest.json> --backup-root <independent-copy> [--previous-coverage <reviewed-coverage.json>] --output <new-coverage.json> --workflow-id-sha256 <digest> --identity-key <private-key.json> --trusted-reviewers <trust.json> --confirm-reviewed-pairing")
+		return 2
+	}
+	paths, err := appdata.Resolve("", "")
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	manifestPath, err := validateLocalSnapshotManifest(*manifestName, paths.Root)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	manifest, err := migrate.LoadSnapshot(manifestPath)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if manifest.Product != migrate.Mancode {
+		_, _ = fmt.Fprintln(stderr, "signed legacy plan review is supported only for Mancode")
+		return 1
+	}
+	backup, err := migrationbackup.VerifySnapshot(manifestPath, *backupRoot)
+	if err != nil || backup.Status != "verified" || backup.Product != string(migrate.Mancode) ||
+		backup.SourceFingerprint != manifest.SourceFingerprint {
+		_, _ = fmt.Fprintln(stderr, "source backup must verify against the selected Mancode snapshot before review")
+		return 1
+	}
+	coverage, err := migrate.BuildFormatCoverage(manifest)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if err := migrationcoverage.Validate(coverage); err != nil {
+		_, _ = fmt.Fprintln(stderr, "snapshot coverage is invalid:", err)
+		return 1
+	}
+	identity, err := teamauth.LoadIdentity(*identityPath)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	trust, _, err := migrationreview.ReadTrustStore(*trustPath)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	reviewer := ""
+	for _, key := range trust.Keys {
+		if key.KeyID == identity.KeyID {
+			reviewer = key.Reviewer
+			break
+		}
+	}
+	if reviewer == "" {
+		_, _ = fmt.Fprintln(stderr, "signing identity is not present in the trusted Mancode plan-review policy")
+		return 1
+	}
+	if *previousCoveragePath != "" {
+		var previous migrationcoverage.Report
+		if err := decodeJSONFile(*previousCoveragePath, 32<<20, &previous); err != nil {
+			_, _ = fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if err := migrationcoverage.Validate(previous); err != nil {
+			_, _ = fmt.Fprintln(stderr, "previous coverage is invalid:", err)
+			return 1
+		}
+		if len(previous.MancodeLegacyWorkflowChecks) != len(coverage.MancodeLegacyWorkflowChecks) {
+			_, _ = fmt.Fprintln(stderr, "previous coverage does not match the selected snapshot")
+			return 1
+		}
+		for index := range previous.MancodeLegacyWorkflowChecks {
+			check := &previous.MancodeLegacyWorkflowChecks[index]
+			if check.PlanReview != nil {
+				binding := migrationreview.Binding{
+					Product: previous.Product, SourceFingerprint: previous.SourceFingerprint, SnapshotSHA256: previous.SnapshotSHA256,
+					WorkflowIDSHA256: check.WorkflowIDSHA256, MetadataSourceSetSHA256: check.MetadataSourceSetSHA256,
+					PlanSourceSetSHA256: check.PlanSourceSetSHA256, MetadataPlanVersion: check.MetadataPlanVersion,
+					MetadataPlanVersionDefaulted: check.MetadataPlanVersionDefaulted,
+				}
+				if err := migrationreview.Verify(*check.PlanReview, trust, binding); err != nil {
+					_, _ = fmt.Fprintln(stderr, "previous coverage contains an invalid reviewer signature:", err)
+					return 1
+				}
+			}
+		}
+		previousReviews := make([]*migrationreview.Attestation, len(previous.MancodeLegacyWorkflowChecks))
+		for index := range previous.MancodeLegacyWorkflowChecks {
+			previousReviews[index] = previous.MancodeLegacyWorkflowChecks[index].PlanReview
+			previous.MancodeLegacyWorkflowChecks[index].PlanReview = nil
+		}
+		previousBytes, previousErr := json.Marshal(previous)
+		baseBytes, baseErr := json.Marshal(coverage)
+		if previousErr != nil || baseErr != nil || !bytes.Equal(previousBytes, baseBytes) {
+			_, _ = fmt.Fprintln(stderr, "previous coverage contains changes beyond signatures generated from this snapshot")
+			return 1
+		}
+		for index := range previous.MancodeLegacyWorkflowChecks {
+			previous.MancodeLegacyWorkflowChecks[index].PlanReview = previousReviews[index]
+		}
+		coverage = previous
+	}
+	var selected *migrationcoverage.MancodeLegacyWorkflowCheck
+	for index := range coverage.MancodeLegacyWorkflowChecks {
+		if coverage.MancodeLegacyWorkflowChecks[index].WorkflowIDSHA256 == *workflowID {
+			if selected != nil {
+				_, _ = fmt.Fprintln(stderr, "workflow ID commitment is ambiguous")
+				return 1
+			}
+			selected = &coverage.MancodeLegacyWorkflowChecks[index]
+		}
+	}
+	if selected == nil || selected.Status != "verified" || selected.MetadataFileCount != 1 || !selected.MetadataValid ||
+		selected.PlanFileCount != 1 || !selected.PlanValid || selected.PlanContentBindingVerified || selected.PlanReview != nil {
+		_, _ = fmt.Fprintln(stderr, "workflow must identify one verified metadata/plan pair without an existing attestation")
+		return 1
+	}
+	binding := migrationreview.Binding{
+		Product: coverage.Product, SourceFingerprint: coverage.SourceFingerprint, SnapshotSHA256: coverage.SnapshotSHA256,
+		WorkflowIDSHA256: selected.WorkflowIDSHA256, MetadataSourceSetSHA256: selected.MetadataSourceSetSHA256,
+		PlanSourceSetSHA256: selected.PlanSourceSetSHA256, MetadataPlanVersion: selected.MetadataPlanVersion,
+		MetadataPlanVersionDefaulted: selected.MetadataPlanVersionDefaulted,
+	}
+	attestation, err := migrationreview.Sign(binding, reviewer, identity.PrivateKey, time.Now())
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if err := migrationreview.Verify(attestation, trust, binding); err != nil {
+		_, _ = fmt.Fprintln(stderr, "review signature verification failed:", err)
+		return 1
+	}
+	selected.PlanReview = &attestation
+	if err := migrationcoverage.Validate(coverage); err != nil {
+		_, _ = fmt.Fprintln(stderr, "reviewed coverage is invalid:", err)
+		return 1
+	}
+	encoded, err := json.MarshalIndent(coverage, "", "  ")
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	absolute, err := filepath.Abs(*outputPath)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	sourceReal, sourceErr := filepath.EvalSymlinks(manifest.SourceRoot)
+	backupReal, backupErr := filepath.EvalSymlinks(*backupRoot)
+	outputParentReal, outputErr := filepath.EvalSymlinks(filepath.Dir(absolute))
+	snapshotRootReal, snapshotErr := filepath.EvalSymlinks(filepath.Join(paths.Root, "migrations", "snapshots"))
+	if sourceErr != nil || backupErr != nil || outputErr != nil || snapshotErr != nil {
+		_, _ = fmt.Fprintln(stderr, "resolve source, backup, and output locations before signing")
+		return 1
+	}
+	outputTarget := filepath.Join(outputParentReal, filepath.Base(absolute))
+	if pathIsWithin(sourceReal, outputTarget) || pathIsWithin(backupReal, outputTarget) || pathIsWithin(snapshotRootReal, outputTarget) {
+		_, _ = fmt.Fprintln(stderr, "reviewed coverage output must be outside the source, independent backup, and snapshot trees")
+		return 1
+	}
+	file, err := os.OpenFile(absolute, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "create new reviewed coverage file:", err)
+		return 1
+	}
+	if _, err = file.Write(append(encoded, '\n')); err == nil {
+		err = file.Sync()
+	}
+	closeErr := file.Close()
+	if err != nil || closeErr != nil {
+		_ = os.Remove(absolute)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "write reviewed coverage file:", err)
+		} else {
+			_, _ = fmt.Fprintln(stderr, "close reviewed coverage file:", closeErr)
+		}
+		return 1
+	}
+	digest := sha256.Sum256(append(encoded, '\n'))
+	return writeIndentedJSON(stdout, map[string]any{
+		"schema_version": "threadforge.mancode-plan-review-result.v1",
+		"output_file":    filepath.Base(absolute), "coverage_sha256": hex.EncodeToString(digest[:]),
+		"workflow_id_sha256": selected.WorkflowIDSHA256, "metadata_plan_version": selected.MetadataPlanVersion,
+		"reviewer_id": reviewer, "reviewer_key_id": identity.KeyID,
+		"historical_content_binding_verified": false,
+	}, stderr)
 }
 
 func migrationFormatCoverage(args []string, stdout, stderr io.Writer) int {
@@ -3989,6 +4223,7 @@ Commands:
   migrate inspect --product <beacon|mancode|anyjev|rrsi> --root <path>
   migrate snapshot --product <beacon|mancode|anyjev|rrsi> --root <path>
   migrate coverage --manifest <snapshot\\manifest.json>
+  migrate review-plan --manifest <snapshot\\manifest.json> --backup-root <independent-copy> [--previous-coverage <reviewed-coverage.json>] --output <new-coverage.json> --workflow-id-sha256 <digest> --identity-key <private-key.json> --trusted-reviewers <trust.json> --confirm-reviewed-pairing
   migrate backup-verify --manifest <snapshot\\manifest.json> --backup-root <independent-copy>
   migrate apply --manifest <snapshot\\manifest.json> --backup-root <independent-copy> [--db <path>] [--progress-stderr]
   migrate verify --manifest <snapshot\\manifest.json> [--expect applied|rolled_back] [--db <path>]
@@ -4050,7 +4285,7 @@ Commands:
   session update --id <id> --expected-revision <n> [--close] [--summary <text>] [--next-action <text>] [--identity-key <private-key.json>]
   session history --id <id> [--db <path>]
   handoff list|export|resume ...
-  cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--repository-root <clean-checkout>]
+  cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-trust.json>] [--repository-root <clean-checkout>]
   security scan [--traces <events.jsonl>] [--rules-dir <path>] [--rules-store <path>] [--min-severity info] [--session <id-substring>] [--fail-on <severity>]
   security reviews list [--limit 50] [--offset 0] [--db <path>]
   security reviews set --fingerprint <sha256> --expected-revision <n> --status <open|acknowledged|resolved|false_positive> [--actor <name>] [--db <path>]

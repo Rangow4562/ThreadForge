@@ -122,6 +122,7 @@ func bindMancodeLegacyWorkflows(sourceRoot string, scanned *[]scannedFile, summa
 			if metadata.PlanVersion != nil {
 				planVersion = *metadata.PlanVersion
 			}
+			check.MetadataPlanVersion = planVersion
 			check.MetadataRequirementsDigestPresent = metadata.RequirementsDigestPresent
 			if check.MetadataRequirementsDigestPresent && check.RequirementsValid {
 				wantDigest := mancodeLegacyRequirementsDigest(requirements.Requirements)
@@ -153,6 +154,7 @@ func bindMancodeLegacyWorkflows(sourceRoot string, scanned *[]scannedFile, summa
 			}
 		} else if check.MetadataFileCount == 0 {
 			check.MetadataPlanVersionDefaulted = true
+			check.MetadataPlanVersion = 1
 		}
 		check.PlanPresenceVerified = check.PlanFileCount == 1 && check.PlanValid
 
@@ -193,6 +195,9 @@ func bindMancodeLegacyWorkflows(sourceRoot string, scanned *[]scannedFile, summa
 		upgradeMancodeLegacyVerificationBinding(scanned, group.verification, check)
 		checks = append(checks, check)
 	}
+	sort.Slice(checks, func(i, j int) bool {
+		return checks[i].WorkflowIDSHA256 < checks[j].WorkflowIDSHA256
+	})
 	return checks, nil
 }
 
@@ -486,6 +491,9 @@ func legacyMancodeWorkflowBindingChecks(files []FileEntry, sourceRoot string) []
 			Authority: "local_pending_review", HumanReviewRequired: true, ExecutionAuthorized: false,
 		})
 	}
+	sort.Slice(checks, func(i, j int) bool {
+		return checks[i].WorkflowIDSHA256 < checks[j].WorkflowIDSHA256
+	})
 	return checks
 }
 

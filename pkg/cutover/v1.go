@@ -17,6 +17,7 @@ import (
 
 	"github.com/threadforge-ai/threadforge/pkg/migrationbackup"
 	"github.com/threadforge-ai/threadforge/pkg/migrationcoverage"
+	"github.com/threadforge-ai/threadforge/pkg/migrationreview"
 	"github.com/threadforge-ai/threadforge/pkg/privacy"
 )
 
@@ -120,10 +121,11 @@ type Approval struct {
 }
 
 type Assessment struct {
-	SchemaVersion           string   `json:"schema_version"`
-	Ready                   bool     `json:"ready"`
-	TrustedEvaluatorsSHA256 string   `json:"trusted_evaluators_sha256,omitempty"`
-	Blockers                []string `json:"blockers"`
+	SchemaVersion                   string   `json:"schema_version"`
+	Ready                           bool     `json:"ready"`
+	TrustedEvaluatorsSHA256         string   `json:"trusted_evaluators_sha256,omitempty"`
+	TrustedMigrationReviewersSHA256 string   `json:"trusted_migration_reviewers_sha256,omitempty"`
+	Blockers                        []string `json:"blockers"`
 }
 
 type artifactVerifier struct {
@@ -138,7 +140,11 @@ func Assess(report Report, evidenceRoot string) (Assessment, error) {
 }
 
 func AssessWithTrust(report Report, evidenceRoot string, trustedEvaluators EvaluatorTrustStore) (Assessment, error) {
-	assessment := Assessment{SchemaVersion: "threadforge.cutover-assessment.v2", Blockers: []string{}}
+	return AssessWithTrustAndMigrationReviewers(report, evidenceRoot, trustedEvaluators, migrationreview.TrustStore{})
+}
+
+func AssessWithTrustAndMigrationReviewers(report Report, evidenceRoot string, trustedEvaluators EvaluatorTrustStore, trustedMigrationReviewers migrationreview.TrustStore) (Assessment, error) {
+	assessment := Assessment{SchemaVersion: "threadforge.cutover-assessment.v3", Blockers: []string{}}
 	if report.SchemaVersion != SchemaVersion {
 		assessment.Blockers = append(assessment.Blockers, "unsupported cutover evidence schema")
 	}
@@ -154,6 +160,14 @@ func AssessWithTrust(report Report, evidenceRoot string, trustedEvaluators Evalu
 		assessment.Blockers = append(assessment.Blockers, "trusted evaluator policy: "+trustErr.Error())
 	} else {
 		assessment.TrustedEvaluatorsSHA256 = trustDigest
+	}
+	if len(trustedMigrationReviewers.Keys) > 0 {
+		reviewerDigest, reviewerErr := migrationreview.TrustStoreSHA256(trustedMigrationReviewers)
+		if reviewerErr != nil {
+			assessment.Blockers = append(assessment.Blockers, "trusted migration reviewer policy: "+reviewerErr.Error())
+		} else {
+			assessment.TrustedMigrationReviewersSHA256 = reviewerDigest
+		}
 	}
 	verifier := &artifactVerifier{root: root, verified: make(map[string]string)}
 
@@ -236,7 +250,7 @@ func AssessWithTrust(report Report, evidenceRoot string, trustedEvaluators Evalu
 			assessment.Blockers = append(assessment.Blockers, "migration "+product+" lacks interruption-recovery or rollback evidence")
 		}
 		verifyEvidence(&assessment, verifier, "migration "+product+" format coverage", []Evidence{migration.FormatCoverage})
-		validateMigrationFormatCoverage(&assessment, verifier, migration)
+		validateMigrationFormatCoverage(&assessment, verifier, migration, trustedMigrationReviewers)
 		verifyEvidence(&assessment, verifier, "migration "+product+" source backup verification", []Evidence{migration.SourceBackupVerification})
 		validateMigrationSourceBackup(&assessment, verifier, migration)
 		verifyEvidence(&assessment, verifier, "migration "+product, migration.Evidence)
@@ -407,7 +421,7 @@ func validateMigrationSourceBackup(assessment *Assessment, verifier *artifactVer
 	}
 }
 
-func validateMigrationFormatCoverage(assessment *Assessment, verifier *artifactVerifier, migration MigrationEvidence) {
+func validateMigrationFormatCoverage(assessment *Assessment, verifier *artifactVerifier, migration MigrationEvidence, trustedMigrationReviewers migrationreview.TrustStore) {
 	content, actual, err := verifier.readEvidence(migration.FormatCoverage)
 	if err != nil {
 		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" format coverage: "+err.Error())
@@ -461,7 +475,21 @@ func validateMigrationFormatCoverage(assessment *Assessment, verifier *artifactV
 			assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" has an incomplete or conflicting legacy workflow ledger binding")
 		}
 		if check.PlanFileCount > 0 && !check.PlanContentBindingVerified {
-			assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" has legacy workflow plans without source-bound content/version binding")
+			if check.PlanReview == nil {
+				assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" has legacy workflow plans without source-bound content/version binding or signed reviewer evidence")
+				continue
+			}
+			binding := migrationreview.Binding{
+				Product: coverage.Product, SourceFingerprint: coverage.SourceFingerprint, SnapshotSHA256: coverage.SnapshotSHA256,
+				WorkflowIDSHA256: check.WorkflowIDSHA256, MetadataSourceSetSHA256: check.MetadataSourceSetSHA256,
+				PlanSourceSetSHA256: check.PlanSourceSetSHA256, MetadataPlanVersion: check.MetadataPlanVersion,
+				MetadataPlanVersionDefaulted: check.MetadataPlanVersionDefaulted,
+			}
+			if len(trustedMigrationReviewers.Keys) == 0 {
+				assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" Mancode plan review has no separately trusted reviewer policy")
+			} else if err := migrationreview.Verify(*check.PlanReview, trustedMigrationReviewers, binding); err != nil {
+				assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" Mancode plan review attestation is invalid: "+err.Error())
+			}
 		}
 	}
 	for _, check := range coverage.MancodeTeamPolicyChecks {

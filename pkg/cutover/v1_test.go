@@ -13,9 +13,11 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/threadforge-ai/threadforge/pkg/migrationbackup"
 	"github.com/threadforge-ai/threadforge/pkg/migrationcoverage"
+	"github.com/threadforge-ai/threadforge/pkg/migrationreview"
 )
 
 func TestAssessRequiresAllParityMigrationAdaptersAndEvaluations(t *testing.T) {
@@ -385,6 +387,7 @@ func TestAssessBlocksMancodeLegacyPlanWithoutSourceVersionBinding(t *testing.T) 
 		ReviewFileCount: 1, ReviewValid: true, ReviewSourceSetSHA256: testDigest("review"),
 		VerificationFileCount: 1, VerificationValid: true, VerificationSourceSetSHA256: testDigest("verification"),
 		PlanFileCount: 1, PlanValid: true, PlanSourceSetSHA256: testDigest("plan"),
+		MetadataPlanVersion:               1,
 		MetadataRequirementsDigestPresent: true, MetadataRequirementsDigestBindingVerified: true,
 		WorkflowPathBindingVerified: true, RequirementsDigestBindingVerified: true,
 		AcceptanceCriteriaBindingVerified: true, PlanVersionBindingVerified: true,
@@ -410,6 +413,60 @@ func TestAssessBlocksMancodeLegacyPlanWithoutSourceVersionBinding(t *testing.T) 
 	assessment, err := AssessWithTrust(report, root, trust)
 	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "legacy workflow plans without source-bound content/version binding") {
 		t.Fatalf("Mancode legacy plan without source-bound version evidence was not blocked: %#v, %v", assessment, err)
+	}
+	privateKey := fixturePrivateKey()
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	issuedAt := time.Now().UTC()
+	reviewers := migrationreview.TrustStore{SchemaVersion: migrationreview.TrustStoreSchemaVersion, Keys: []migrationreview.ReviewerKey{{
+		KeyID: migrationreview.KeyID(publicKey), PublicKey: base64.StdEncoding.EncodeToString(publicKey), Reviewer: "mancode-reviewer",
+		Products: []string{"mancode"}, NotBefore: issuedAt.Add(-time.Hour).Format(time.RFC3339Nano),
+		NotAfter: issuedAt.Add(time.Hour).Format(time.RFC3339Nano),
+	}}}
+	check := &coverage.MancodeLegacyWorkflowChecks[0]
+	binding := migrationreview.Binding{
+		Product: coverage.Product, SourceFingerprint: coverage.SourceFingerprint, SnapshotSHA256: coverage.SnapshotSHA256,
+		WorkflowIDSHA256: check.WorkflowIDSHA256, MetadataSourceSetSHA256: check.MetadataSourceSetSHA256,
+		PlanSourceSetSHA256: check.PlanSourceSetSHA256, MetadataPlanVersion: check.MetadataPlanVersion,
+		MetadataPlanVersionDefaulted: check.MetadataPlanVersionDefaulted,
+	}
+	review, err := migrationreview.Sign(binding, "mancode-reviewer", privateKey, issuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check.PlanReview = &review
+	if err := migrationcoverage.Validate(coverage); err != nil {
+		t.Fatalf("signed human review did not validate as supplementary evidence: %v", err)
+	}
+	updated, err = json.Marshal(coverage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(coveragePath, updated, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest = sha256.Sum256(updated)
+	mancodeMigration.FormatCoverage.SHA256 = hex.EncodeToString(digest[:])
+	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, trust, migrationreview.TrustStore{})
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "no separately trusted reviewer policy") {
+		t.Fatalf("signed plan review bypassed the separate reviewer trust root: %#v, %v", assessment, err)
+	}
+	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, trust, reviewers)
+	if err != nil || !assessment.Ready || assessment.TrustedMigrationReviewersSHA256 == "" {
+		t.Fatalf("valid signed supplementary review did not satisfy only the missing source-contract evidence: %#v, %v", assessment, err)
+	}
+	check.PlanReview.Signature = base64.StdEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))
+	updated, err = json.Marshal(coverage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(coveragePath, updated, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest = sha256.Sum256(updated)
+	mancodeMigration.FormatCoverage.SHA256 = hex.EncodeToString(digest[:])
+	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, trust, reviewers)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "signature verification failed") {
+		t.Fatalf("modified reviewer signature was accepted: %#v, %v", assessment, err)
 	}
 }
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+
+	"github.com/threadforge-ai/threadforge/pkg/migrationreview"
 )
 
 const SchemaVersion = "threadforge.migration-format-coverage.v1"
@@ -67,6 +69,7 @@ type MancodeLegacyWorkflowCheck struct {
 	PlanValid                                 bool                             `json:"plan_valid"`
 	PlanSourceSetSHA256                       string                           `json:"plan_source_set_sha256,omitempty"`
 	MetadataPlanVersionDefaulted              bool                             `json:"metadata_plan_version_defaulted"`
+	MetadataPlanVersion                       int64                            `json:"metadata_plan_version,omitempty"`
 	MetadataRequirementsDigestPresent         bool                             `json:"metadata_requirements_digest_present"`
 	MetadataRequirementsDigestBindingVerified bool                             `json:"metadata_requirements_digest_binding_verified"`
 	MetadataRequirementsStatusPresent         bool                             `json:"metadata_requirements_status_present,omitempty"`
@@ -80,6 +83,7 @@ type MancodeLegacyWorkflowCheck struct {
 	ReviewRemediationBindingVerified          bool                             `json:"review_remediation_binding_verified"`
 	PlanPresenceVerified                      bool                             `json:"plan_presence_verified"`
 	PlanContentBindingVerified                bool                             `json:"plan_content_binding_verified"`
+	PlanReview                                *migrationreview.Attestation     `json:"plan_review_attestation,omitempty"`
 	ArtifactReferences                        *MancodeLegacyArtifactReferences `json:"artifact_references,omitempty"`
 	Status                                    string                           `json:"status"`
 	Issues                                    []string                         `json:"issues"`
@@ -233,6 +237,24 @@ func Validate(report Report) error {
 	}
 	if err := ValidateMancodeLegacyWorkflowChecks(report.Product, report.MancodeLegacyWorkflowChecks); err != nil {
 		return err
+	}
+	for _, check := range report.MancodeLegacyWorkflowChecks {
+		if check.PlanReview == nil {
+			continue
+		}
+		expected := migrationreview.Binding{
+			Product: report.Product, SourceFingerprint: report.SourceFingerprint, SnapshotSHA256: report.SnapshotSHA256,
+			WorkflowIDSHA256: check.WorkflowIDSHA256, MetadataSourceSetSHA256: check.MetadataSourceSetSHA256,
+			PlanSourceSetSHA256: check.PlanSourceSetSHA256, MetadataPlanVersion: check.MetadataPlanVersion,
+			MetadataPlanVersionDefaulted: check.MetadataPlanVersionDefaulted,
+		}
+		if err := migrationreview.ValidateAttestation(*check.PlanReview); err != nil || check.PlanReview.Binding != expected {
+			return errors.New("Mancode legacy plan review does not bind this coverage report and workflow")
+		}
+		if check.Status != "verified" || check.PlanFileCount != 1 || !check.PlanValid ||
+			check.MetadataFileCount != 1 || !check.MetadataValid || check.PlanContentBindingVerified {
+			return errors.New("Mancode legacy plan review requires a verified source pair and cannot claim historical content binding")
+		}
 	}
 	if err := ValidateMancodeTeamPolicyChecks(report.Product, report.MancodeTeamPolicyChecks); err != nil {
 		return err

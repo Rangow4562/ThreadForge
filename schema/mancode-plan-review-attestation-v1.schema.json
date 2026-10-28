@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-plan-review-attestation-v1.schema.json",
+  "title": "Threadforge signed Mancode legacy plan review attestation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "reviewer_id", "key_id", "product", "source_fingerprint", "snapshot_sha256",
+    "workflow_id_sha256", "metadata_source_set_sha256", "plan_source_set_sha256", "metadata_plan_version",
+    "metadata_plan_version_defaulted", "decision", "issued_at", "signature"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-plan-review-attestation.v1" },
+    "reviewer_id": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._@/-]{0,127}$" },
+    "key_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "product": { "const": "mancode" },
+    "source_fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "snapshot_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "workflow_id_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "metadata_source_set_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "plan_source_set_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "metadata_plan_version": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+    "metadata_plan_version_defaulted": { "type": "boolean" },
+    "decision": { "const": "pairing_and_declared_version_confirmed" },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "contentEncoding": "base64", "minLength": 88, "maxLength": 88 }
+  }
+}

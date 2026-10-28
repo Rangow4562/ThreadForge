@@ -497,3 +497,16 @@ func TestMancodeLegacyWorkflowBindingRequiresPlanPresenceAndSupportsMancodeRoot(
 		t.Fatalf("missing plan presence was not surfaced: %#v", check)
 	}
 }
+
+func TestLegacyManifestWorkflowChecksSortByHashedWorkflowIdentity(t *testing.T) {
+	checks := legacyMancodeWorkflowBindingChecks([]FileEntry{
+		{Path: ".mancode/workflows/alpha/metadata.json", SourceSHA256: strings.Repeat("a", 64)},
+		{Path: ".mancode/workflows/beta/metadata.json", SourceSHA256: strings.Repeat("b", 64)},
+	}, t.TempDir())
+	if len(checks) != 2 || checks[0].WorkflowIDSHA256 >= checks[1].WorkflowIDSHA256 {
+		t.Fatalf("legacy workflow checks are not sorted by their validated hashed identity: %#v", checks)
+	}
+	if err := migrationcoverage.ValidateMancodeLegacyWorkflowChecks("mancode", checks); err != nil {
+		t.Fatalf("sorted legacy workflow checks failed validation: %v", err)
+	}
+}

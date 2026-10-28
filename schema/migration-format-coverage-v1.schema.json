@@ -163,6 +163,7 @@
         "plan_valid": { "type": "boolean" },
         "plan_source_set_sha256": { "$ref": "#/$defs/sha256" },
         "metadata_plan_version_defaulted": { "type": "boolean" },
+        "metadata_plan_version": { "type": "integer", "minimum": 1, "maximum": 1000000 },
         "metadata_requirements_digest_present": { "type": "boolean" },
         "metadata_requirements_digest_binding_verified": { "type": "boolean" },
         "metadata_requirements_status_present": { "type": "boolean" },
@@ -176,6 +177,7 @@
         "review_remediation_binding_verified": { "type": "boolean" },
         "plan_presence_verified": { "type": "boolean" },
         "plan_content_binding_verified": { "const": false },
+        "plan_review_attestation": { "$ref": "mancode-plan-review-attestation-v1.schema.json" },
         "artifact_references": { "$ref": "#/$defs/mancode_legacy_artifact_references" },
         "status": { "enum": ["verified", "incomplete", "conflicting"] },
         "issues": {
@@ -202,6 +204,7 @@
         { "if": { "properties": { "review_file_count": { "minimum": 1 } } }, "then": { "required": ["review_source_set_sha256"] }, "else": { "not": { "required": ["review_source_set_sha256"] } } },
         { "if": { "properties": { "verification_file_count": { "minimum": 1 } } }, "then": { "required": ["verification_source_set_sha256"] }, "else": { "not": { "required": ["verification_source_set_sha256"] } } },
         { "if": { "properties": { "plan_file_count": { "minimum": 1 } } }, "then": { "required": ["plan_source_set_sha256"] }, "else": { "not": { "required": ["plan_source_set_sha256"] } } },
+        { "if": { "required": ["plan_review_attestation"] }, "then": { "required": ["metadata_plan_version"], "properties": { "metadata_file_count": { "const": 1 }, "metadata_valid": { "const": true }, "plan_file_count": { "const": 1 }, "plan_valid": { "const": true }, "plan_content_binding_verified": { "const": false }, "status": { "const": "verified" } } } },
         { "if": { "required": ["metadata_requirements_status_binding_verified"], "properties": { "metadata_requirements_status_binding_verified": { "const": true } } }, "then": { "required": ["metadata_requirements_status_present"], "properties": { "metadata_requirements_status_present": { "const": true }, "metadata_valid": { "const": true }, "requirements_valid": { "const": true } } } },
         { "if": { "required": ["metadata_verification_status_binding_verified"], "properties": { "metadata_verification_status_binding_verified": { "const": true } } }, "then": { "required": ["metadata_verification_status_present"], "properties": { "metadata_verification_status_present": { "const": true }, "metadata_valid": { "const": true }, "verification_valid": { "const": true } } } },
         { "if": { "required": ["metadata_requirements_status_present", "status"], "properties": { "metadata_requirements_status_present": { "const": true }, "status": { "const": "verified" } } }, "then": { "required": ["metadata_requirements_status_binding_verified"], "properties": { "metadata_requirements_status_binding_verified": { "const": true } } } },

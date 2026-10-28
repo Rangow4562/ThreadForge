@@ -21,11 +21,14 @@ Cursor session.
 Cursor's `beforeSubmitPrompt` hook is a submission gate whose output decides
 whether a prompt continues; Threadforge does not install it or use it to inject
 memory. This integration stays on the non-blocking `sessionStart` path.
-Task-resume context remains off by default and can be enabled only by adding
-`--task-id` (optionally `--session-id`) or `--discover-active-task` to the
-configured command. The hook's `session_id` belongs to Cursor and is never
-treated as a Threadforge session ID; use `--session-id` only with an explicit
-Threadforge task ID when selecting a Threadforge session.
+Task-resume context remains off by default. The installer accepts
+`--task-id <id>` with optional `--session-id <id>`, or
+`--discover-active-task`; `--max-task-entries <1-20>` defaults to 6 when a
+selector is enabled. Stable IDs and selector combinations are validated before
+the hook file changes, and selected task context remains advisory. The hook's
+`session_id` belongs to Cursor and is never treated as a Threadforge session ID;
+use `--session-id` only with an explicit Threadforge task ID when selecting a
+Threadforge session.
 
 Install this separately from telemetry hooks. Replace `my-project` with the
 project ID used when the approved memory was published, and ensure `threadforge`
@@ -34,7 +37,8 @@ is on Cursor's host `PATH`:
 ```powershell
 npm.cmd --prefix adapters run adapter -- cursor memory install `
   --project-root <absolute-project-path> `
-  --command 'threadforge memory inject-cursor --project-id my-project --threadforge-managed-cursor-memory=v1 --threadforge-memory=cursor-v1'
+  --command 'threadforge memory inject-cursor --project-id my-project --threadforge-managed-cursor-memory=v1 --threadforge-memory=cursor-v1' `
+  --task-id <task-id> --session-id <session-id>
 ```
 
 The adapter merges only a marked command into `.cursor/hooks.json` under

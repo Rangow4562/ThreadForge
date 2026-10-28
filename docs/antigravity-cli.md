@@ -18,11 +18,17 @@ The observational manager writes the `threadforge-endpoint` owner block using th
 
 ## Approved project memory at invocation start
 
-Antigravity's `PreInvocation` hook can add a transient system message. Threadforge uses it for a project-scoped bootstrap of already-approved local memory. Task-resume context is disabled by default and can be enabled only by explicitly adding `--task-id` (optionally `--session-id`) or `--discover-active-task` to the configured command. It does not capture or persist the current prompt or conversation. Install it separately from observational telemetry:
+Antigravity's `PreInvocation` hook can add a transient system message. Threadforge uses it for a project-scoped bootstrap of already-approved local memory. Task-resume context is disabled by default; the installer accepts `--task-id <id>` with optional `--session-id <id>`, or `--discover-active-task`, plus `--max-task-entries <1-20>` (default 6). It does not capture or persist the current prompt or conversation. Install it separately from observational telemetry:
 
 ```powershell
 npm.cmd --prefix adapters run adapter -- antigravity memory install --scope project --project-root <absolute-project-path> --command 'threadforge memory inject-antigravity --project-id <project-id> --threadforge-managed-antigravity-memory=v1 --threadforge-memory=antigravity-v1'
 npm.cmd --prefix adapters run adapter -- antigravity memory uninstall --scope project --project-root <absolute-project-path>
+```
+
+Add the selectors directly to the install command to opt into task context:
+
+```powershell
+npm.cmd --prefix adapters run adapter -- antigravity memory install --scope project --project-root <absolute-project-path> --command 'threadforge memory inject-antigravity --project-id <project-id> --threadforge-managed-antigravity-memory=v1 --threadforge-memory=antigravity-v1' --task-id <task-id> --session-id <session-id>
 ```
 
 The adapter manages only the `threadforge-approved-memory` block in `<project>/.agents/hooks.json`, uses a direct `PreInvocation` handler with a 10-second timeout, and preserves other hook owners and the separate `threadforge-endpoint` block. Install only in a project whose hook execution you trust; Threadforge does not change Antigravity trust settings or tool permissions.

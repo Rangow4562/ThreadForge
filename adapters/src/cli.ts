@@ -1437,8 +1437,9 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       rejectUnexpected(options, ['project-root']);
       result = await removeGeminiProjectPlanGateHook(projectRoot);
     } else if (family === 'cursor' && cursorSubsystem === 'memory' && (action === 'install' || action === 'update')) {
-      rejectUnexpected(options, ['project-root', 'command']);
-      result = await installCursorProjectMemoryHook(projectRoot, required(options, 'command'));
+      rejectUnexpected(options, ['project-root', 'command', 'task-id', 'session-id', 'max-task-entries'], [], ['discover-active-task']);
+      result = await installCursorProjectMemoryHook(projectRoot,
+        taskAwareMemoryHookCommand(options, 'Cursor', '--threadforge-memory=cursor-v1'));
       warning = 'Cursor sessionStart adds bounded approved project memory as startup guidance, not per-prompt retrieval or authorization; use the Threadforge MCP tool for task-specific context.';
     } else if (family === 'cursor' && cursorSubsystem === 'memory' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
@@ -1544,9 +1545,11 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       rejectUnexpected(options, ['project-root']);
       result = await removeCodexProjectHooks(projectRoot);
     } else if (family === 'antigravity' && antigravitySubsystem === 'memory' && (action === 'install' || action === 'update')) {
-      rejectUnexpected(options, ['scope', 'project-root', 'command']);
+      rejectUnexpected(options, ['scope', 'project-root', 'command', 'task-id', 'session-id', 'max-task-entries'], [], ['discover-active-task']);
       if (options.values.get('scope') !== 'project') throw new Error('Antigravity memory requires explicit --scope project');
-      result = await installAntigravityProjectMemoryHook({ command: required(options, 'command'), projectRoot });
+      result = await installAntigravityProjectMemoryHook({
+        command: taskAwareMemoryHookCommand(options, 'Antigravity', '--threadforge-memory=antigravity-v1'), projectRoot,
+      });
       warning = 'Antigravity PreInvocation adds approved project memory as transient guidance once per execution; project hooks require user trust, and Threadforge does not change trust or tool authorization.';
     } else if (family === 'antigravity' && antigravitySubsystem === 'memory' && action === 'uninstall') {
       rejectUnexpected(options, ['scope', 'project-root']);
@@ -1722,7 +1725,11 @@ function required(options: ParsedOptions, key: string): string {
   return value;
 }
 
-function taskAwareMemoryHookCommand(options: ParsedOptions, host: 'Claude Code' | 'Codex' | 'Gemini' | 'Qwen', runtimeMarker: string): string {
+function taskAwareMemoryHookCommand(
+  options: ParsedOptions,
+  host: 'Antigravity' | 'Claude Code' | 'Codex' | 'Cursor' | 'Gemini' | 'Qwen',
+  runtimeMarker: string,
+): string {
   const command = required(options, 'command');
   const taskId = options.values.get('task-id');
   const sessionId = options.values.get('session-id');
@@ -1842,7 +1849,7 @@ function usage(): string {
     '  npm run adapter -- codex uninstall --project-root <absolute-path>',
     '  npm run adapter -- antigravity install|update [--scope user|project] [--project-root <absolute-path>] --command <shell-command-with-marker>',
     '  npm run adapter -- antigravity uninstall [--scope user|project] [--project-root <absolute-path>]',
-    '  npm run adapter -- antigravity memory install|update --scope project --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers>',
+    '  npm run adapter -- antigravity memory install|update --scope project --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers> [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]',
     '  npm run adapter -- antigravity memory uninstall --scope project --project-root <absolute-path>',
     '  npm run adapter -- antigravity plan-gate install|update --scope project --project-root <absolute-path> --command <threadforge-task-plan-guard-command-with-markers>',
     '  npm run adapter -- antigravity plan-gate uninstall --scope project --project-root <absolute-path>',
@@ -1948,7 +1955,7 @@ function usage(): string {
     '  npm run adapter -- gemini memory uninstall --project-root <absolute-path>',
     '  npm run adapter -- gemini plan-gate install|update --project-root <absolute-path> --command <threadforge-deny-only-plan-gate-command-with-markers>',
     '  npm run adapter -- gemini plan-gate uninstall --project-root <absolute-path>',
-    '  npm run adapter -- cursor memory install|update --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers>',
+    '  npm run adapter -- cursor memory install|update --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers> [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]',
     '  npm run adapter -- cursor memory uninstall --project-root <absolute-path>',
     '  npm run adapter -- cursor plan-gate install|update --project-root <absolute-path> --command <threadforge-deny-only-plan-gate-command-with-markers>',
     '  npm run adapter -- cursor plan-gate uninstall --project-root <absolute-path>',

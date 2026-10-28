@@ -1196,6 +1196,7 @@ test('adapter CLI manages Cursor session-start memory without changing telemetry
     await writeFile(hooksPath, JSON.stringify(original));
     const telemetryCommand = 'node observer.js --threadforge-hook=cursor';
     const memoryCommand = 'threadforge memory inject-cursor --project-id demo-project --threadforge-managed-cursor-memory=v1 --threadforge-memory=cursor-v1';
+    let activeMemoryCommand = memoryCommand;
     let result = await invoke(['cursor', 'install', '--project-root', root, '--command', telemetryCommand]);
     assert.equal(result.code, 0, result.stderr);
     result = await invoke(['cursor', 'memory', 'install', '--project-root', root, '--command', memoryCommand]);
@@ -1214,10 +1215,50 @@ test('adapter CLI manages Cursor session-start memory without changing telemetry
     result = await invoke(['cursor', 'memory', 'update', '--project-root', root, '--command', memoryCommand]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'unchanged');
+
+    result = await invoke([
+      'cursor', 'memory', 'update', '--project-root', root, '--command', memoryCommand,
+      '--task-id', 'cursor-task', '--session-id', 'cursor-session', '--max-task-entries', '4',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    activeMemoryCommand = memoryCommand.replace(
+      '--threadforge-memory=cursor-v1',
+      '--task-id cursor-task --session-id cursor-session --max-task-entries 4 --threadforge-memory=cursor-v1',
+    );
+    config = JSON.parse(await readFile(hooksPath, 'utf8'));
+    assert.equal(config.hooks.sessionStart.some((hook: { command: string }) => hook.command === activeMemoryCommand), true);
+
+    result = await invoke([
+      'cursor', 'memory', 'update', '--project-root', root, '--command', memoryCommand, '--discover-active-task',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    activeMemoryCommand = memoryCommand.replace(
+      '--threadforge-memory=cursor-v1',
+      '--discover-active-task --max-task-entries 6 --threadforge-memory=cursor-v1',
+    );
+    config = JSON.parse(await readFile(hooksPath, 'utf8'));
+    assert.equal(config.hooks.sessionStart.some((hook: { command: string }) => hook.command === activeMemoryCommand), true);
+
+    const beforeInvalidOptions = await readFile(hooksPath, 'utf8');
+    for (const [invalidOptions, expectedError] of [
+      [['--task-id', 'cursor-task', '--discover-active-task'], /mutually exclusive/],
+      [['--session-id', 'cursor-session'], /requires --task-id/],
+      [['--task-id', 'Cursor/Task'], /--task-id must match/],
+      [['--discover-active-task', '--max-task-entries', '21'], /between 1 and 20/],
+      [['--max-task-entries', '4'], /requires --task-id or --discover-active-task/],
+    ] as const) {
+      result = await invoke([
+        'cursor', 'memory', 'update', '--project-root', root, '--command', memoryCommand, ...invalidOptions,
+      ]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, expectedError);
+    }
+    assert.equal(await readFile(hooksPath, 'utf8'), beforeInvalidOptions);
+
     result = await invoke(['cursor', 'memory', 'uninstall', '--project-root', root]);
     assert.equal(result.code, 0, result.stderr);
     config = JSON.parse(await readFile(hooksPath, 'utf8'));
-    assert.equal(config.hooks.sessionStart.some((hook: { command: string }) => hook.command === memoryCommand), false);
+    assert.equal(config.hooks.sessionStart.some((hook: { command: string }) => hook.command === activeMemoryCommand), false);
     assert.equal(config.hooks.sessionStart.some((hook: { command: string }) => hook.command === telemetryCommand), true);
     assert.deepEqual(config.hooks.beforeSubmitPrompt, original.hooks.beforeSubmitPrompt);
   } finally {
@@ -1331,6 +1372,47 @@ test('adapter CLI installs project-only Antigravity approved-memory PreInvocatio
     result = await invoke(['antigravity', 'memory', 'update', '--scope', 'project', '--project-root', project, '--command', command], env);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'unchanged');
+
+    result = await invoke([
+      'antigravity', 'memory', 'update', '--scope', 'project', '--project-root', project,
+      '--command', command, '--task-id', 'antigravity-task', '--session-id', 'antigravity-session', '--max-task-entries', '5',
+    ], env);
+    assert.equal(result.code, 0, result.stderr);
+    const explicitTaskCommand = command.replace(
+      '--threadforge-memory=antigravity-v1',
+      '--task-id antigravity-task --session-id antigravity-session --max-task-entries 5 --threadforge-memory=antigravity-v1',
+    );
+    config = JSON.parse(await readFile(file, 'utf8'));
+    assert.deepEqual(config['threadforge-approved-memory'].PreInvocation, [{ type: 'command', command: explicitTaskCommand, timeout: 10 }]);
+
+    result = await invoke([
+      'antigravity', 'memory', 'update', '--scope', 'project', '--project-root', project,
+      '--command', command, '--discover-active-task',
+    ], env);
+    assert.equal(result.code, 0, result.stderr);
+    const discoveryCommand = command.replace(
+      '--threadforge-memory=antigravity-v1',
+      '--discover-active-task --max-task-entries 6 --threadforge-memory=antigravity-v1',
+    );
+    config = JSON.parse(await readFile(file, 'utf8'));
+    assert.deepEqual(config['threadforge-approved-memory'].PreInvocation, [{ type: 'command', command: discoveryCommand, timeout: 10 }]);
+
+    const beforeInvalidOptions = await readFile(file, 'utf8');
+    for (const [invalidOptions, expectedError] of [
+      [['--task-id', 'antigravity-task', '--discover-active-task'], /mutually exclusive/],
+      [['--session-id', 'antigravity-session'], /requires --task-id/],
+      [['--task-id', 'Antigravity/Task'], /--task-id must match/],
+      [['--discover-active-task', '--max-task-entries', '21'], /between 1 and 20/],
+      [['--max-task-entries', '5'], /requires --task-id or --discover-active-task/],
+    ] as const) {
+      result = await invoke([
+        'antigravity', 'memory', 'update', '--scope', 'project', '--project-root', project,
+        '--command', command, ...invalidOptions,
+      ], env);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, expectedError);
+    }
+    assert.equal(await readFile(file, 'utf8'), beforeInvalidOptions);
 
     result = await invoke(['antigravity', 'memory', 'uninstall', '--project-root', project], env);
     assert.equal(result.code, 1);

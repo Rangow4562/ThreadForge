@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/memory-feedback-list-v1.schema.json",
+  "title": "Threadforge local memory feedback list",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_id", "total", "limit", "offset", "feedback", "evidence_class", "cutover_evidence_eligible", "execution_authorized"],
+  "properties": {
+    "schema_version": { "const": "threadforge.memory-feedback-list.v1" },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "total": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
+    "offset": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "feedback": { "type": "array", "maxItems": 500, "items": { "$ref": "memory-feedback-v1.schema.json" } },
+    "evidence_class": { "const": "self_reported" },
+    "cutover_evidence_eligible": { "const": false },
+    "execution_authorized": { "const": false }
+  }
+}

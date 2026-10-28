@@ -112,11 +112,20 @@ func TestDatadogSmokeScriptsAreExplicitSyntheticOnlyAndSampleBound(t *testing.T)
 	}
 }
 
-func TestDatadogPowerShellSmokePostsOnlyPinnedSampleToLocalFixture(t *testing.T) {
-	pwsh, err := exec.LookPath("pwsh")
+func testPowerShell(t *testing.T) string {
+	t.Helper()
+	path, err := exec.LookPath("pwsh")
 	if err != nil {
 		t.Skip("PowerShell Core is unavailable")
 	}
+	if exec.Command(path, "-NoLogo", "-NoProfile", "-Command", "exit 0").Run() != nil {
+		t.Skip("PowerShell Core is unavailable")
+	}
+	return path
+}
+
+func TestDatadogPowerShellSmokePostsOnlyPinnedSampleToLocalFixture(t *testing.T) {
+	pwsh := testPowerShell(t)
 	type requestCapture struct {
 		method      string
 		path        string
@@ -187,10 +196,7 @@ func TestDatadogPowerShellSmokePostsOnlyPinnedSampleToLocalFixture(t *testing.T)
 }
 
 func TestDatadogPowerShellSmokeRejectsNon202WithoutExposingResponseBody(t *testing.T) {
-	pwsh, err := exec.LookPath("pwsh")
-	if err != nil {
-		t.Skip("PowerShell Core is unavailable")
-	}
+	pwsh := testPowerShell(t)
 	type requestCapture struct {
 		method string
 		path   string

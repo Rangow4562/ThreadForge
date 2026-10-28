@@ -6,7 +6,7 @@
 
 **Local-first memory, task continuity, calibrated typed decisions, and procedural learning for AI coding agents.**
 
-[![Release](https://img.shields.io/badge/Release-v0.3.5-2563eb?style=flat-square&logo=github)](https://github.com/Rangow4562/ThreadForge/releases/tag/v0.3.5)
+[![Release](https://img.shields.io/badge/Release-v0.4.0-2563eb?style=flat-square&logo=github)](https://github.com/Rangow4562/ThreadForge/releases/tag/v0.4.0)
 [![License](https://img.shields.io/badge/License-Apache--2.0-2f855a?style=flat-square)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=flat-square&logo=go&logoColor=white)](go.mod)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white)](python/pyproject.toml)

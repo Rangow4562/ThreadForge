@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -320,7 +321,18 @@ func TestSensitiveTreeEntriesUsePathOnlyReceiptsButStillDetectBackupDifferences(
 func backupFixture(t *testing.T) (string, string) {
 	t.Helper()
 	sourceRoot := t.TempDir()
-	backupRoot := filepath.Join(t.TempDir(), "backup")
+	backupParent := t.TempDir()
+	backupRoot := filepath.Join(backupParent, "backup")
+	t.Cleanup(func() {
+		for _, root := range []string{sourceRoot, backupParent} {
+			_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+				if err == nil && d != nil && !d.IsDir() {
+					_ = os.Chmod(p, 0o600)
+				}
+				return nil
+			})
+		}
+	})
 	return sourceRoot, backupRoot
 }
 
@@ -394,6 +406,14 @@ func copyBackupFixtureTree(t *testing.T, sourceRoot, backupRoot string) {
 			return err
 		}
 		return os.Chmod(destination, info.Mode().Perm())
+	})
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(backupRoot, func(p string, d fs.DirEntry, err error) error {
+			if err == nil && d != nil && !d.IsDir() {
+				_ = os.Chmod(p, 0o600)
+			}
+			return nil
+		})
 	})
 	if err != nil {
 		t.Fatalf("copy backup test tree: %v", err)

@@ -3334,11 +3334,12 @@ func invokePython(ctx context.Context, python, requestID, operation string, para
 	command := exec.CommandContext(ctx, python, "-m", "threadforge_py")
 	command.Env = pythonEnvironment()
 	command.Stdin = bytes.NewReader(append(request, '\n'))
-	command.Stderr = io.Discard
+	var errBuffer bytes.Buffer
+	command.Stderr = &errBuffer
 	output := &limitedOutput{limit: maxPythonProtocolResponse}
 	command.Stdout = output
 	if err := command.Run(); err != nil {
-		return pythonProtocolResponse{}, errors.New("Python process failed")
+		return pythonProtocolResponse{}, fmt.Errorf("Python process failed: %w, stderr: %s", err, errBuffer.String())
 	}
 	var response pythonProtocolResponse
 	if err := decodeJSONBytes(output.Bytes(), &response); err != nil || response.SchemaVersion != "threadforge.python.v1" ||

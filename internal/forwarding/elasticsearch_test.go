@@ -142,13 +142,7 @@ func TestElasticsearchSmokeScriptsAreExplicitSyntheticOnly(t *testing.T) {
 }
 
 func TestElasticsearchPowerShellSmokeScriptUsesLocalFixtureForAPIKeyAndBasicAuth(t *testing.T) {
-	pwsh, err := exec.LookPath("pwsh")
-	if err != nil {
-		pwsh, err = exec.LookPath("powershell.exe")
-	}
-	if err != nil {
-		t.Skip("PowerShell is unavailable")
-	}
+	pwsh := testPowerShell(t)
 	type capturedRequest struct {
 		method        string
 		path          string
@@ -346,13 +340,7 @@ func TestElasticsearchPosixSmokeScriptUsesMockCurlAndExternalCredentials(t *test
 }
 
 func TestElasticsearchPowerShellSmokeDoesNotWriteWhenDataStreamIsMissing(t *testing.T) {
-	pwsh, err := exec.LookPath("pwsh")
-	if err != nil {
-		pwsh, err = exec.LookPath("powershell.exe")
-	}
-	if err != nil {
-		t.Skip("PowerShell is unavailable")
-	}
+	pwsh := testPowerShell(t)
 	methods := make(chan string, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		methods <- r.Method

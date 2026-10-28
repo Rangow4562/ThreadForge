@@ -9,6 +9,7 @@ import math
 import os
 import random
 import re
+import shutil
 import stat
 import tempfile
 import zipfile
@@ -271,7 +272,23 @@ def _write_npz_exclusive(root: Path, relative_path: str, arrays: dict[str, np.nd
             except FileExistsError:
                 return existing_digest()
             except (AttributeError, NotImplementedError, OSError):
-                raise DistillationError("atomic exclusive distillation cache installation is unavailable") from None
+                try:
+                    out_fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    try:
+                        with open(temporary, "rb") as src, os.fdopen(out_fd, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                            dst.flush()
+                            os.fsync(dst.fileno())
+                    except Exception:
+                        try:
+                            target.unlink()
+                        except OSError:
+                            pass
+                        raise
+                except FileExistsError:
+                    return existing_digest()
+                except OSError:
+                    raise DistillationError("atomic exclusive distillation cache installation is unavailable") from None
             installed = target.lstat()
             if not stat.S_ISREG(installed.st_mode) or stat.S_ISLNK(installed.st_mode):
                 raise DistillationError("installed distillation cache is not a regular file")
@@ -328,7 +345,29 @@ def _write_json_exclusive(root: Path, relative_path: str, content: bytes) -> str
                     raise DistillationError("an existing synthetic-state file conflicts with regenerated output")
                 return existing_digest
             except (AttributeError, NotImplementedError, OSError):
-                raise DistillationError("atomic exclusive synthetic-state installation is unavailable") from None
+                try:
+                    out_fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    try:
+                        with os.fdopen(out_fd, "wb") as dst:
+                            dst.write(content)
+                            dst.flush()
+                            os.fsync(dst.fileno())
+                    except Exception:
+                        try:
+                            target.unlink()
+                        except OSError:
+                            pass
+                        raise
+                except FileExistsError:
+                    existing, existing_digest = _read_cache_bytes(
+                        root, relative_path, [0], extension=".json", file_limit=MAX_SOURCE_JSON_BYTES,
+                        label="synthetic-state JSON",
+                    )
+                    if existing != content:
+                        raise DistillationError("an existing synthetic-state file conflicts with regenerated output")
+                    return existing_digest
+                except OSError:
+                    raise DistillationError("atomic exclusive synthetic-state installation is unavailable") from None
             return digest
         finally:
             try:

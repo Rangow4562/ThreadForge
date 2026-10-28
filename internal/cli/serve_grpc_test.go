@@ -21,6 +21,7 @@ func TestServeRejectsNonLoopbackOTLPGRPCAddress(t *testing.T) {
 }
 
 func TestServeEmptyGRPCListenDisablesDefaultListener(t *testing.T) {
+	probeLoopback(t)
 	if os.Getenv("THREADFORGE_TEST_SERVE_EMPTY_GRPC") == "1" {
 		code := Run([]string{"serve", "--listen", os.Getenv("THREADFORGE_TEST_HTTP_LISTEN"), "--grpc-listen", ""}, os.Stdout, os.Stderr)
 		os.Exit(code)

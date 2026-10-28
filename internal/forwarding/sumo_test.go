@@ -143,10 +143,7 @@ func TestSumoSmokeScriptIsExplicitSyntheticOnlyAndKeepsTokenOffArgv(t *testing.T
 }
 
 func TestSumoPowerShellSmokeScriptPostsOnlyPinnedSampleToLocalFixture(t *testing.T) {
-	pwsh, err := exec.LookPath("pwsh")
-	if err != nil {
-		t.Skip("PowerShell Core is unavailable")
-	}
+	pwsh := testPowerShell(t)
 	type requestCapture struct {
 		method string
 		path   string

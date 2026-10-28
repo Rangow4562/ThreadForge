@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2831,6 +2832,18 @@ func TestValidRRSISourceInventoryRejectsAuthorityAndTaskSetTampering(t *testing.
 	}
 }
 
+func makeTreeWritableForCleanup(t *testing.T, root string) {
+	t.Helper()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err == nil && d != nil && !d.IsDir() {
+				_ = os.Chmod(p, 0o600)
+			}
+			return nil
+		})
+	})
+}
+
 func TestEvolutionRRSISourceInventoryCLIDerivesLocallyAndRejectsDirtyFiles(t *testing.T) {
 	python, err := exec.LookPath("python")
 	if err != nil {
@@ -2846,6 +2859,7 @@ func TestEvolutionRRSISourceInventoryCLIDerivesLocallyAndRejectsDirtyFiles(t *te
 	}
 	t.Setenv("PYTHONPATH", filepath.Join(repositoryRoot, "python"))
 	root := filepath.Join(t.TempDir(), "rrsi")
+	makeTreeWritableForCleanup(t, root)
 	sourceFile := filepath.Join(root, "domains", "eng", "data", "split_engd.json")
 	if err := os.MkdirAll(filepath.Dir(sourceFile), 0o700); err != nil {
 		t.Fatal(err)
@@ -2914,6 +2928,7 @@ func TestEvolutionFrontierInventoryCLIProducesOnlyUnanchoredCandidate(t *testing
 	}
 	t.Setenv("PYTHONPATH", filepath.Join(repositoryRoot, "python"))
 	root := filepath.Join(t.TempDir(), "frontier")
+	makeTreeWritableForCleanup(t, root)
 	for _, task := range []string{"KernelEngineering/Task-Alpha", "KernelEngineering/Task-Beta"} {
 		path := filepath.Join(root, "benchmarks", filepath.FromSlash(task), "frontier_eval", "eval_command.txt")
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -3272,6 +3287,7 @@ func TestEvolutionPairedEvaluationCLIReportsComparisonWithoutAuthorizingWork(t *
 func TestCutoverAssessmentFailsClosedAndDoesNotMutateSources(t *testing.T) {
 	root := t.TempDir()
 	repositoryRoot := filepath.Join(root, "candidate")
+	makeTreeWritableForCleanup(t, repositoryRoot)
 	if err := os.Mkdir(repositoryRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}

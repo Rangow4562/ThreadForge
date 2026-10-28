@@ -3,6 +3,7 @@ package migrate
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -336,6 +337,14 @@ func mancodeGitRefFixture(t *testing.T, transportMode string, includeUnsupported
 func mancodeGitRefFixtureWithoutRef(t *testing.T, transportMode string) (string, string, []byte) {
 	t.Helper()
 	root := t.TempDir()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err == nil && d != nil && !d.IsDir() {
+				_ = os.Chmod(p, 0o600)
+			}
+			return nil
+		})
+	})
 	runMancodeGitRefGit(t, root, "", "init", "--quiet")
 	runMancodeGitRefGit(t, root, "", "config", "user.name", "Threadforge Test")
 	runMancodeGitRefGit(t, root, "", "config", "user.email", "threadforge-test@example.invalid")

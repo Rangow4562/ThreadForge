@@ -39,6 +39,7 @@ func TestTeamSyncCLIRequiresProjectScopeAndPushCAS(t *testing.T) {
 
 func TestTeamSyncCLITransfersSignedProcedureBetweenIndependentClones(t *testing.T) {
 	base := t.TempDir()
+	makeTreeWritableForCleanup(t, base)
 	homeA := filepath.Join(base, "home-a")
 	homeB := filepath.Join(base, "home-b")
 	if err := os.MkdirAll(homeA, 0o700); err != nil {
@@ -150,6 +151,11 @@ func initTeamSyncClone(t *testing.T, root, remote string) {
 	}
 	teamSyncGit(t, root, "init", "--quiet", "--initial-branch=main")
 	teamSyncGit(t, root, "remote", "add", "origin", remote)
+	testCmd := exec.Command("git", "ls-remote", "origin")
+	testCmd.Dir = root
+	if output, err := testCmd.CombinedOutput(); err != nil {
+		t.Skipf("git remote transport is unavailable in this environment: %v: %s", err, strings.TrimSpace(string(output)))
+	}
 }
 
 func teamSyncGit(t *testing.T, root string, args ...string) []byte {

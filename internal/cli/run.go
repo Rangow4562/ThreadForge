@@ -39,7 +39,7 @@ import (
 	"github.com/threadforge-ai/threadforge/pkg/teamauth"
 )
 
-const version = "0.3.5"
+const version = "0.4.0"
 const maxGraphBytes = 2 << 20
 
 func Run(args []string, stdout, stderr io.Writer) int {
@@ -1462,12 +1462,14 @@ func runSession(args []string, stdout, stderr io.Writer) int {
 
 func runMemory(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "memory command required: learn, inject, inject-codex, inject-gemini, inject-cursor, inject-qwen, inject-antigravity, inject-opencode, inject-copilot, fingerprint, publish, read, get, list, or history")
+		_, _ = fmt.Fprintln(stderr, "memory command required: learn, feedback, inject, inject-codex, inject-gemini, inject-cursor, inject-qwen, inject-antigravity, inject-opencode, inject-copilot, fingerprint, publish, read, get, list, or history")
 		return 2
 	}
 	switch args[0] {
 	case "learn":
 		return learnMemory(args[1:], stdout, stderr)
+	case "feedback":
+		return runMemoryFeedback(args[1:], stdout, stderr)
 	case "inject":
 		return injectClaudeMemory(args[1:], stdin, stdout, stderr)
 	case "inject-codex":
@@ -4231,6 +4233,9 @@ Commands:
   migrate records --id <migration-id> [--limit 50] [--offset 0]
   migrate rollback --id <migration-id> --reason <reason> [--db <path>]
   memory learn --input <events.jsonl> --project-id <id> [--project-root <root>] [--model-path <local-dir>] [--device cpu] [--dtype float32] [--python python] [--actor local-user] [--db <path>]
+  memory feedback record --project-root <root> --project-id <id> --task-id <id> --target-kind <procedure|fact|decision|policy> --target-id <id> --target-revision <n> --exposure <used|shown_not_used> --utility <helpful|neutral|harmful|not_assessed> --task-result <passed|failed|inconclusive> --harness <id> [--db <path>]
+  memory feedback list --project-id <id> [--task-id <id>] [--target-kind <kind>] [--target-id <id>] [--harness <id>] [--limit 50] [--offset 0]
+  memory feedback summary --project-id <id> [--max-records 10000]
   memory inject --project-id <id> --threadforge-managed-claude-memory=v1 --threadforge-memory=claude-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory inject-codex --project-id <id> --threadforge-managed-codex-memory=v1 --threadforge-memory=codex-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory inject-gemini --project-id <id> --threadforge-managed-gemini-memory=v1 --threadforge-memory=gemini-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]

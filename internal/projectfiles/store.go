@@ -476,10 +476,19 @@ func writeNoReplace(filename string, data []byte) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	if err := os.Link(temporaryName, filename); err != nil {
+	if err := os.Link(temporaryName, filename); err == nil {
+		return nil
+	}
+	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
 		return err
 	}
-	return nil
+	defer file.Close()
+	if _, err := file.Write(data); err != nil {
+		_ = os.Remove(filename)
+		return err
+	}
+	return file.Sync()
 }
 
 func parseRevisionFilename(name string) (int, error) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -131,7 +132,22 @@ func TestCICodexChildProcessHelper(t *testing.T) {
 	}
 }
 
+func probeLoopback(t *testing.T) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("loopback listen unavailable in this environment: %v", err)
+	}
+	defer ln.Close()
+	conn, err := net.DialTimeout("tcp", ln.Addr().String(), 100*time.Millisecond)
+	if err != nil {
+		t.Skipf("loopback connections unavailable in this environment (AppContainer/sandbox socket isolation): %v", err)
+	}
+	_ = conn.Close()
+}
+
 func TestCIExecStartsLocalCaptureValidatesAndKeepsOnlyRedactedLog(t *testing.T) {
+	probeLoopback(t)
 	outputBase := t.TempDir()
 	t.Setenv("THREADFORGE_TEST_CI_HELPER", "1")
 	t.Setenv("THREADFORGE_TEST_CI_NO_EVENT", "")
@@ -284,6 +300,7 @@ func TestCIExecRejectsAllHarnessMode(t *testing.T) {
 }
 
 func TestCIExecCodexUsesPrivateOTLPHomeWithoutCopyingAuth(t *testing.T) {
+	probeLoopback(t)
 	userHome := filepath.Join(t.TempDir(), "user-codex")
 	if err := os.Mkdir(userHome, 0o700); err != nil {
 		t.Fatal(err)
@@ -338,6 +355,7 @@ func TestCIExecCodexUsesPrivateOTLPHomeWithoutCopyingAuth(t *testing.T) {
 }
 
 func TestCIDetachedSessionSpansSeparateCLIProcesses(t *testing.T) {
+	probeLoopback(t)
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)

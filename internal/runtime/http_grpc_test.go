@@ -85,7 +85,22 @@ func TestOpenLocalListenersLeavesGRPCDisabledWhenAddressIsEmpty(t *testing.T) {
 	_ = httpListener.Close()
 }
 
+func probeLoopback(t *testing.T) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("loopback listen unavailable: %v", err)
+	}
+	defer ln.Close()
+	conn, err := net.DialTimeout("tcp", ln.Addr().String(), 100*time.Millisecond)
+	if err != nil {
+		t.Skipf("loopback connections unavailable in this environment (AppContainer/sandbox socket isolation): %v", err)
+	}
+	_ = conn.Close()
+}
+
 func TestLocalServerServesHTTPAndAllOTLPGRPCSignalsThenShutsDown(t *testing.T) {
+	probeLoopback(t)
 	home := t.TempDir()
 	database, err := store.Open(filepath.Join(home, "threadforge.sqlite"))
 	if err != nil {

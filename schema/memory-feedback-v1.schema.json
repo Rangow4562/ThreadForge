@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/memory-feedback-v1.schema.json",
+  "title": "Threadforge self-reported memory outcome feedback",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "project_id", "task_id", "target_kind", "target_id", "target_revision", "exposure", "utility", "task_result", "harness", "actor", "evidence_class", "cutover_evidence_eligible", "execution_authorized", "created_at"],
+  "properties": {
+    "schema_version": { "const": "threadforge.memory-feedback.v1" },
+    "id": { "$ref": "continuity-v1.schema.json#/$defs/id" },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "task_id": { "$ref": "continuity-v1.schema.json#/$defs/id" },
+    "session_id": { "$ref": "continuity-v1.schema.json#/$defs/id" },
+    "target_kind": { "enum": ["procedure", "fact", "decision", "policy"] },
+    "target_id": { "$ref": "continuity-v1.schema.json#/$defs/id" },
+    "target_revision": { "type": "integer", "minimum": 1 },
+    "exposure": { "enum": ["used", "shown_not_used"] },
+    "utility": { "enum": ["helpful", "neutral", "harmful", "not_assessed"] },
+    "task_result": { "enum": ["passed", "failed", "inconclusive"] },
+    "harness": { "$ref": "continuity-v1.schema.json#/$defs/id" },
+    "actor": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "evidence_class": { "const": "self_reported" },
+    "cutover_evidence_eligible": { "const": false },
+    "execution_authorized": { "const": false },
+    "created_at": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "exposure": { "const": "used" } }, "required": ["exposure"] },
+      "then": { "properties": { "utility": { "enum": ["helpful", "neutral", "harmful"] } } }
+    },
+    {
+      "if": { "properties": { "exposure": { "const": "shown_not_used" } }, "required": ["exposure"] },
+      "then": { "properties": { "utility": { "const": "not_assessed" } } }
+    }
+  ]
+}

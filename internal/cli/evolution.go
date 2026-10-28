@@ -869,6 +869,14 @@ func writePrivateInventoryBundle(path string, data []byte) (string, error) {
 		if err := os.Link(temporaryPath, path); err != nil {
 			if existing, found, readErr := readExistingInventoryBundle(path); readErr == nil && found && bytes.Equal(existing, data) {
 				resultStatus = "bundle_already_present"
+			} else if file, createErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); createErr == nil {
+				_, writeErr := file.Write(data)
+				syncErr := file.Sync()
+				closeErr := file.Close()
+				if writeErr != nil || syncErr != nil || closeErr != nil {
+					_ = os.Remove(path)
+					return "", errors.New("bundle could not be published without replacing existing data")
+				}
 			} else {
 				return "", errors.New("bundle could not be published without replacing existing data")
 			}

@@ -153,6 +153,11 @@ func newGitTestClone(t *testing.T, root, name, remote string) string {
 	}
 	runGitTest(t, clone, "init", "--quiet", "--initial-branch=main")
 	runGitTest(t, clone, "remote", "add", "origin", remote)
+	testCmd := exec.Command("git", "ls-remote", "origin")
+	testCmd.Dir = clone
+	if output, err := testCmd.CombinedOutput(); err != nil {
+		t.Skipf("git remote transport is unavailable in this environment: %v: %s", err, strings.TrimSpace(string(output)))
+	}
 	return clone
 }
 

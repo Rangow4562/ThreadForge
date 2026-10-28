@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/memory-feedback-result-v1.schema.json",
+  "title": "Threadforge memory feedback append result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "sequence", "feedback"],
+  "properties": {
+    "schema_version": { "const": "threadforge.memory-feedback-result.v1" },
+    "status": { "const": "recorded" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "feedback": { "$ref": "memory-feedback-v1.schema.json" }
+  }
+}

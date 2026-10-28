@@ -57,7 +57,18 @@ await generateText({ model, prompt, telemetry });
 
 Use Vercel AI SDK v7.0.114 or later for the runtime/tool-context privacy guarantee: earlier v7 releases did not consistently apply these exclusions to telemetry-channel events. This version floor does not sanitize attributes added by other registered integrations or exporters; review those separately. See the upstream [telemetry-context filtering fix](https://github.com/vercel/ai/issues/21447).
 
-The application owns the telemetry integration, OpenTelemetry provider/exporter, endpoint, and retention policy. Avoid registering another integration that records content or context. The SDK/provider span attributes and live Vercel package compatibility have not been validated here; this helper only supplies privacy-minimizing per-call options and is not telemetry-delivery evidence.
+An optional installed-package smoke is available from `adapters/`:
+
+```powershell
+$smoke = Join-Path $env:TEMP ("threadforge-ai-sdk-" + [guid]::NewGuid().ToString("N"))
+npm install --prefix $smoke --no-save --package-lock=false `
+  ai@7.0.155 @ai-sdk/otel@1.0.155 @opentelemetry/sdk-trace@3.0.0
+node --experimental-strip-types scripts/vercel-ai-sdk-live-smoke.mjs --npm-prefix $smoke
+```
+
+The optional packages are installed outside the repository; no Threadforge manifest or lockfile changes are needed. The smoke uses `MockLanguageModelV3` plus an in-memory span exporter and prints a content-free version/count receipt. On October 28, 2026, it captured three spans with neither prompt nor output marker present and made zero real model/provider calls. It does not test runtime-context/tool-context payloads, real provider spans, or application-owned exporter filtering, and it is not part of the default adapter suite.
+
+The application owns the telemetry integration, OpenTelemetry provider/exporter, endpoint, and retention policy. Avoid registering another integration that records content or context. The selected-version smoke validates one published-package path only; other package versions, provider-specific span attributes, and application exporter behavior remain unverified.
 
 For applications that own an OpenTelemetry provider, `@threadforge/adapter-contracts/otel-span-processor` exports `createThreadforgeSpanProcessor(options={})`, a dependency-free structural `SpanProcessor` implementation. It accepts only a fixed set of `gen_ai.operation.name` values and bounded provider/model/token metadata, and posts projected events to the loopback `/v1/events` intake. `endpoint` defaults to `http://127.0.0.1:4318/v1/events`; `timeoutMs` defaults to `1500` and must be from 100 to 10000. At most 64 intake requests are in flight; overflow is dropped, and `forceFlush()`/`shutdown()` wait for accepted in-flight requests. Span names, trace/span IDs, arbitrary attributes, events, links, exception descriptions, prompt/output text, and credential-shaped provider/model values are not copied. This is a local metadata bridge, not Beacon's OpenTelemetry auto-instrumentation or a live-version compatibility claim. The application remains responsible for provider/exporter setup and for ensuring its own other exporters do not forward sensitive data.
 

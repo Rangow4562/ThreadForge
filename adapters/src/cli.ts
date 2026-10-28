@@ -96,6 +96,7 @@ import { hermesHookEvents, hermesManagedMarker, renderHermesHookConfig, runHerme
 import { getHermesHistoryStatus, syncHermesHistory } from './hermes-history.ts';
 import { deepseekHookEvents, deepseekManagedMarker, runDeepSeekHook } from './deepseek-hook.ts';
 import { getDeepSeekHistoryStatus, syncDeepSeekHistory, watchDeepSeekHistory } from './deepseek-history.ts';
+import { renderDeepSeekHarnessMcpPatch } from './dsh-mcp-patch.ts';
 import { getClineHistoryStatus, syncClineHistory, watchClineHistory } from './cline-history.ts';
 import { getClinePluginStatus, installClinePlugin, uninstallClinePlugin, updateClinePlugin } from './cline-plugin-config.ts';
 import {
@@ -167,7 +168,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   let fxSubsystem: 'sessions' | undefined;
   let piSubsystem: 'sessions' | undefined;
   let primeSubsystem: 'sessions' | undefined;
-  let dshSubsystem: 'sessions' | undefined;
+  let dshSubsystem: 'sessions' | 'mcp' | undefined;
   let clineSubsystem: 'sessions' | 'plugin' | 'mcp' | undefined;
   let openHandsSubsystem: 'mcp' | undefined;
   let projectSkillSubsystem: 'skills' | undefined;
@@ -377,6 +378,15 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   }
   if (family === 'dsh' && action === 'sessions') {
     dshSubsystem = 'sessions';
+    action = rest[0];
+    rest = rest.slice(1);
+    if (!action) {
+      stderr.write(`${usage()}\n`);
+      return 2;
+    }
+  }
+  if (family === 'dsh' && action === 'mcp') {
+    dshSubsystem = 'mcp';
     action = rest[0];
     rest = rest.slice(1);
     if (!action) {
@@ -674,6 +684,14 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
         (family === 'omp' && ompScope === 'user') || (family === 'kimi' && projectSkillSubsystem !== 'skills'))
       ? ''
       : required(options, 'project-root');
+    if (family === 'dsh' && dshSubsystem === 'mcp' && action === 'print-patch') {
+      rejectUnexpected(options, ['project-root', 'command'], ['arg']);
+      if (!path.isAbsolute(projectRoot)) throw new Error('--project-root must be an absolute path');
+      const command = required(options, 'command');
+      const args = await buildManagedMcpArgs(projectRoot, options.repeated.get('arg') ?? []);
+      stdout.write(renderDeepSeekHarnessMcpPatch(command, args));
+      return 0;
+    }
     if (family === 'dsh' && dshSubsystem === 'sessions' && action === 'status') {
       rejectUnexpected(options, ['dsh-home', 'sessions-dir', 'state-path', 'max-sessions', 'workspace', 'session-id']);
       const status = await getDeepSeekHistoryStatus({
@@ -1802,6 +1820,7 @@ function usage(): string {
     '  npm run adapter -- grok sessions status [--sessions-dir <absolute-path>] [--state-path <absolute-path>] [--max-sessions <1-5000>]',
     '  npm run adapter -- grok sessions sync [--sessions-dir <absolute-path>] [--state-path <absolute-path>] [--endpoint <loopback-v1-events-url>] [--max-sessions <1-5000>] [--print] [--include-content]',
     '  npm run adapter -- dsh hook <SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|Stop|SubagentStart|SubagentStop> --threadforge-dsh-hook=v1',
+    '  npm run adapter -- dsh mcp print-patch --project-root <absolute-path> --command <threadforge-executable> --arg mcp --arg serve --arg --project-root --arg <same-project-root>',
     '  npm run adapter -- dsh sessions status [--dsh-home <absolute-path>|--sessions-dir <absolute-path>] [--state-path <absolute-path>] [--max-sessions <1-5000>] [--workspace <absolute-path>] [--session-id <id>]',
     '  npm run adapter -- dsh sessions sync [--dsh-home <absolute-path>|--sessions-dir <absolute-path>] [--state-path <absolute-path>] [--endpoint <loopback-v1-events-url>] [--max-sessions <1-5000>] [--workspace <absolute-path>] [--session-id <id>] [--print] [--include-content] [--watch --interval <5s-168h>]',
     '  npm run adapter -- claude-cowork otel print-config --endpoint <public-https-collector-url>',

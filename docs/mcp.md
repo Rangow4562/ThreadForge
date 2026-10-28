@@ -202,6 +202,10 @@ npm.cmd --prefix adapters run adapter -- mcp uninstall --host zcode --project-ro
 
 It stores only `type`, `command`, and `args`, preserving other project config and MCP servers. It refuses credential-like values, unowned collisions, malformed JSON and unsupported entry fields. It does not enable MCP, connect the project server, or grant trust. ZCode's MCP design specifies a separate explicit user connection decision for project-origin servers; the Threadforge manager does not write or make that decision. The `zcode` executable is unavailable here, so this is a tested file adapter only, not live discovery or tool-dispatch evidence. See [ZCode project MCP](zcode-mcp.md) and ZCode's official [configuration guide](https://github.com/zai-org/ZCode/blob/main/apps/zcode-cli/docs/usage/03-config.md) and [MCP design](https://github.com/zai-org/ZCode/blob/main/apps/zcode-cli/docs/design/v2/mcp.md).
 
+## DeepSeek Harness manual MCP overlay
+
+DeepSeek Harness accepts explicit Cordis `--patch` overlays but does not auto-discover a project MCP file. `dsh mcp print-patch` emits a YAML insertion for `@deepseek-ai/dsh-mcp-client`; save it in the project and pass the path to each host invocation. This renderer does not install files or add a bootstrap host ID. See [DeepSeek Harness MCP access](deepseek-harness-mcp.md) for the command and verification limits.
+
 ## OpenHands user-global MCP
 
 OpenHands CLI uses a user-level MCP config at `~/.openhands/mcp.json` and does not document a project-level MCP file. Threadforge has a separate global manager:

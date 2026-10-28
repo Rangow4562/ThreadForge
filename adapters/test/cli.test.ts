@@ -1825,6 +1825,28 @@ test('DeepSeek Harness CLI accepts only marked events and preserves the empty no
   assert.equal(result.stderr.includes('private command'), false);
 });
 
+test('DeepSeek Harness MCP CLI prints a manual project Cordis patch without changing files or permissions', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-dsh-mcp-'));
+  const args = ['--project-root', root, '--command', 'threadforge.exe',
+    '--arg', 'mcp', '--arg', 'serve', '--arg', '--project-root', '--arg', root];
+  try {
+    const result = await invoke(['dsh', 'mcp', 'print-patch', ...args]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /^- insert:\n/);
+    assert.match(result.stdout, /name: '@deepseek-ai\/dsh-mcp-client'/);
+    assert.match(result.stdout, /serverName: threadforge\n        transport: stdio/);
+    assert.match(result.stdout, /--threadforge-managed-mcp=v1/);
+    assert.ok(result.stdout.includes(root));
+    assert.doesNotMatch(result.stdout, /\benv:|\btrust:|autoApprove|permissionOverride/i);
+    await assert.rejects(readFile(path.join(root, '.dsh', 'threadforge-mcp.patch.yml')));
+
+    const rejected = await invoke(['deepseek-harness', 'mcp', 'print-patch', ...args.map((value, index) =>
+      index === args.indexOf('threadforge.exe') ? 'threadforge token=fixture-secret' : value)]);
+    assert.equal(rejected.code, 1);
+    assert.match(rejected.stderr, /credential-free/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('DeepSeek session CLI exposes read-only status and bounded sync commands', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-dsh-cli-'));
   const stateDirectory = path.join(path.dirname(root), `${path.basename(root)}-threadforge-state`);
@@ -2156,7 +2178,7 @@ test('direct ZCode MCP CLI manages its project config without changing trust set
     let config = JSON.parse(await readFile(configPath, 'utf8'));
     assert.deepEqual(config.mcp.servers.threadforge, {
       type: 'stdio', command: 'threadforge.exe',
-      args: ['mcp', 'serve', '--project-root', await realpath(root), '--threadforge-managed-mcp=v1'],
+      args: ['mcp', 'serve', '--project-root', root, '--threadforge-managed-mcp=v1'],
     });
     assert.deepEqual(config.features, original.features);
     assert.deepEqual(config.mcp.servers.analytics, original.mcp.servers.analytics);

@@ -63,6 +63,53 @@ test('adapter CLI manages Claude approved-memory injection without disturbing ot
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'unchanged');
 
+    result = await invoke([
+      'claude-code', 'memory', 'update', '--project-root', root, '--command', command,
+      '--task-id', 'claude-task', '--session-id', 'claude-session', '--max-task-entries', '2',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    const explicitTaskCommand = command.replace(
+      '--threadforge-memory=claude-v1',
+      '--task-id claude-task --session-id claude-session --max-task-entries 2 --threadforge-memory=claude-v1',
+    );
+    settings = JSON.parse(await readFile(path.join(root, '.claude', 'settings.json'), 'utf8'));
+    assert.equal(settings.hooks.UserPromptSubmit[0].hooks[0].command, explicitTaskCommand);
+
+    result = await invoke([
+      'claude-code', 'memory', 'update', '--project-root', root, '--command', command, '--discover-active-task',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    const discoveryCommand = command.replace(
+      '--threadforge-memory=claude-v1',
+      '--discover-active-task --max-task-entries 6 --threadforge-memory=claude-v1',
+    );
+    settings = JSON.parse(await readFile(path.join(root, '.claude', 'settings.json'), 'utf8'));
+    assert.equal(settings.hooks.UserPromptSubmit[0].hooks[0].command, discoveryCommand);
+
+    const settingsPath = path.join(root, '.claude', 'settings.json');
+    const beforeInvalidOptions = await readFile(settingsPath, 'utf8');
+    for (const [invalidOptions, expectedError] of [
+      [['--task-id', 'claude-task', '--discover-active-task'], /mutually exclusive/],
+      [['--session-id', 'claude-session'], /requires --task-id/],
+      [['--task-id', 'Claude/Task'], /--task-id must match/],
+      [['--discover-active-task', '--max-task-entries', '21'], /between 1 and 20/],
+      [['--max-task-entries', '2'], /requires --task-id or --discover-active-task/],
+    ] as const) {
+      result = await invoke([
+        'claude-code', 'memory', 'update', '--project-root', root, '--command', command, ...invalidOptions,
+      ]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, expectedError);
+    }
+    assert.equal(await readFile(settingsPath, 'utf8'), beforeInvalidOptions);
+    result = await invoke([
+      'claude-code', 'memory', 'update', '--project-root', root,
+      '--command', `${command} --task-id claude-manual-task`, '--discover-active-task',
+    ]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /already contains task-resume options/);
+    assert.equal(await readFile(settingsPath, 'utf8'), beforeInvalidOptions);
+
     result = await invoke(['claude-code', 'memory', 'uninstall', '--project-root', root]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'removed');

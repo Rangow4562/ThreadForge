@@ -1457,8 +1457,9 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       rejectUnexpected(options, []);
       result = await removeGeminiTelemetry();
     } else if (family === 'claude-code' && claudeCodeSubsystem === 'memory' && (action === 'install' || action === 'update')) {
-      rejectUnexpected(options, ['project-root', 'command']);
-      result = await installClaudeProjectMemoryHook(projectRoot, required(options, 'command'));
+      rejectUnexpected(options, ['project-root', 'command', 'task-id', 'session-id', 'max-task-entries'], [], ['discover-active-task']);
+      result = await installClaudeProjectMemoryHook(projectRoot,
+        taskAwareMemoryHookCommand(options, 'Claude Code', '--threadforge-memory=claude-v1'));
       warning = 'Claude UserPromptSubmit adds approved project memory as guidance only; retrieval is local, and the hook does not authorize actions';
     } else if (family === 'claude-code' && claudeCodeSubsystem === 'memory' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
@@ -1721,7 +1722,7 @@ function required(options: ParsedOptions, key: string): string {
   return value;
 }
 
-function taskAwareMemoryHookCommand(options: ParsedOptions, host: 'Codex' | 'Gemini' | 'Qwen', runtimeMarker: string): string {
+function taskAwareMemoryHookCommand(options: ParsedOptions, host: 'Claude Code' | 'Codex' | 'Gemini' | 'Qwen', runtimeMarker: string): string {
   const command = required(options, 'command');
   const taskId = options.values.get('task-id');
   const sessionId = options.values.get('session-id');
@@ -1935,7 +1936,7 @@ function usage(): string {
     '  npm run adapter -- claude-code skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- aider skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
     '  npm run adapter -- command-code skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',
-    '  npm run adapter -- claude-code memory install|update --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers>',
+    '  npm run adapter -- claude-code memory install|update --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers> [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]',
     '  npm run adapter -- claude-code memory uninstall --project-root <absolute-path>',
     '  npm run adapter -- claude-code plan-gate install|update --project-root <absolute-path> --command <threadforge-deny-only-plan-gate-command-with-markers>',
     '  npm run adapter -- claude-code plan-gate uninstall --project-root <absolute-path>',

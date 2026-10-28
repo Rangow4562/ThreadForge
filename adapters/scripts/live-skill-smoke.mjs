@@ -10,7 +10,6 @@ import { createOpenCodeAdapter } from '../src/opencode-plugin.ts';
 import { installAntigravityProjectPlanGateHook } from '../src/antigravity-hooks-config.ts';
 import { installAntigravityProjectSkill } from '../src/antigravity-skill-config.ts';
 import { installClaudeCodeProjectSkill } from '../src/claude-skill-config.ts';
-import { installClaudeProjectMemoryHook } from '../src/claude-hooks-config.ts';
 import { installCommandCodeProjectSkill } from '../src/command-code-skill-config.ts';
 import { installClineProjectSkill } from '../src/cline-skill-config.ts';
 import { installCopilotProjectPlanGateHook } from '../src/copilot-hooks-config.ts';
@@ -91,6 +90,13 @@ function run(command, args, { cwd = repositoryRoot, env = process.env, timeout =
 
 function runThreadforge(args) {
   return run(cliPath, args, { cwd: projectRoot, env: isolatedEnvironment }).trim();
+}
+
+function runAdapterCLI(args) {
+  const adapterCLI = path.join(repositoryRoot, 'adapters', 'src', 'cli.ts');
+  return run(process.execPath, ['--experimental-strip-types', adapterCLI, ...args], {
+    cwd: projectRoot, env: isolatedEnvironment,
+  }).trim();
 }
 
 function runCommandCode(args, { cwd = commandCodeProjectRoot, env = isolatedEnvironment, timeout = 60_000, includeStderr = false } = {}) {
@@ -1531,12 +1537,27 @@ try {
     'does not override current user instructions',
   ];
   const claudeVersion = runHost('claude', ['--version']).trim();
-  const claudeMemoryCommand = `${JSON.stringify(cliPath)} memory inject --project-id cross-harness-smoke --threadforge-managed-claude-memory=v1 --threadforge-memory=claude-v1 --task-id ${openCodeTaskFixture.id}`;
-  assert.equal(await installClaudeProjectMemoryHook(projectRoot, claudeMemoryCommand), 'installed');
+  const claudeMemoryCommand = `${JSON.stringify(cliPath)} memory inject --project-id cross-harness-smoke --threadforge-managed-claude-memory=v1 --threadforge-memory=claude-v1`;
+  const claudeMemoryInstall = JSON.parse(runAdapterCLI([
+    'claude-code', 'memory', 'install', '--project-root', projectRoot, '--command', claudeMemoryCommand,
+    '--task-id', openCodeTaskFixture.id, '--max-task-entries', '6',
+  ]));
+  assert.equal(claudeMemoryInstall.result, 'installed', 'Claude task-aware project-memory installer did not install');
+  const claudeSettings = JSON.parse(readFileSync(path.join(projectRoot, '.claude', 'settings.json'), 'utf8'));
+  const claudeHookCommands = (claudeSettings?.hooks?.UserPromptSubmit ?? [])
+    .flatMap((entry) => Array.isArray(entry?.hooks) ? entry.hooks : [])
+    .map((hook) => hook?.command)
+    .filter((command) => typeof command === 'string' && command.includes('--threadforge-managed-claude-memory=v1'));
+  const expectedClaudeMemoryCommand = claudeMemoryCommand.replace(
+    '--threadforge-memory=claude-v1',
+    `--task-id ${openCodeTaskFixture.id} --max-task-entries 6 --threadforge-memory=claude-v1`,
+  );
+  assert.deepEqual(claudeHookCommands, [expectedClaudeMemoryCommand],
+    'Claude memory installer did not persist the requested task selector before its marker');
   const claudeHookProbe = spawnSync(cliPath, [
     'memory', 'inject', '--project-id', 'cross-harness-smoke',
     '--threadforge-managed-claude-memory=v1', '--threadforge-memory=claude-v1',
-    '--task-id', openCodeTaskFixture.id,
+    '--task-id', openCodeTaskFixture.id, '--max-task-entries', '6',
   ], {
     cwd: projectRoot, env: isolatedEnvironment, encoding: 'utf8',
     input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd: projectRoot, prompt: 'Read the selected task context.' }),
@@ -1577,7 +1598,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v36',
+    schema_version: 'threadforge.installed-skill-smoke.v37',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,

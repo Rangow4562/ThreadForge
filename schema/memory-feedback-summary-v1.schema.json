@@ -22,9 +22,9 @@
       "required": ["target_kind", "target_id", "target_revision", "harness", "exposure", "utility", "task_result", "count"],
       "properties": {
         "target_kind": { "enum": ["procedure", "fact", "decision", "policy"] },
-        "target_id": { "$ref": "continuity-v1.schema.json#/$defs/id" },
+        "target_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
         "target_revision": { "type": "integer", "minimum": 1 },
-        "harness": { "$ref": "continuity-v1.schema.json#/$defs/id" },
+        "harness": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
         "exposure": { "enum": ["used", "shown_not_used"] },
         "utility": { "enum": ["helpful", "neutral", "harmful", "not_assessed"] },
         "task_result": { "enum": ["passed", "failed", "inconclusive"] },

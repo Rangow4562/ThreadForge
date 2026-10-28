@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/threadforge-ai/threadforge/internal/store"
 	"github.com/threadforge-ai/threadforge/pkg/continuity"
 	"github.com/threadforge-ai/threadforge/pkg/memoryfeedback"
+	"github.com/threadforge-ai/threadforge/pkg/proceduregraph"
 	"github.com/threadforge-ai/threadforge/pkg/projectmemory"
 )
 
@@ -163,6 +165,72 @@ func TestMemoryFeedbackCLIRejectsWrongProjectAndUnapprovedTargets(t *testing.T) 
 	items, total, err := database.ListMemoryFeedback(context.Background(), memoryfeedback.Filter{ProjectID: "repo-feedback", Limit: 10})
 	if err != nil || total != 0 || len(items) != 0 {
 		t.Fatalf("invalid feedback was stored: items=%+v total=%d err=%v", items, total, err)
+	}
+}
+
+func TestMemoryFeedbackCLIRecordsApprovedSQLiteProcedureTarget(t *testing.T) {
+	projectRoot := t.TempDir()
+	databasePath := filepath.Join(t.TempDir(), "threadforge.sqlite")
+	database, err := store.Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	stamp := now.Format(time.RFC3339Nano)
+	task := continuity.Task{
+		SchemaVersion: continuity.SchemaVersion, ID: "task-procedure-feedback", ProjectID: "repo-feedback", Owner: "local-user",
+		Title: "Apply the approved repair", Objective: "Check feedback for a local approved procedure",
+		AcceptanceCriteria: []string{"The procedure target is revision checked"}, Status: continuity.TaskOpen,
+		Revision: 1, CreatedAt: stamp, UpdatedAt: stamp,
+	}
+	if err := database.CreateTask(ctx, task, "local-user", "create procedure feedback task"); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	graph := proceduregraph.Graph{
+		SchemaVersion: proceduregraph.SchemaVersion, ID: "approved-build-repair", ProjectID: "repo-feedback",
+		Title: "Approved build repair", Revision: 1, Status: proceduregraph.StatusDraft,
+		Nodes: []proceduregraph.Node{{ID: "inspect", Kind: proceduregraph.NodeTrigger, Instruction: "Inspect the build failure."}},
+	}
+	if err := database.CreateProposal(ctx, graph, "local-user", "seed feedback test procedure", now); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	validated, err := database.RecordValidation(ctx, graph.ID, graph.Revision, proceduregraph.Validation{
+		DatasetFingerprint: strings.Repeat("c", 64), HeldOut: true, BaselineRuns: 2,
+		BaselineScore: 0.8, CandidateScore: 0.8, NoiseFloor: 0,
+		CostUnit: "tokens", BaselineCost: 100, CandidateCost: 100, MaxCostIncrease: 0, Status: "passed",
+	}, now.Add(time.Minute))
+	if err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	approved, err := database.Approve(ctx, graph.ID, validated.Revision, "reviewer", "held-out validation passed", true, now.Add(2*time.Minute))
+	if err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"memory", "feedback", "record", "--project-root", projectRoot, "--project-id", task.ProjectID,
+		"--task-id", task.ID, "--target-kind", "procedure", "--target-id", approved.ID,
+		"--target-revision", fmt.Sprint(approved.Revision), "--exposure", "used", "--utility", "harmful",
+		"--task-result", "failed", "--harness", "claude-code", "--db", databasePath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("record exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var result memoryfeedback.RecordResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Feedback.TargetKind != memoryfeedback.TargetProcedure || result.Feedback.TargetRevision != approved.Revision ||
+		result.Feedback.Utility != memoryfeedback.UtilityHarmful || result.Feedback.TaskResult != "failed" {
+		t.Fatalf("recorded feedback does not bind the approved procedure: %+v", result)
 	}
 }
 

@@ -73,6 +73,23 @@ func TestMemoryFeedbackRejectsTaskAndSessionScopeMismatch(t *testing.T) {
 	if err := database.CreateTask(ctx, task, "local-user", "create local test task"); err != nil {
 		t.Fatal(err)
 	}
+	foreignTask := task
+	foreignTask.ID = "task-foreign-project"
+	foreignTask.ProjectID = "repo-b"
+	foreignTask.Title = "Foreign project task"
+	foreignTask.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	foreignTask.UpdatedAt = foreignTask.CreatedAt
+	if err := database.CreateTask(ctx, foreignTask, "local-user", "create foreign task"); err != nil {
+		t.Fatal(err)
+	}
+	foreignSession := continuity.Session{
+		SchemaVersion: continuity.SchemaVersion, ID: "session-foreign-project", ProjectID: foreignTask.ProjectID,
+		TaskID: foreignTask.ID, Harness: "cursor", Status: continuity.SessionActive, Revision: 1,
+		StartedAt: foreignTask.CreatedAt, UpdatedAt: foreignTask.UpdatedAt,
+	}
+	if err := database.StartSession(ctx, foreignSession, "local-user", "create foreign session"); err != nil {
+		t.Fatal(err)
+	}
 	feedback := memoryfeedback.Feedback{
 		SchemaVersion: memoryfeedback.SchemaVersion, ID: "memory-feedback-1123456789abcdef0123456789abcdef",
 		ProjectID: "repo-b", TaskID: task.ID, TargetKind: memoryfeedback.TargetFact,
@@ -84,9 +101,9 @@ func TestMemoryFeedbackRejectsTaskAndSessionScopeMismatch(t *testing.T) {
 		t.Fatal("project mismatch was accepted")
 	}
 	feedback.ProjectID = task.ProjectID
-	feedback.SessionID = "session-other-project"
+	feedback.SessionID = foreignSession.ID
 	if _, err := database.RecordMemoryFeedback(ctx, feedback); err == nil {
-		t.Fatal("missing session was accepted")
+		t.Fatal("session from another task and project was accepted")
 	}
 }
 

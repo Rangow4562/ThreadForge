@@ -18,6 +18,7 @@ export const projectMcpHosts = {
   'command-code': '.mcp.json',
   'github-copilot': '.mcp.json',
   qoder: '.mcp.json',
+  zcode: path.join('.zcode', 'config.json'),
   'kimi-code': path.join('.kimi-code', 'mcp.json'),
   cursor: path.join('.cursor', 'mcp.json'),
   antigravity: path.join('.agents', 'mcp_config.json'),
@@ -28,6 +29,7 @@ export const projectMcpHosts = {
 export type ProjectMcpHost = keyof typeof projectMcpHosts;
 
 export interface McpServerConfig {
+  type?: 'stdio';
   command: string;
   args: string[];
   cwd?: string;
@@ -51,17 +53,18 @@ export async function installProjectMcpServer(
   server: McpServerConfig,
 ): Promise<ChangeResult> {
   validateServerName(serverName);
+  validateServerNameForHost(host, serverName);
   validateServerForHost(host, server);
   if (!isManagedServer(server)) throw new Error('MCP server entry must include the Threadforge ownership argument');
   if (host === 'qwen-code') return installQwenProjectMcpServer(projectRoot, serverName, server);
   return mutateProjectConfig(projectRoot, host, (config) => {
-    const servers = getServers(config);
+    const servers = getServers(config, host);
     if (Object.hasOwn(servers, serverName)) {
       if (isManagedServer(servers[serverName]) && deepEqual(servers[serverName], server)) return { result: 'unchanged', changed: false };
       throw new Error(`MCP server '${serverName}' already exists with different settings; refusing to overwrite it`);
     }
     servers[serverName] = server;
-    config.mcpServers = servers;
+    setServers(config, host, servers);
     return { result: 'installed', changed: true };
   });
 }
@@ -74,11 +77,12 @@ export async function updateProjectMcpServer(
   next: McpServerConfig,
 ): Promise<ChangeResult> {
   validateServerName(serverName);
+  validateServerNameForHost(host, serverName);
   validateServerForHost(host, next);
   if (!isManagedServer(next)) throw new Error('updated MCP server entry must include the Threadforge ownership argument');
   if (host === 'qwen-code') return updateQwenProjectMcpServer(projectRoot, serverName, expectedCurrent, next);
   return mutateProjectConfig(projectRoot, host, (config) => {
-    const servers = getServers(config);
+    const servers = getServers(config, host);
     if (!Object.hasOwn(servers, serverName)) {
       throw new Error(`MCP server '${serverName}' is absent; refusing to create it during update`);
     }
@@ -88,7 +92,7 @@ export async function updateProjectMcpServer(
     requireGeminiTrustOff(host, servers[serverName]);
     if (deepEqual(servers[serverName], next)) return { result: 'unchanged', changed: false };
     servers[serverName] = next;
-    config.mcpServers = servers;
+    setServers(config, host, servers);
     return { result: 'updated', changed: true };
   });
 }
@@ -100,17 +104,18 @@ export async function updateManagedProjectMcpServer(
   next: McpServerConfig,
 ): Promise<ChangeResult> {
   validateServerName(serverName);
+  validateServerNameForHost(host, serverName);
   validateServerForHost(host, next);
   if (!isManagedServer(next)) throw new Error('updated MCP server entry must include the Threadforge ownership argument');
   if (host === 'qwen-code') return updateManagedQwenProjectMcpServer(projectRoot, serverName, next);
   return mutateProjectConfig(projectRoot, host, (config) => {
-    const servers = getServers(config);
+    const servers = getServers(config, host);
     if (!Object.hasOwn(servers, serverName)) throw new Error(`MCP server '${serverName}' is absent; refusing to update it`);
     if (!isManagedServer(servers[serverName])) throw new Error(`MCP server '${serverName}' is not marked as Threadforge-managed`);
     requireGeminiTrustOff(host, servers[serverName]);
     if (deepEqual(servers[serverName], next)) return { result: 'unchanged', changed: false };
     servers[serverName] = next;
-    config.mcpServers = servers;
+    setServers(config, host, servers);
     return { result: 'updated', changed: true };
   });
 }
@@ -122,17 +127,17 @@ export async function removeProjectMcpServer(
   expectedCurrent: unknown,
 ): Promise<ChangeResult> {
   validateServerName(serverName);
+  validateServerNameForHost(host, serverName);
   if (host === 'qwen-code') return removeQwenProjectMcpServer(projectRoot, serverName, expectedCurrent);
   return mutateProjectConfig(projectRoot, host, (config) => {
-    const servers = getServers(config);
+    const servers = getServers(config, host);
     if (!Object.hasOwn(servers, serverName)) return { result: 'absent', changed: false };
     if (!isManagedServer(servers[serverName]) || !isManagedServer(expectedCurrent) || !deepEqual(servers[serverName], expectedCurrent)) {
       throw new Error(`MCP server '${serverName}' changed since it was read; refusing to remove it`);
     }
     requireGeminiTrustOff(host, servers[serverName]);
     delete servers[serverName];
-    if (Object.keys(servers).length === 0) delete config.mcpServers;
-    else config.mcpServers = servers;
+    setServers(config, host, servers);
     return { result: 'removed', changed: true };
   });
 }
@@ -143,15 +148,15 @@ export async function removeManagedProjectMcpServer(
   serverName: string,
 ): Promise<ChangeResult> {
   validateServerName(serverName);
+  validateServerNameForHost(host, serverName);
   if (host === 'qwen-code') return removeManagedQwenProjectMcpServer(projectRoot, serverName);
   return mutateProjectConfig(projectRoot, host, (config) => {
-    const servers = getServers(config);
+    const servers = getServers(config, host);
     if (!Object.hasOwn(servers, serverName)) return { result: 'absent', changed: false };
     if (!isManagedServer(servers[serverName])) throw new Error(`MCP server '${serverName}' is not marked as Threadforge-managed`);
     requireGeminiTrustOff(host, servers[serverName]);
     delete servers[serverName];
-    if (Object.keys(servers).length === 0) delete config.mcpServers;
-    else config.mcpServers = servers;
+    setServers(config, host, servers);
     return { result: 'removed', changed: true };
   });
 }
@@ -166,6 +171,7 @@ async function mutateProjectConfig(
     throw new Error('project root must exist and be accessible');
   });
   const configPath = path.join(root, path.relative(path.resolve(projectRoot), requestedPath));
+  if (host === 'zcode') await assertNoZCodeAlternateThreadforgeServer(root);
   const parent = path.dirname(configPath);
   await ensureSafeDirectory(root, parent);
 
@@ -181,6 +187,7 @@ async function mutateProjectConfig(
   }
 
   try {
+    if (host === 'zcode') await assertNoZCodeAlternateThreadforgeServer(root);
     const config = await readConfig(configPath);
     const outcome = mutate(config);
     if (!outcome.changed) return outcome.result;
@@ -189,6 +196,14 @@ async function mutateProjectConfig(
   } finally {
     await lock.close().catch(() => {});
     await unlink(lockPath).catch(() => {});
+  }
+}
+
+async function assertNoZCodeAlternateThreadforgeServer(projectRoot: string): Promise<void> {
+  const alternate = await readConfig(path.join(projectRoot, 'zcode.json'));
+  const servers = getServers(alternate, 'zcode');
+  if (Object.hasOwn(servers, 'threadforge')) {
+    throw new Error('ZCode project MCP entry also exists in zcode.json; resolve the alternate config entry before using .zcode/config.json');
   }
 }
 
@@ -240,10 +255,31 @@ async function readConfig(filePath: string): Promise<ConfigObject> {
   }
 }
 
-function getServers(config: ConfigObject): ConfigObject {
+function getServers(config: ConfigObject, host: ProjectMcpHost): ConfigObject {
+  if (host === 'zcode') {
+    if (config.mcp === undefined) return {};
+    if (!isRecord(config.mcp)) throw new Error('ZCode project MCP config mcp must be an object; no changes were made');
+    if (config.mcp.servers === undefined) return {};
+    if (!isRecord(config.mcp.servers)) throw new Error('ZCode project MCP config mcp.servers must be an object; no changes were made');
+    return config.mcp.servers;
+  }
   if (config.mcpServers === undefined) return {};
   if (!isRecord(config.mcpServers)) throw new Error('project MCP config mcpServers must be an object; no changes were made');
   return config.mcpServers;
+}
+
+function setServers(config: ConfigObject, host: ProjectMcpHost, servers: ConfigObject): void {
+  if (host !== 'zcode') {
+    if (Object.keys(servers).length === 0) delete config.mcpServers;
+    else config.mcpServers = servers;
+    return;
+  }
+
+  const mcp = isRecord(config.mcp) ? { ...config.mcp } : {};
+  if (Object.keys(servers).length === 0) delete mcp.servers;
+  else mcp.servers = servers;
+  if (Object.keys(mcp).length === 0) delete config.mcp;
+  else config.mcp = mcp;
 }
 
 async function atomicWriteJson(filePath: string, value: ConfigObject): Promise<void> {
@@ -273,6 +309,12 @@ function validateServerName(value: string): void {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value)) throw new Error('MCP server name is invalid');
 }
 
+function validateServerNameForHost(host: ProjectMcpHost, value: string): void {
+  if (host === 'zcode' && value !== 'threadforge') {
+    throw new Error('ZCode project MCP currently manages the fixed server name threadforge');
+  }
+}
+
 function validateServer(value: McpServerConfig): void {
   if (!isRecord(value) || typeof value.command !== 'string' || value.command.trim() === '' || value.command.length > 2048) {
     throw new Error('MCP server command is required and must be bounded');
@@ -286,12 +328,23 @@ function validateServer(value: McpServerConfig): void {
   if (value.trust !== undefined && value.trust !== false) {
     throw new Error('MCP server trust must remain false; Threadforge never disables host confirmations');
   }
-  const extraKeys = Object.keys(value).filter((key) => key !== 'command' && key !== 'args' && key !== 'cwd' && key !== 'trust');
+  if (value.type !== undefined && value.type !== 'stdio') throw new Error('MCP server type must be stdio');
+  const extraKeys = Object.keys(value).filter((key) => key !== 'type' && key !== 'command' && key !== 'args' && key !== 'cwd' && key !== 'trust');
   if (extraKeys.length > 0) throw new Error('MCP server config only accepts command, args, and cwd; environment secrets are not accepted');
 }
 
 function validateServerForHost(host: ProjectMcpHost, value: McpServerConfig): void {
   validateServer(value);
+  if (host === 'zcode') {
+    if (value.type !== 'stdio' || Object.keys(value).some((key) => key !== 'type' && key !== 'command' && key !== 'args')) {
+      throw new Error('ZCode project MCP config requires type=stdio and accepts only command and args; Threadforge does not set trust, cwd, or environment');
+    }
+    if ([value.command, ...value.args].some(looksCredentialLikeMcpValue)) {
+      throw new Error('ZCode project MCP values must not contain credential-like text');
+    }
+    return;
+  }
+  if (value.type !== undefined) throw new Error(`${host} project MCP config does not accept a transport type field`);
   if (host === 'gemini-cli' && value.trust !== false) {
     throw new Error('Gemini MCP config must explicitly set trust to false');
   }

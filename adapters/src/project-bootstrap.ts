@@ -26,6 +26,7 @@ export const projectBootstrapMcpTargets = {
   'command-code': '.mcp.json',
   'github-copilot': '.mcp.json',
   qoder: '.mcp.json',
+  zcode: path.join('.zcode', 'config.json'),
   'kimi-code': path.join('.kimi-code', 'mcp.json'),
   cursor: path.join('.cursor', 'mcp.json'),
   antigravity: path.join('.agents', 'mcp_config.json'),
@@ -179,6 +180,7 @@ async function installHost(host: ProjectBootstrapMcpHost, root: string, command:
   if (isCodexProjectMcpHost(host)) return installCodexProjectMcpServer(root, command, args);
   if (host === 'opencode') return installOpenCodeProjectMcpServer(root, 'threadforge', command, args);
   return installProjectMcpServer(root, host as ProjectMcpHost, 'threadforge', {
+    ...(host === 'zcode' ? { type: 'stdio' as const } : {}),
     command, args, ...(host === 'gemini-cli' ? { trust: false as const } : {}),
   });
 }
@@ -187,6 +189,7 @@ async function updateHost(host: ProjectBootstrapMcpHost, root: string, command: 
   if (isCodexProjectMcpHost(host)) return updateCodexProjectMcpServer(root, command, args);
   if (host === 'opencode') return updateManagedOpenCodeProjectMcpServer(root, 'threadforge', command, args);
   return updateManagedProjectMcpServer(root, host as ProjectMcpHost, 'threadforge', {
+    ...(host === 'zcode' ? { type: 'stdio' as const } : {}),
     command, args, ...(host === 'gemini-cli' ? { trust: false as const } : {}),
   });
 }

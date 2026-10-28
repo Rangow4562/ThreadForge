@@ -33,6 +33,7 @@ test('uses project-local config paths for supported MCP hosts', () => {
   assert.equal(projectMcpConfigPath(root, 'command-code'), path.join(root, '.mcp.json'));
   assert.equal(projectMcpConfigPath(root, 'github-copilot'), path.join(root, '.mcp.json'));
   assert.equal(projectMcpConfigPath(root, 'qoder'), path.join(root, '.mcp.json'));
+  assert.equal(projectMcpConfigPath(root, 'zcode'), path.join(root, '.zcode', 'config.json'));
   assert.equal(projectMcpConfigPath(root, 'kimi-code'), path.join(root, '.kimi-code', 'mcp.json'));
   assert.equal(projectMcpConfigPath(root, 'cursor'), path.join(root, '.cursor', 'mcp.json'));
   assert.equal(projectMcpConfigPath(root, 'antigravity'), path.join(root, '.agents', 'mcp_config.json'));
@@ -131,6 +132,72 @@ test('Kimi Code project MCP uses its native project file and rejects credential-
     }), 'updated');
     assert.equal(await removeManagedProjectMcpServer(root, 'kimi-code', 'threadforge'), 'removed');
     assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), original);
+  });
+});
+
+test('ZCode project MCP uses nested mcp.servers stdio entries and preserves project settings', async () => {
+  await withProject(async (root) => {
+    const file = projectMcpConfigPath(root, 'zcode');
+    await mkdir(path.dirname(file), { recursive: true });
+    const original = {
+      features: { mcp: true, skill: false },
+      mcp: { servers: { analytics: { type: 'stdio', command: 'analytics', args: ['serve'] } } },
+      ui: { locale: 'en-US' },
+    };
+    await writeFile(file, JSON.stringify(original, null, 2));
+    const zcodeServer: McpServerConfig = {
+      type: 'stdio',
+      command: 'threadforge',
+      args: ['mcp', 'serve', '--project-root', root, managedMcpArgument],
+    };
+
+    assert.equal(await installProjectMcpServer(root, 'zcode', 'threadforge', zcodeServer), 'installed');
+    const first = await readFile(file, 'utf8');
+    assert.equal(await installProjectMcpServer(root, 'zcode', 'threadforge', zcodeServer), 'unchanged');
+    assert.equal(await readFile(file, 'utf8'), first);
+    assert.deepEqual(JSON.parse(first), {
+      ...original,
+      mcp: { servers: { ...original.mcp.servers, threadforge: zcodeServer } },
+    });
+
+    await assert.rejects(installProjectMcpServer(root, 'zcode', 'threadforge', {
+      command: 'threadforge', args: zcodeServer.args,
+    }), /requires type=stdio/);
+    await assert.rejects(installProjectMcpServer(root, 'zcode', 'threadforge', {
+      ...zcodeServer, trust: false,
+    }), /accepts only command and args/);
+    await assert.rejects(installProjectMcpServer(root, 'zcode', 'threadforge', {
+      ...zcodeServer, cwd: root,
+    }), /accepts only command and args/);
+    await assert.rejects(installProjectMcpServer(root, 'zcode', 'threadforge', {
+      ...zcodeServer, args: [...zcodeServer.args, 'api_key=fixture-secret'],
+    }), /credential-like/);
+    await assert.rejects(installProjectMcpServer(root, 'zcode', 'other', zcodeServer), /fixed server name threadforge/);
+
+    assert.equal(await updateManagedProjectMcpServer(root, 'zcode', 'threadforge', {
+      ...zcodeServer, command: 'threadforge-next',
+    }), 'updated');
+    assert.equal(await removeManagedProjectMcpServer(root, 'zcode', 'threadforge'), 'removed');
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), original);
+  });
+});
+
+test('ZCode project MCP refuses an alternate zcode.json Threadforge collision', async () => {
+  await withProject(async (root) => {
+    const alternatePath = path.join(root, 'zcode.json');
+    const targetPath = projectMcpConfigPath(root, 'zcode');
+    const alternate = {
+      mcp: { servers: { threadforge: { type: 'stdio', command: 'user-owned', args: ['serve'] } } },
+    };
+    await writeFile(alternatePath, JSON.stringify(alternate, null, 2));
+
+    await assert.rejects(installProjectMcpServer(root, 'zcode', 'threadforge', {
+      type: 'stdio', command: 'threadforge',
+      args: ['mcp', 'serve', '--project-root', root, managedMcpArgument],
+    }), /also exists in zcode\.json/);
+    assert.deepEqual(JSON.parse(await readFile(alternatePath, 'utf8')), alternate);
+    await assert.rejects(readFile(targetPath));
+    await assert.rejects(lstat(path.dirname(targetPath)));
   });
 });
 

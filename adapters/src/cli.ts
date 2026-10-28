@@ -1620,6 +1620,13 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
         result = action === 'install'
           ? await installOpenCodeProjectMcpServer(projectRoot, name, command, args)
           : await updateManagedOpenCodeProjectMcpServer(projectRoot, name, command, args);
+      } else if (hostName === 'zcode') {
+        if (cwd !== undefined) throw new Error('ZCode project MCP config does not accept --cwd; use the project root as its working directory');
+        if (name !== 'threadforge') throw new Error('ZCode project MCP currently manages the fixed server name threadforge');
+        const server = { type: 'stdio' as const, command, args };
+        result = action === 'install'
+          ? await installProjectMcpServer(projectRoot, 'zcode', name, server)
+          : await updateManagedProjectMcpServer(projectRoot, 'zcode', name, server);
       } else {
         const host = hostName as ProjectMcpHost;
       const server = {
@@ -1834,10 +1841,10 @@ function usage(): string {
     '  npm run adapter -- telemetry install|update|uninstall --host <claude-code|codex-cli>',
     '  npm run adapter -- opencode install|update --project-root <absolute-path> --module <Threadforge-package-export-or-file-url>',
     '  npm run adapter -- opencode uninstall --project-root <absolute-path>',
-    '  npm run adapter -- mcp install --host <claude-code|command-code|github-copilot|qoder|kimi-code|cursor|antigravity|gemini-cli|qwen-code|opencode|codex-cli|chatgpt-desktop-codex|codex-ide> --project-root <absolute-path> --command <executable> [--arg <value> ...] [--cwd <path>] [--name threadforge]',
-    '  npm run adapter -- mcp update --host <claude-code|command-code|github-copilot|qoder|kimi-code|cursor|antigravity|gemini-cli|qwen-code|opencode|codex-cli|chatgpt-desktop-codex|codex-ide> --project-root <absolute-path> --command <executable> [--arg <value> ...] [--cwd <path>] [--name threadforge]',
-    '  npm run adapter -- mcp uninstall --host <claude-code|command-code|github-copilot|qoder|kimi-code|cursor|antigravity|gemini-cli|qwen-code|opencode|codex-cli|chatgpt-desktop-codex|codex-ide> --project-root <absolute-path> [--name threadforge]',
-    '  npm run adapter -- bootstrap mcp plan|install|update --project-root <absolute-path> --hosts <claude-code|command-code|github-copilot|qoder|kimi-code|cursor|antigravity|gemini-cli|qwen-code|codex-cli|chatgpt-desktop-codex|codex-ide|opencode,...> --command <executable> --arg mcp --arg serve --arg --project-root --arg <same-project-root>',
+    '  npm run adapter -- mcp install --host <claude-code|command-code|github-copilot|qoder|zcode|kimi-code|cursor|antigravity|gemini-cli|qwen-code|opencode|codex-cli|chatgpt-desktop-codex|codex-ide> --project-root <absolute-path> --command <executable> [--arg <value> ...] [--cwd <path>] [--name threadforge]',
+    '  npm run adapter -- mcp update --host <claude-code|command-code|github-copilot|qoder|zcode|kimi-code|cursor|antigravity|gemini-cli|qwen-code|opencode|codex-cli|chatgpt-desktop-codex|codex-ide> --project-root <absolute-path> --command <executable> [--arg <value> ...] [--cwd <path>] [--name threadforge]',
+    '  npm run adapter -- mcp uninstall --host <claude-code|command-code|github-copilot|qoder|zcode|kimi-code|cursor|antigravity|gemini-cli|qwen-code|opencode|codex-cli|chatgpt-desktop-codex|codex-ide> --project-root <absolute-path> [--name threadforge]',
+    '  npm run adapter -- bootstrap mcp plan|install|update --project-root <absolute-path> --hosts <claude-code|command-code|github-copilot|qoder|zcode|kimi-code|cursor|antigravity|gemini-cli|qwen-code|codex-cli|chatgpt-desktop-codex|codex-ide|opencode,...> --command <executable> --arg mcp --arg serve --arg --project-root --arg <same-project-root>',
     '  npm run adapter -- bootstrap mcp uninstall --project-root <absolute-path> --hosts <comma-separated-supported-hosts>',
     '  npm run adapter -- bootstrap instructions plan|install|update|uninstall --project-root <absolute-path> --hosts <claude-code|command-code|cursor|antigravity|gemini-cli|codex-cli|chatgpt-desktop-codex|codex-ide|opencode|qwen-code|github-copilot|zcode|kimi-code|qoder|deepseek-harness|goose|cline,...>',
     '  npm run adapter -- cline skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',

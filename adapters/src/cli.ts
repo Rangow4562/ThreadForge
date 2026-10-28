@@ -1522,8 +1522,9 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       rejectUnexpected(options, ['project-root']);
       result = await removeCursorProjectHooks(projectRoot);
     } else if (family === 'codex' && codexSubsystem === 'memory' && (action === 'install' || action === 'update')) {
-      rejectUnexpected(options, ['project-root', 'command']);
-      result = await installCodexProjectMemoryHook(projectRoot, required(options, 'command'));
+      rejectUnexpected(options, ['project-root', 'command', 'task-id', 'session-id', 'max-task-entries'], [], ['discover-active-task']);
+      result = await installCodexProjectMemoryHook(projectRoot,
+        taskAwareMemoryHookCommand(options, 'Codex', '--threadforge-memory=codex-v1'));
       warning = 'Codex UserPromptSubmit adds approved project memory as guidance only; review and trust the hook in Codex. Threadforge does not change hook trust or feature settings.';
     } else if (family === 'codex' && codexSubsystem === 'memory' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
@@ -1720,7 +1721,7 @@ function required(options: ParsedOptions, key: string): string {
   return value;
 }
 
-function taskAwareMemoryHookCommand(options: ParsedOptions, host: 'Gemini' | 'Qwen', runtimeMarker: string): string {
+function taskAwareMemoryHookCommand(options: ParsedOptions, host: 'Codex' | 'Gemini' | 'Qwen', runtimeMarker: string): string {
   const command = required(options, 'command');
   const taskId = options.values.get('task-id');
   const sessionId = options.values.get('session-id');
@@ -1938,7 +1939,7 @@ function usage(): string {
     '  npm run adapter -- claude-code memory uninstall --project-root <absolute-path>',
     '  npm run adapter -- claude-code plan-gate install|update --project-root <absolute-path> --command <threadforge-deny-only-plan-gate-command-with-markers>',
     '  npm run adapter -- claude-code plan-gate uninstall --project-root <absolute-path>',
-    '  npm run adapter -- codex memory install|update --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers>',
+    '  npm run adapter -- codex memory install|update --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers> [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]',
     '  npm run adapter -- codex memory uninstall --project-root <absolute-path>',
     '  npm run adapter -- codex plan-gate install|update --project-root <absolute-path> --command <threadforge-deny-only-plan-gate-command-with-markers>',
     '  npm run adapter -- codex plan-gate uninstall --project-root <absolute-path>',

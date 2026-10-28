@@ -878,6 +878,55 @@ test('adapter CLI manages Codex approved-memory injection independently and pres
     result = await invoke(['codex', 'memory', 'update', '--project-root', root, '--command', memoryCommand]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'unchanged');
+
+    result = await invoke([
+      'codex', 'memory', 'update', '--project-root', root, '--command', memoryCommand,
+      '--task-id', 'codex-task', '--session-id', 'codex-session', '--max-task-entries', '4',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    const explicitTaskCommand = memoryCommand.replace(
+      '--threadforge-memory=codex-v1',
+      '--task-id codex-task --session-id codex-session --max-task-entries 4 --threadforge-memory=codex-v1',
+    );
+    config = JSON.parse(await readFile(configPath, 'utf8'));
+    assert.equal(config.hooks.UserPromptSubmit[1].hooks[0].command, explicitTaskCommand);
+    assert.equal(config.features.hooks, false);
+    assert.equal(config.trusted, false);
+
+    result = await invoke([
+      'codex', 'memory', 'update', '--project-root', root, '--command', memoryCommand, '--discover-active-task',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    const discoveryCommand = memoryCommand.replace(
+      '--threadforge-memory=codex-v1',
+      '--discover-active-task --max-task-entries 6 --threadforge-memory=codex-v1',
+    );
+    config = JSON.parse(await readFile(configPath, 'utf8'));
+    assert.equal(config.hooks.UserPromptSubmit[1].hooks[0].command, discoveryCommand);
+
+    const beforeInvalidOptions = await readFile(configPath, 'utf8');
+    for (const [invalidOptions, expectedError] of [
+      [['--task-id', 'codex-task', '--discover-active-task'], /mutually exclusive/],
+      [['--session-id', 'codex-session'], /requires --task-id/],
+      [['--task-id', 'Codex/Task'], /--task-id must match/],
+      [['--discover-active-task', '--max-task-entries', '21'], /between 1 and 20/],
+      [['--max-task-entries', '4'], /requires --task-id or --discover-active-task/],
+    ] as const) {
+      result = await invoke([
+        'codex', 'memory', 'update', '--project-root', root, '--command', memoryCommand, ...invalidOptions,
+      ]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, expectedError);
+    }
+    assert.equal(await readFile(configPath, 'utf8'), beforeInvalidOptions);
+    result = await invoke([
+      'codex', 'memory', 'update', '--project-root', root,
+      '--command', `${memoryCommand} --task-id codex-manual-task`, '--discover-active-task',
+    ]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /already contains task-resume options/);
+    assert.equal(await readFile(configPath, 'utf8'), beforeInvalidOptions);
+
     result = await invoke(['codex', 'memory', 'uninstall', '--project-root', root]);
     assert.equal(result.code, 0, result.stderr);
     config = JSON.parse(await readFile(configPath, 'utf8'));

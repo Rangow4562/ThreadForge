@@ -887,6 +887,62 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 		t.Fatalf("malformed Copilot patch did not fail closed: code=%d stdout=%s stderr=%s", code, copilotMalformedPatchOutput, copilotMalformedPatchError)
 	}
 
+	clineEditorInput := map[string]any{
+		"hook_event_name": "BeforeTool", "tool_name": "editor", "cwd": projectRoot,
+		"tool_input": map[string]any{"path": "src/main.go", "new_text": "private source"},
+	}
+	code, clineEditorOutput, clineEditorError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cline-cli", clineEditorInput)
+	var clineEditor map[string]any
+	if code != 0 || clineEditorError != "" || json.Unmarshal([]byte(clineEditorOutput), &clineEditor) != nil ||
+		clineEditor["decision"] != "allow" || clineEditor["reason"] != nil {
+		t.Fatalf("in-scope Cline editor operation must pass through without rewriting host policy: code=%d stdout=%s stderr=%s",
+			code, clineEditorOutput, clineEditorError)
+	}
+	clineOutsideInput := map[string]any{
+		"hook_event_name": "BeforeTool", "tool_name": "editor", "cwd": projectRoot,
+		"tool_input": map[string]any{"path": "docs/readme.md", "new_text": "private source"},
+	}
+	code, clineOutsideOutput, clineOutsideError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cline-cli", clineOutsideInput)
+	var clineOutside map[string]any
+	if code != 0 || clineOutsideError != "" || json.Unmarshal([]byte(clineOutsideOutput), &clineOutside) != nil ||
+		clineOutside["decision"] != "deny" || clineOutside["reason"] == nil ||
+		strings.Contains(clineOutsideOutput, "docs/readme.md") || strings.Contains(clineOutsideOutput, "private source") {
+		t.Fatalf("out-of-scope Cline editor operation was not privately denied: code=%d stdout=%s stderr=%s",
+			code, clineOutsideOutput, clineOutsideError)
+	}
+	clinePatchInput := map[string]any{
+		"hook_event_name": "BeforeTool", "tool_name": "apply_patch", "cwd": projectRoot,
+		"tool_input": map[string]any{"input": "*** Begin Patch\n*** Update File: src/main.go\n@@\n-old\n+new\n*** End Patch"},
+	}
+	code, clinePatchOutput, clinePatchError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cline-cli", clinePatchInput)
+	if code != 0 || clinePatchError != "" || !strings.Contains(clinePatchOutput, `"decision": "allow"`) {
+		t.Fatalf("in-scope Cline patch was not accepted for host evaluation: code=%d stdout=%s stderr=%s",
+			code, clinePatchOutput, clinePatchError)
+	}
+	clineMalformedPatch := map[string]any{
+		"hook_event_name": "BeforeTool", "tool_name": "apply_patch", "cwd": projectRoot,
+		"tool_input": map[string]any{"input": "*** Begin Patch\n*** End Patch"},
+	}
+	code, clineMalformedOutput, clineMalformedError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cline-cli", clineMalformedPatch)
+	if code != 0 || clineMalformedError != "" || !strings.Contains(clineMalformedOutput, `"decision": "deny"`) {
+		t.Fatalf("malformed Cline patch did not fail closed: code=%d stdout=%s stderr=%s",
+			code, clineMalformedOutput, clineMalformedError)
+	}
+	clineUnsupported := map[string]any{
+		"hook_event_name": "BeforeTool", "tool_name": "run_commands", "cwd": projectRoot,
+		"tool_input": map[string]any{"command": "do not execute"},
+	}
+	code, clineUnsupportedOutput, clineUnsupportedError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cline-cli", clineUnsupported)
+	if code != 0 || clineUnsupportedError != "" || !strings.Contains(clineUnsupportedOutput, `"decision": "deny"`) {
+		t.Fatalf("unsupported Cline tool did not fail closed: code=%d stdout=%s stderr=%s",
+			code, clineUnsupportedOutput, clineUnsupportedError)
+	}
+
 	outsideInput := map[string]any{
 		"hook_event_name": "PreToolUse", "tool_name": "Edit", "cwd": projectRoot,
 		"tool_input": map[string]any{"file_path": "docs/readme.md"},
@@ -948,6 +1004,8 @@ func runTaskPlanGuardTestHook(t *testing.T, projectRoot, taskID, projectID, host
 		args = append(args, "--host", host, "--threadforge-managed-cursor-plan-gate=v1", "--threadforge-plan-gate=cursor-v1")
 	} else if host == "antigravity-cli" {
 		args = append(args, "--host", host, "--threadforge-managed-antigravity-plan-gate=v1", "--threadforge-plan-gate=antigravity-v1")
+	} else if host == "cline-cli" {
+		args = append(args, "--host", host, "--threadforge-managed-cline-plan-gate=v1", "--threadforge-plan-gate=cline-v1")
 	} else {
 		args = append(args, "--threadforge-managed-claude-plan-gate=v1", "--threadforge-plan-gate=claude-v1")
 	}

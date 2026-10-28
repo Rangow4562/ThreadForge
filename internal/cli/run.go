@@ -4280,7 +4280,7 @@ Commands:
   task plan template --id <id> [--template standard]
   task plan revise --id <id> --expected-revision <n> --file <plan.md> [--scope-file <scope.json>] [--identity-key <private-key.json>]
   task plan confirm --id <id> --expected-revision <n> --decision <plan_only|governed_execution> --actor <human> --reason <text> [--identity-key <private-key.json>]
-  task plan guard --host <claude-code|qwen-code|github-copilot|codex-cli> --task-id <id> --project-id <id> --project-root <absolute-path> --threadforge-managed-<host>-plan-gate=v1 --threadforge-plan-gate=<host>-v1
+  task plan guard --host <claude-code|qwen-code|github-copilot|codex-cli|gemini-cli|cursor|antigravity-cli|cline-cli> --task-id <id> --project-id <id> --project-root <absolute-path> --threadforge-managed-<host>-plan-gate=v1 --threadforge-plan-gate=<host>-v1
   task record --id <id> --project-id <id> --task-id <id> --kind <checkpoint|handoff|review|verification> --summary <text> [...] [--identity-key <private-key.json>]
   task entries --task-id <id> [--limit 100] [--db <path>]
   task history --id <id> [--db <path>]

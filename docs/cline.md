@@ -31,6 +31,19 @@ npm.cmd --prefix adapters run test:cline-plugin-host -- --cline-path <absolute-c
 
 The generated package is unsigned and is not a public registry release. Review its manifest, hashes, and notices before installing. Use either the native portable package or the Threadforge checkout wrapper in a given scope, not both, to avoid duplicate callbacks. The project install and manual relocated-entry callback smoke were verified against Cline CLI `3.0.73` on October 23, 2026; this does not establish agent-triggered hook dispatch, model behavior, telemetry receiver availability, VS Code/JetBrains plugin support, or cross-harness task efficacy.
 
+## Optional Cline CLI task-plan gate
+
+The separate `threadforge-task-plan-gate` package is opt-in and bound at build time to one explicit Threadforge task, project, and local project root. It invokes the local `threadforge task plan guard` process without a shell, and covers only Cline CLI `editor` and `apply_patch` calls. The editor request forwards only its target path; a bounded patch request (up to 1 MiB) is passed to the local guard for target parsing. It does not persist or log callback input. In-scope calls return no Cline decision, leaving normal host approval policy in charge. Denied, missing-workspace, malformed, oversized, unavailable, or timed-out checks return Cline's `skip` result. Rebuild the package when the active task changes. Shell commands, custom tools, other Cline products, and any execution outside these direct tools are not covered; this is not a security boundary.
+
+```powershell
+$project = (Resolve-Path .).Path
+$bundle = Join-Path $env:TEMP ("threadforge-cline-plan-gate-" + [guid]::NewGuid())
+npm.cmd --prefix adapters run build:cline-plan-gate -- --output $bundle --task-id <task-id> --project-id <project-id> --project-root $project
+cline plugin install $bundle --cwd $project
+```
+
+Optional builder flags are `--db <absolute-sqlite-path>`, `--threadforge-bin <command-or-path>`, and `--timeout-ms <100-10000>` (default 5000 ms). The generated package contains the selected identifiers and local paths, is unsigned, and is not a public release; keep it outside source control and do not share it. Review its hash manifest before installation. The SDK callback and `skip` contract follow Cline's [plugin examples](https://docs.cline.bot/sdk/plugin-examples); Threadforge fixture tests exercise the callback shape but do not run an agent turn. Live Cline dispatch remains unverified, so do not rely on this integration as a security control.
+
 ## Cline MCP server registration
 
 `cline mcp install|update|uninstall|status` separately manages the user-global `mcpServers.threadforge` entry in Cline's MCP settings file. This is independent of the plugin callback installer above. It starts `threadforge mcp serve` without a fixed project root and never adds tools to Cline's auto-approval list. Because the host config is user-global and the server is not bound to a workspace, this path exposes the local SQLite-backed MCP surface only; it does not load version-controlled project memory or procedures. Use project skills or another verified project-scoped MCP configuration for project-specific memory. The path honors `CLINE_MCP_SETTINGS_PATH`; see [MCP setup](mcp.md#cline-user-level-mcp-entry).
@@ -40,7 +53,7 @@ The generated package is unsigned and is not a public registry release. Review i
 - `beforeRun` emits a session-start event and a prompt event when the run context contains a prompt.
 - `beforeTool` emits an invocation; `afterTool` maps explicit failures, command outcomes, file reads/edits, and the documented Cline MCP tool names.
 - `afterRun` emits a session completion/cancel/failure event and reported token/cost usage once.
-- No approval state is inferred, and plugin callbacks always resolve without a Cline decision, prompt rewrite, or output replacement.
+- The observational telemetry plugin does not infer approval or write a Cline decision, prompt rewrite, or output replacement. The separate opt-in task-plan plugin may return `skip` for its two documented direct file tools only.
 
 Task/call identifiers and workspace/file paths are SHA-256 hashed. Prompt, tool input, command, tool output, and file-change values are digested locally up to 64 KiB; oversized values are omitted. Context serialization tolerates cycles and is bounded to depth 8 and 2,000 values. Events are delivered only to the shared loopback `/v1/events` intake; `timeoutMs` defaults to 250 ms and can be configured from 100 to 10,000 ms. The callback fails open if intake or mapping fails, though Cline may await the callback while the bounded send completes.
 

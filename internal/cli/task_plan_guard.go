@@ -40,6 +40,7 @@ type taskPlanGateToolInput struct {
 	Path       string `json:"path"`
 	TargetFile string `json:"TargetFile"`
 	Patch      string `json:"patch"`
+	Input      string `json:"input"`
 	Command    string `json:"command"`
 	Cmd        string `json:"cmd"`
 }
@@ -74,37 +75,42 @@ func runTaskPlanGuard(args []string, stdout, stderr io.Writer) int {
 	geminiMarker := fs.String("threadforge-managed-gemini-plan-gate", "", "required Gemini CLI hook marker")
 	cursorMarker := fs.String("threadforge-managed-cursor-plan-gate", "", "required Cursor hook marker")
 	antigravityMarker := fs.String("threadforge-managed-antigravity-plan-gate", "", "required Antigravity hook marker")
+	clineMarker := fs.String("threadforge-managed-cline-plan-gate", "", "required Cline CLI plugin marker")
 	planGateMarker := fs.String("threadforge-plan-gate", "", "required host-specific plan-gate ownership marker")
 	if err := fs.Parse(args); err != nil || *taskID == "" || *projectID == "" || *projectRoot == "" || fs.NArg() != 0 {
 		return writeTaskPlanGateResult(stdout, stderr, false, *host)
 	}
 	switch *host {
 	case "claude-code":
-		if *claudeMarker != planGateRuntimeMarker || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *planGateMarker != "claude-v1" {
+		if *claudeMarker != planGateRuntimeMarker || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *clineMarker != "" || *planGateMarker != "claude-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	case "qwen-code":
-		if *qwenMarker != planGateRuntimeMarker || *claudeMarker != "" || *copilotMarker != "" || *codexMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *planGateMarker != "qwen-v1" {
+		if *qwenMarker != planGateRuntimeMarker || *claudeMarker != "" || *copilotMarker != "" || *codexMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *clineMarker != "" || *planGateMarker != "qwen-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	case "github-copilot":
-		if *copilotMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *codexMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *planGateMarker != "copilot-v1" {
+		if *copilotMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *codexMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *clineMarker != "" || *planGateMarker != "copilot-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	case "codex-cli":
-		if *codexMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *geminiMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *planGateMarker != "codex-v1" {
+		if *codexMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *geminiMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *clineMarker != "" || *planGateMarker != "codex-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	case "gemini-cli":
-		if *geminiMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *planGateMarker != "gemini-v1" {
+		if *geminiMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *clineMarker != "" || *planGateMarker != "gemini-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	case "cursor":
-		if *cursorMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *geminiMarker != "" || *antigravityMarker != "" || *planGateMarker != "cursor-v1" {
+		if *cursorMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *geminiMarker != "" || *antigravityMarker != "" || *clineMarker != "" || *planGateMarker != "cursor-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	case "antigravity-cli":
-		if *antigravityMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *geminiMarker != "" || *cursorMarker != "" || *planGateMarker != "antigravity-v1" {
+		if *antigravityMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *geminiMarker != "" || *cursorMarker != "" || *clineMarker != "" || *planGateMarker != "antigravity-v1" {
+			return writeTaskPlanGateResult(stdout, stderr, false, *host)
+		}
+	case "cline-cli":
+		if *clineMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *geminiMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *planGateMarker != "cline-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	default:
@@ -136,6 +142,10 @@ func runTaskPlanGuard(args []string, stdout, stderr io.Writer) int {
 		}
 		toolName, toolArgs = hookInput.AntigravityTool.Name, hookInput.AntigravityTool.Args
 		hookInput.CWD = hookInput.WorkspacePaths[0]
+	} else if *host == "cline-cli" {
+		if hookInput.HookEventName != "BeforeTool" {
+			return writeTaskPlanGateResult(stdout, stderr, false, *host)
+		}
 	} else {
 		expectedEvent := "PreToolUse"
 		if *host == "gemini-cli" {
@@ -222,6 +232,8 @@ func taskPlanGateToolIsSupported(host, toolName string) bool {
 		default:
 			return false
 		}
+	case "cline-cli":
+		return toolName == "editor" || toolName == "apply_patch"
 	default:
 		return false
 	}
@@ -269,6 +281,15 @@ func taskPlanGateToolTargetPaths(host, toolName string, raw json.RawMessage) ([]
 			return nil, false
 		}
 		return []string{input.TargetFile}, true
+	}
+	if host == "cline-cli" {
+		if toolName == "apply_patch" {
+			return taskPlanGateCopilotPatchPaths(input.Input)
+		}
+		if toolName != "editor" || input.Path == "" {
+			return nil, false
+		}
+		return []string{input.Path}, true
 	}
 	if host != "github-copilot" {
 		if input.FilePath == "" {
@@ -339,6 +360,17 @@ func taskPlanGateCopilotPatchPaths(patch string) ([]string, bool) {
 }
 
 func writeTaskPlanGateResult(stdout, stderr io.Writer, withinScope bool, host string) int {
+	if host == "cline-cli" {
+		result := struct {
+			Decision string `json:"decision"`
+			Reason   string `json:"reason,omitempty"`
+		}{Decision: "allow"}
+		if !withinScope {
+			result.Decision = "deny"
+			result.Reason = "Threadforge withheld this Cline file operation; task requirements, plan decision, or implementation scope did not satisfy the configured guard."
+		}
+		return writeIndentedJSON(stdout, result, stderr)
+	}
 	if host == "antigravity-cli" {
 		result := struct {
 			Decision string `json:"decision"`

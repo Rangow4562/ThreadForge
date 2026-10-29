@@ -51,6 +51,7 @@
     "./copilot-history": "./dist/copilot-history.js",
     "./copilot-hooks-config": "./dist/copilot-hooks-config.js",
     "./copilot-sdk-memory": "./dist/copilot-sdk-memory.js",
+    "./copilot-sdk-telemetry": "./dist/copilot-sdk-telemetry.js",
     "./cursor-history": "./dist/cursor-history.js",
     "./factory-history": "./dist/factory-history.js",
     "./fx-history": "./dist/fx-history.js",

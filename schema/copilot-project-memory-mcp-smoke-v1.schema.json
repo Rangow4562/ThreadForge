@@ -32,6 +32,7 @@
         "tool_call_count": { "const": 1 },
         "tool_result_observed": { "const": true },
         "memory_content_retained_in_report": { "const": false },
+        "project_instruction_guidance_loaded": { "const": true },
         "approved_memory_readback_verified": { "const": true },
         "memory_freshness_verified": { "const": true },
         "advisory_result_markers_verified": { "const": true },

@@ -21,6 +21,7 @@ def test_copilot_project_memory_mcp_smoke_is_bounded_and_non_authorizing():
         "tool_call_count": 1,
         "tool_result_observed": True,
         "memory_content_retained_in_report": False,
+        "project_instruction_guidance_loaded": True,
         "approved_memory_readback_verified": True,
         "memory_freshness_verified": True,
         "advisory_result_markers_verified": True,
@@ -40,6 +41,8 @@ def test_copilot_project_memory_mcp_smoke_is_bounded_and_non_authorizing():
     })
     with pytest.raises(ValidationError):
         validator.validate({**result, "execution_authorized": True})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "project_instruction_guidance_loaded": False})
     with pytest.raises(ValidationError):
         validator.validate({**result, "memory_guidance": "private project memory"})
     with pytest.raises(ValidationError):

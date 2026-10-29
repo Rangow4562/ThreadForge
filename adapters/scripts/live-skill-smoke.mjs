@@ -498,6 +498,8 @@ async function runCopilotTaskResumeHostSmoke(version, taskFixture, memoryFixture
   let toolCallCount = 0;
   let toolResultObserved = false;
   let availableToolsRestricted = false;
+  let projectInstructionGuidanceLoaded = false;
+  let projectInstructionInstalled = false;
   let fixtureError;
   const providerDiagnostics = [];
   const taskID = taskFixture?.id;
@@ -541,6 +543,9 @@ async function runCopilotTaskResumeHostSmoke(version, taskFixture, memoryFixture
           throw new Error('Copilot requested an unexpected local MCP provider route');
         }
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        if (memoryRead && JSON.stringify(body).includes('## Threadforge project continuity (advisory only)')) {
+          projectInstructionGuidanceLoaded = true;
+        }
         const messages = Array.isArray(body.messages) ? body.messages : [];
         const toolResults = messages.filter((message) => message?.role === 'tool' || message?.role === 'function');
         providerRequests++;
@@ -631,6 +636,25 @@ async function runCopilotTaskResumeHostSmoke(version, taskFixture, memoryFixture
     });
     assert.equal(hasNamedMcpServer(JSON.parse(mcpListing), 'threadforge'), true,
       'Copilot smoke home did not discover the project Threadforge MCP server');
+    if (memoryRead) {
+      const instructionsPath = path.join(projectRoot, '.github', 'copilot-instructions.md');
+      const userInstructionsBefore = readFileSync(instructionsPath, 'utf8');
+      const instructionInstall = JSON.parse(runAdapterCLI([
+        'bootstrap', 'instructions', 'install', '--project-root', projectRoot, '--hosts', 'github-copilot',
+      ]));
+      const copilotInstructionTarget = instructionInstall.targets?.find(
+        (target) => target.path === '.github/copilot-instructions.md',
+      );
+      assert.equal(instructionInstall.status, 'complete', 'Copilot project continuity instruction install failed');
+      assert.ok(['installed', 'unchanged'].includes(copilotInstructionTarget?.result),
+        'Copilot project continuity instruction target was not installed');
+      const installedInstructions = readFileSync(instructionsPath, 'utf8');
+      assert.ok(installedInstructions.startsWith(userInstructionsBefore),
+        'Copilot project instruction bootstrap changed existing repository instructions');
+      assert.ok(installedInstructions.includes('## Threadforge project continuity (advisory only)'),
+        'Copilot project instruction file omitted the managed continuity block');
+      projectInstructionInstalled = true;
+    }
     const output = await runCopilotAgent([
       '--prompt', expectedPrompt,
       `--available-tools=threadforge-${toolName}`, '--allow-all-tools', '--no-auto-update', '--silent',
@@ -644,12 +668,16 @@ async function runCopilotTaskResumeHostSmoke(version, taskFixture, memoryFixture
     assert.ok(output.includes(memoryRead ? 'fresh local guidance' : 'Requirements are not finalized'),
       'Copilot final response omitted the scripted advisory status');
     if (memoryRead) {
+      assert.equal(projectInstructionInstalled, true, 'Copilot project continuity instruction was not installed');
+      assert.equal(projectInstructionGuidanceLoaded, true,
+        'Copilot did not include the managed project continuity instruction in its provider request');
       return {
         schema_version: 'threadforge.copilot-project-memory-mcp-smoke.v1',
         status: 'verified', host_cli_version: version,
         provider: 'deterministic-loopback-fixture', tool: toolName,
         tool_call_count: toolCallCount, tool_result_observed: toolResultObserved,
         memory_content_retained_in_report: false,
+        project_instruction_guidance_loaded: projectInstructionGuidanceLoaded,
         approved_memory_readback_verified: true, memory_freshness_verified: true,
         advisory_result_markers_verified: true,
         action_ready: false, guidance_only: true, execution_authorized: false,
@@ -1710,7 +1738,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v40',
+    schema_version: 'threadforge.installed-skill-smoke.v41',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,

@@ -267,6 +267,8 @@ As of 2026-10-07, the pinned AnyJev `bench/results_heads/2026-09-22/Qwen__Qwen3-
 
 As of 2026-10-07, Beacon migration accepts only `.codex/hooks.json` and preserves configured `SessionStart` plus legacy `Stop` event names for matching `--platform codex` commands. The importer omits commands and surrounding config; Codex TOML is handled by a separate metadata-only projection below, and the rest of Beacon's source matrix remains incomplete.
 
+Beacon Devin Desktop/Cascade hook configuration at `~/.codeium/windsurf/hooks.json` and `./.windsurf/hooks.json` remains unsupported for migration. The current Beacon documents and installer identify paths and five event keys, but Threadforge has no Devin Desktop projection or `devin_desktop` schema entry; arbitrary Cascade/Windsurf hook configuration is not classified as Beacon-owned until a strict, versioned host contract is verified. See [migration coverage](migration.md#beacon-devin-desktop-and-cascade-hooks-unsupported).
+
 As of 2026-10-07, Beacon Codex `config.toml` with recognized OTLP tables is also projected into path-free exporter metadata; user endpoints, headers, credentials, and unrelated Codex settings remain omitted. This is migration evidence only, not live telemetry validation or full Beacon parity.
 
 As of 2026-10-07, Beacon's Gemini user settings now have a separate strict migration projection for the local gRPC collector configuration. It records prompt/traces enablement and outfile presence without retaining the endpoint or settings file; project overrides, environment precedence, and live telemetry behavior remain unverified.

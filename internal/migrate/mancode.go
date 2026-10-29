@@ -125,7 +125,12 @@ func eligibleMancodePath(relative, sourceRoot string) bool {
 func isMancodeWorkflowDocumentExtension(relative string) bool {
 	return extIs(relative, ".md", ".mdx", ".txt", ".log", ".yaml", ".yml", ".toml", ".csv", ".tsv",
 		".xml", ".html", ".htm", ".ini", ".conf", ".cfg", ".properties", ".rst", ".adoc", ".diff", ".patch",
-		".sh", ".ps1", ".sql", ".jsonl", ".ndjson")
+		".sh", ".ps1", ".sql", ".jsonl", ".ndjson", ".py", ".pyw", ".js", ".jsx", ".mjs", ".cjs",
+		".ts", ".tsx", ".go", ".rs", ".java", ".kt", ".kts", ".cs", ".c", ".h", ".cc", ".cpp",
+		".cxx", ".hpp", ".hxx", ".rb", ".php", ".swift", ".scala", ".sc", ".lua", ".r", ".pl", ".pm",
+		".ex", ".exs", ".erl", ".hrl", ".hs", ".lhs", ".clj", ".cljs", ".cljc", ".edn", ".vue",
+		".svelte", ".astro", ".graphql", ".gql", ".proto", ".tf", ".tfvars", ".nix", ".jsonc", ".json5",
+		".bat", ".cmd", ".psm1", ".psd1")
 }
 
 func mancodePath(relative, sourceRoot string) string {

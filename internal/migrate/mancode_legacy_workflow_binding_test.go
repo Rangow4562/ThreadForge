@@ -270,6 +270,9 @@ func TestMancodeLegacyWorkflowReferencedTextFormatsImportAsReviewOnlyDocuments(t
 	if eligibleMancodePath(".mancode/memory/project.yaml", t.TempDir()) {
 		t.Fatal("workflow-only text extensions broadened Mancode memory-file eligibility")
 	}
+	if eligibleMancodePath(".mancode/memory/example.py", t.TempDir()) {
+		t.Fatal("workflow source-code extensions broadened Mancode memory-file eligibility")
+	}
 	formats := []struct {
 		extension string
 		content   string
@@ -280,6 +283,14 @@ func TestMancodeLegacyWorkflowReferencedTextFormatsImportAsReviewOnlyDocuments(t
 		{".xml", "<result>passed</result>\n"},
 		{".html", "<p>result: passed</p>\n"},
 		{".sql", "-- verification evidence\nSELECT 1;\n"},
+		{".py", "# historical source artifact\nprint('review only')\n"},
+		{".ts", "// historical source artifact\nexport const reviewOnly = true;\n"},
+		{".go", "// historical source artifact\npackage example\n"},
+		{".rs", "// historical source artifact\nfn main() {}\n"},
+		{".java", "// historical source artifact\nclass Example {}\n"},
+		{".cpp", "// historical source artifact\nint main() { return 0; }\n"},
+		{".jsonc", "// historical configuration\n{\"review_only\": true}\n"},
+		{".tf", "# historical infrastructure artifact\nresource \"null_resource\" \"example\" {}\n"},
 	}
 	for _, format := range formats {
 		t.Run(format.extension, func(t *testing.T) {
@@ -330,8 +341,18 @@ func TestMancodeLegacyWorkflowReferencedTextFormatsImportAsReviewOnlyDocuments(t
 			t.Fatalf("referenced text document is absent from the source inventory: %s", relative)
 		})
 	}
-	if _, err := decodeMancodeSourceItems("evidence.yaml", []byte("unsafe\x00content")); err == nil {
-		t.Fatal("binary Mancode workflow document was accepted as text")
+	for _, test := range []struct {
+		path string
+		data []byte
+	}{
+		{"evidence.yaml", []byte("unsafe\x00content")},
+		{"evidence.py", []byte("unsafe\x00content")},
+		{"evidence.ts", []byte{0xff, 0xfe}},
+		{"evidence.exe", []byte("not an allowed text suffix")},
+	} {
+		if _, err := decodeMancodeSourceItems(test.path, test.data); err == nil {
+			t.Fatalf("unsafe or unsupported Mancode workflow document was accepted: %s", test.path)
+		}
 	}
 }
 

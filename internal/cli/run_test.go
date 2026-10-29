@@ -2735,6 +2735,112 @@ func TestEvolutionDomainVerificationCLIHashesLocalArtifactsAndRemainsAdvisory(t 
 	}
 }
 
+func TestEvolutionDomainVerificationV2CLIUsesPythonRegisteredSplitRoles(t *testing.T) {
+	python, err := exec.LookPath("python")
+	if err != nil {
+		t.Skip("Python runtime is unavailable for the stdio integration test")
+	}
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PYTHONPATH", filepath.Join(repositoryRoot, "python"))
+	evidenceRoot := t.TempDir()
+	requestPath := filepath.Join(t.TempDir(), "domain-verification-v2.json")
+	cases := []struct {
+		domain string
+		splits []struct {
+			id    string
+			roles []string
+		}
+	}{
+		{
+			domain: "rrsi-coding",
+			splits: []struct {
+				id    string
+				roles []string
+			}{
+				{id: "terminal-bench/terminal-bench-2-1", roles: []string{"evolve"}},
+				{id: "swe-bench/swe-bench-verified", roles: []string{"held_out", "ood"}},
+			},
+		},
+		{
+			domain: "rrsi-agentic-workspace",
+			splits: []struct {
+				id    string
+				roles []string
+			}{
+				{id: "harvey-lab/evolve", roles: []string{"evolve"}},
+				{id: "harvey-lab/held-out", roles: []string{"held_out"}},
+				{id: "jobbench", roles: []string{"ood"}},
+				{id: "gdpval", roles: []string{"ood"}},
+				{id: "apex-agents", roles: []string{"ood"}},
+			},
+		},
+		{
+			domain: "rrsi-engineering-design",
+			splits: []struct {
+				id    string
+				roles []string
+			}{
+				{id: "engdesign-open", roles: []string{"evolve"}},
+				{id: "engdesign-v1", roles: []string{"ood"}},
+				{id: "frontier-eng", roles: []string{"held_out", "ood"}},
+			},
+		},
+	}
+	encodeRequest := func(domain string, splits []any) []byte {
+		t.Helper()
+		request := map[string]any{
+			"schema_version": "threadforge.evolution-domain-verification-request.v2",
+			"params": map[string]any{
+				"domain": domain, "evidence_root": evidenceRoot,
+				"benchmark_inventories": []any{}, "splits": splits,
+			},
+		}
+		encoded, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return encoded
+	}
+	runRequest := func(content []byte) (int, string, string) {
+		t.Helper()
+		if err := os.WriteFile(requestPath, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{"evolution", "domain-verify", "--file", requestPath, "--python", python}, &stdout, &stderr)
+		return code, stdout.String(), stderr.String()
+	}
+	for _, test := range cases {
+		t.Run(test.domain, func(t *testing.T) {
+			splits := make([]any, 0, len(test.splits))
+			for _, split := range test.splits {
+				splits = append(splits, map[string]any{
+					"split_id": split.id, "roles": split.roles, "task_set_sha256": strings.Repeat("0", 64),
+				})
+			}
+			code, stdout, stderr := runRequest(encodeRequest(test.domain, splits))
+			if code != 0 || !strings.Contains(stdout, `"schema_version": "threadforge.rrsi-domain-verification.v2"`) ||
+				!strings.Contains(stdout, `"required_split_scope_complete": true`) ||
+				!strings.Contains(stdout, `"split_identity_verified": false`) ||
+				!strings.Contains(stdout, `"execution_authorized": false`) || strings.Contains(stdout, evidenceRoot) {
+				t.Fatalf("registered split roles rejected or unsafe: code=%d stdout=%s stderr=%s", code, stdout, stderr)
+			}
+		})
+	}
+	invalid := []any{
+		map[string]any{"split_id": "engdesign-open", "roles": []string{"evolve"}, "task_set_sha256": strings.Repeat("0", 64)},
+		map[string]any{"split_id": "engdesign-v1", "roles": []string{"ood"}, "task_set_sha256": strings.Repeat("0", 64)},
+		map[string]any{"split_id": "frontier-eng", "roles": []string{"ood"}, "task_set_sha256": strings.Repeat("0", 64)},
+	}
+	code, stdout, stderr := runRequest(encodeRequest("rrsi-engineering-design", invalid))
+	if code == 0 || strings.Contains(stdout, evidenceRoot) || strings.Contains(stderr, evidenceRoot) {
+		t.Fatalf("invalid Python-registered roles were not rejected safely: code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+}
+
 func TestValidDomainVerificationV2ResultRejectsUnexpectedOrSensitiveFields(t *testing.T) {
 	makeValidResult := func() map[string]any {
 		sources := []string{"harvey-lab/evolve", "harvey-lab/held-out", "jobbench", "gdpval", "apex-agents"}

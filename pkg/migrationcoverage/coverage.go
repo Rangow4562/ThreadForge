@@ -174,7 +174,7 @@ type Format struct {
 var requiredFormats = map[string][]string{
 	"beacon": {
 		"beacon.runtime-events", "beacon.inventory-events", "beacon.learning-database",
-		"beacon.opencode-plugin", "beacon.hook-log", "beacon.endpoint-claude",
+		"beacon.opencode-plugin", "beacon.cline-plugin", "beacon.hook-log", "beacon.endpoint-claude",
 		"beacon.endpoint-qwen", "beacon.endpoint-factory", "beacon.endpoint-cursor",
 		"beacon.endpoint-codex-hooks", "beacon.endpoint-codex-otel", "beacon.endpoint-gemini",
 		"beacon.endpoint-antigravity", "beacon.endpoint-openhands", "beacon.endpoint-kiro",

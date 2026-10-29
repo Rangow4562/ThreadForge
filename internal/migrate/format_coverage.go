@@ -164,6 +164,9 @@ func migrationFormatID(product Product, sourceRoot, relative string) string {
 		if isBeaconOpenCodePluginPath(relative, sourceRoot) {
 			return "beacon.opencode-plugin"
 		}
+		if isBeaconClinePluginPath(relative, sourceRoot) {
+			return "beacon.cline-plugin"
+		}
 		if isBeaconHookLogPath(relative, sourceRoot) {
 			return "beacon.hook-log"
 		}

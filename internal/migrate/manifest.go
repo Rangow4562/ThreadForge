@@ -805,7 +805,7 @@ func knownRecordType(value string) bool {
 		"workflow_state", "workflow_document", "decision_record", "project_record", "decision_label_or_evaluation",
 		"decision_calibration_artifact", "decision_adaptation_state", "decision_bundle_metadata", "evolution_history", "noise_calibration", "evolution_frontier",
 		"evaluation_result", "evolution_proposal", "selection_decision", "evolution_artifact", "decision_synthetic_dataset_summary",
-		"beacon_learning_evaluation", "beacon_learning_candidate", "beacon_learning_memory", "beacon_opencode_plugin_presence", "beacon_hook_log_summary",
+		"beacon_learning_evaluation", "beacon_learning_candidate", "beacon_learning_memory", "beacon_opencode_plugin_presence", "beacon_cline_plugin_presence", "beacon_hook_log_summary",
 		"mancode_legacy_state", "mancode_project_profile", "mancode_legacy_config", "mancode_project_config", "mancode_schema_manifest",
 		"mancode_actor_identity", "mancode_actor_profile", "mancode_team_policy", "mancode_team_event",
 		"mancode_team_claim", "mancode_team_handoff", "mancode_team_head_fence", "mancode_operation_audit",
@@ -856,6 +856,9 @@ func recordTypeMatchesSource(product Product, relative, recordType, sourceRoot s
 	}
 	if product == Beacon && recordType == "beacon_hook_log_summary" {
 		return isBeaconHookLogPath(relative, sourceRoot)
+	}
+	if product == Beacon && recordType == "beacon_cline_plugin_presence" {
+		return isBeaconClinePluginPath(relative, sourceRoot)
 	}
 	if classifyRecord(product, relative) == recordType {
 		return true
@@ -1115,6 +1118,22 @@ func scanFileWithMancodeGitRef(product Product, sourceRoot, relative, fullPath s
 		} else {
 			file.records = append(file.records, Record{
 				Key: relative + "#000001", Type: "beacon_opencode_plugin_presence", SourcePath: relative,
+				ContentSHA256: digest(payload), Scope: "local_pending_review", Payload: payload,
+			})
+		}
+		finalizeScannedFile(&file)
+		return file, int64(len(data)), nil
+	}
+	if product == Beacon && isBeaconClinePluginPath(relative, sourceRoot) {
+		file := scannedFile{entry: entry}
+		file.entry.RecordCount = 1
+		payload, err := normalizeBeaconClinePlugin(data)
+		if err != nil {
+			file.entry.RejectedCount = 1
+			file.entry.Issue = safeIssue(err)
+		} else {
+			file.records = append(file.records, Record{
+				Key: relative + "#000001", Type: "beacon_cline_plugin_presence", SourcePath: relative,
 				ContentSHA256: digest(payload), Scope: "local_pending_review", Payload: payload,
 			})
 		}
@@ -1524,6 +1543,9 @@ func classifyRecord(product Product, relative string) string {
 		if isBeaconOpenCodePluginRelativePath(relative) {
 			return "beacon_opencode_plugin_presence"
 		}
+		if isBeaconClinePluginRelativePath(relative) {
+			return "beacon_cline_plugin_presence"
+		}
 		if strings.HasPrefix(base, "runtime.jsonl") || strings.HasPrefix(base, "inventory_state.jsonl") {
 			return "telemetry_event"
 		}
@@ -1573,7 +1595,8 @@ func eligiblePath(product Product, relative, sourceRoot string) bool {
 	switch product {
 	case Beacon:
 		return strings.HasPrefix(base, "runtime.jsonl") || strings.HasPrefix(base, "inventory_state.jsonl") ||
-			isBeaconOpenCodePluginPath(relative, sourceRoot) || isBeaconHookLogPath(relative, sourceRoot) ||
+			isBeaconOpenCodePluginPath(relative, sourceRoot) || isBeaconClinePluginPath(relative, sourceRoot) ||
+			isBeaconHookLogPath(relative, sourceRoot) ||
 			isBeaconEndpointConfigPath(relative, sourceRoot) || isBeaconClaudeSettingsPath(relative, sourceRoot) ||
 			isBeaconQwenSettingsPath(relative, sourceRoot) || isBeaconFactorySettingsPath(relative, sourceRoot) ||
 			isBeaconCursorHooksPath(relative, sourceRoot) || isBeaconCodexHooksPath(relative, sourceRoot) ||

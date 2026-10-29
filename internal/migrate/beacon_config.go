@@ -24,6 +24,7 @@ var (
 	errBeaconOpenHandsHooks = errors.New("Beacon OpenHands hooks must use the documented event-map shape")
 	errBeaconKiroHooks      = errors.New("Beacon Kiro hooks must use the documented v1 command-hook shape")
 	errBeaconOpenCodePlugin = errors.New("Beacon OpenCode plugin must start with its managed marker")
+	errBeaconClinePlugin    = errors.New("Beacon Cline plugin must start with its managed marker")
 	configLabelPattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 )
 
@@ -34,9 +35,23 @@ const (
 	beaconOpenCodePluginSchema   = "threadforge.beacon-opencode-plugin-config.v1"
 	beaconOpenCodePluginMarker   = "// beacon-managed-opencode-plugin:v1"
 	maxBeaconOpenCodePluginBytes = 1 << 20
+	beaconClinePluginSchema      = "threadforge.beacon-cline-plugin-config.v1"
+	beaconClinePluginMarker      = "// beacon-managed-cline-plugin:v1"
+	maxBeaconClinePluginBytes    = 1 << 20
 )
 
 type beaconOpenCodePluginPresence struct {
+	SchemaVersion        string   `json:"schema_version"`
+	Kind                 string   `json:"kind"`
+	SourceFormat         string   `json:"source_format"`
+	Harness              string   `json:"harness"`
+	ManagedMarkerPresent bool     `json:"managed_marker_present"`
+	OmittedFields        []string `json:"omitted_fields"`
+	HumanReviewRequired  bool     `json:"human_review_required"`
+	ExecutionAuthorized  bool     `json:"execution_authorized"`
+}
+
+type beaconClinePluginPresence struct {
 	SchemaVersion        string   `json:"schema_version"`
 	Kind                 string   `json:"kind"`
 	SourceFormat         string   `json:"source_format"`
@@ -71,11 +86,39 @@ func isBeaconOpenCodePluginPath(relative, sourceRoot string) bool {
 	return false
 }
 
+// isBeaconClinePluginPath accepts only Beacon's documented user/project plugin paths or
+// their explicitly selected Cline config/plugin roots. A generic beacon.ts file is not a source.
+func isBeaconClinePluginPath(relative, sourceRoot string) bool {
+	if !strings.EqualFold(filepath.Base(relative), "beacon.ts") {
+		return false
+	}
+	clean := strings.ToLower(strings.TrimPrefix(filepath.ToSlash(filepath.Clean(relative)), "./"))
+	if clean == ".cline/plugins/beacon.ts" || strings.HasSuffix(clean, "/.cline/plugins/beacon.ts") {
+		return true
+	}
+	if clean == "plugins/beacon.ts" {
+		root := strings.ToLower(filepath.Base(filepath.Clean(sourceRoot)))
+		return root == ".cline"
+	}
+	if clean == "beacon.ts" {
+		root := strings.ToLower(filepath.Base(filepath.Clean(sourceRoot)))
+		parent := strings.ToLower(filepath.Base(filepath.Dir(filepath.Clean(sourceRoot))))
+		return root == "plugins" && parent == ".cline"
+	}
+	return false
+}
+
 func isBeaconOpenCodePluginRelativePath(relative string) bool {
 	clean := strings.ToLower(strings.TrimPrefix(filepath.ToSlash(filepath.Clean(relative)), "./"))
 	return clean == ".opencode/plugins/beacon.ts" || strings.HasSuffix(clean, "/.opencode/plugins/beacon.ts") ||
 		clean == ".config/opencode/plugins/beacon.ts" || strings.HasSuffix(clean, "/.config/opencode/plugins/beacon.ts") ||
 		clean == "opencode/plugins/beacon.ts" || clean == "plugins/beacon.ts" || clean == "beacon.ts"
+}
+
+func isBeaconClinePluginRelativePath(relative string) bool {
+	clean := strings.ToLower(strings.TrimPrefix(filepath.ToSlash(filepath.Clean(relative)), "./"))
+	return clean == ".cline/plugins/beacon.ts" || strings.HasSuffix(clean, "/.cline/plugins/beacon.ts") ||
+		clean == "plugins/beacon.ts" || clean == "beacon.ts"
 }
 
 // normalizeBeaconOpenCodePlugin records only the first-line ownership marker. It does not
@@ -97,6 +140,29 @@ func normalizeBeaconOpenCodePlugin(data []byte) (json.RawMessage, error) {
 	})
 	if err != nil {
 		return nil, errors.New("unable to encode Beacon OpenCode plugin presence")
+	}
+	return payload, nil
+}
+
+// normalizeBeaconClinePlugin records only the first-line ownership marker. It does not
+// parse, retain, execute, or authenticate the plugin source.
+func normalizeBeaconClinePlugin(data []byte) (json.RawMessage, error) {
+	if len(data) > maxBeaconClinePluginBytes || !utf8.Valid(data) {
+		return nil, errBeaconClinePlugin
+	}
+	source := strings.TrimPrefix(string(data), "\uFEFF")
+	firstLine := strings.SplitN(source, "\n", 2)[0]
+	if strings.TrimSuffix(firstLine, "\r") != beaconClinePluginMarker {
+		return nil, errBeaconClinePlugin
+	}
+	payload, err := json.Marshal(beaconClinePluginPresence{
+		SchemaVersion: beaconClinePluginSchema, Kind: "managed_plugin_presence",
+		SourceFormat: "typescript_plugin", Harness: "cline", ManagedMarkerPresent: true,
+		OmittedFields:       []string{"plugin_source", "commands", "credentials", "environment", "local_paths", "unrelated_configuration"},
+		HumanReviewRequired: true, ExecutionAuthorized: false,
+	})
+	if err != nil {
+		return nil, errors.New("unable to encode Beacon Cline plugin presence")
 	}
 	return payload, nil
 }

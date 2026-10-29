@@ -313,6 +313,104 @@ func TestBeaconOpenCodePluginPathAllowlistAndMarkerValidation(t *testing.T) {
 	}
 }
 
+func TestBeaconClinePluginPresenceMigrationIsPathBoundAndSourceFree(t *testing.T) {
+	root := t.TempDir()
+	pluginPath := filepath.Join(root, ".cline", "plugins", "beacon.ts")
+	if err := os.MkdirAll(filepath.Dir(pluginPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	source := beaconClinePluginMarker + "\r\nconst privateEndpoint = 'https://private.example.invalid';\n" +
+		"const apiKey = 'do-not-import-plugin-secret';\nexport default {} as const;\n"
+	if err := os.WriteFile(pluginPath, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest, err := Inspect(Beacon, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Summary.FilesScanned != 1 || manifest.Summary.FilesReady != 1 || manifest.Summary.RecordsImported != 1 ||
+		manifest.Summary.FilesUnsupported != 0 || manifest.Summary.RecordsRejected != 0 {
+		t.Fatalf("managed Cline plugin did not produce one presence record: %#v", manifest.Summary)
+	}
+	if format := migrationFormatID(Beacon, root, filepath.ToSlash(filepath.Join(".cline", "plugins", "beacon.ts"))); format != "beacon.cline-plugin" {
+		t.Fatalf("Cline plugin got migration family %q", format)
+	}
+	dataRoot := t.TempDir()
+	snapshot, err := CreateSnapshot(Beacon, root, dataRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dataRoot, "migrations", "snapshots", string(Beacon), snapshot.SourceFingerprint, "manifest.json")
+	loaded, err := LoadSnapshot(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := ReadSnapshotRecords(manifestPath, loaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Type != "beacon_cline_plugin_presence" || records[0].Scope != "local_pending_review" {
+		t.Fatalf("unexpected Cline plugin presence record: %#v", records)
+	}
+	payload := string(records[0].Payload)
+	for _, forbidden := range []string{
+		"privateEndpoint", "private.example.invalid", "do-not-import-plugin-secret", "apiKey", "export default", pluginPath,
+	} {
+		if strings.Contains(payload, forbidden) {
+			t.Fatalf("Cline plugin presence projection retained %q: %s", forbidden, payload)
+		}
+	}
+	for _, expected := range []string{
+		`"schema_version":"threadforge.beacon-cline-plugin-config.v1"`,
+		`"kind":"managed_plugin_presence"`, `"source_format":"typescript_plugin"`, `"harness":"cline"`,
+		`"managed_marker_present":true`, `"human_review_required":true`, `"execution_authorized":false`,
+	} {
+		if !strings.Contains(payload, expected) {
+			t.Fatalf("Cline plugin presence projection omitted %q: %s", expected, payload)
+		}
+	}
+}
+
+func TestBeaconClinePluginPathAllowlistAndMarkerValidation(t *testing.T) {
+	paths := []struct {
+		name, relative, sourceRoot string
+		want                       bool
+	}{
+		{"project plugin", filepath.Join("repo", ".cline", "plugins", "beacon.ts"), `C:\source`, true},
+		{"user home config", filepath.Join(".cline", "plugins", "beacon.ts"), `C:\home`, true},
+		{"selected Cline config root", filepath.Join("plugins", "beacon.ts"), filepath.Join(`C:\repo`, ".cline"), true},
+		{"selected plugin directory", "beacon.ts", filepath.Join(`C:\home`, ".cline", "plugins"), true},
+		{"noncanonical config directory", filepath.Join("cline", "plugins", "beacon.ts"), `C:\home`, false},
+		{"unrelated plugin", filepath.Join("repo", "plugins", "beacon.ts"), `C:\source`, false},
+		{"wrong config", filepath.Join("repo", ".opencode", "plugins", "beacon.ts"), `C:\source`, false},
+		{"wrong filename", filepath.Join("repo", ".cline", "plugins", "custom.ts"), `C:\source`, false},
+	}
+	for _, test := range paths {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isBeaconClinePluginPath(test.relative, test.sourceRoot); got != test.want {
+				t.Fatalf("isBeaconClinePluginPath(%q, %q) = %v, want %v", test.relative, test.sourceRoot, got, test.want)
+			}
+		})
+	}
+	for _, source := range []string{
+		"export default {};\n// beacon-managed-cline-plugin:v1\n",
+		"// beacon-managed-cline-plugin:v2\nexport default {};\n",
+		"// beacon-managed-cline-plugin:v1x\nexport default {};\n",
+		" // beacon-managed-cline-plugin:v1\nexport default {};\n",
+	} {
+		if _, err := normalizeBeaconClinePlugin([]byte(source)); !errors.Is(err, errBeaconClinePlugin) {
+			t.Fatalf("unmarked/unsupported plugin source returned %v", err)
+		}
+	}
+	if _, err := normalizeBeaconClinePlugin([]byte{0xff}); !errors.Is(err, errBeaconClinePlugin) {
+		t.Fatalf("invalid UTF-8 plugin source returned %v", err)
+	}
+	if _, err := normalizeBeaconClinePlugin([]byte(strings.Repeat("x", maxBeaconClinePluginBytes+1))); !errors.Is(err, errBeaconClinePlugin) {
+		t.Fatalf("oversized plugin source returned %v", err)
+	}
+}
+
 func TestBeaconClaudeSettingsMigrationRetainsOnlyManagedHookEventNames(t *testing.T) {
 	root := t.TempDir()
 	claudeDir := filepath.Join(root, ".claude")

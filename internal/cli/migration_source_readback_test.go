@@ -47,6 +47,43 @@ func TestBeaconOpenCodeManagedPluginMigrationReadback(t *testing.T) {
 	}
 }
 
+func TestBeaconClineManagedPluginMigrationReadback(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "project")
+	plugin := filepath.Join(root, ".cline", "plugins", "beacon.ts")
+	if err := os.MkdirAll(filepath.Dir(plugin), 0o700); err != nil {
+		t.Fatal("create synthetic Beacon Cline plugin directory")
+	}
+	contents := "// beacon-managed-cline-plugin:v1\nconst config = 'private-cline-plugin-source';\n"
+	if err := os.WriteFile(plugin, []byte(contents), 0o600); err != nil {
+		t.Fatal("write synthetic Beacon Cline plugin")
+	}
+
+	readback := runConfiguredMigrationSourceReadback(t, migrate.Beacon, root)
+	if readback.Snapshot.Summary.RecordsImported != 1 || readback.Verification.CutoverAuthorized {
+		t.Fatalf("Cline plugin migration receipt did not reconcile as review-only: %#v", readback)
+	}
+	clineFamilyFound := false
+	for _, format := range readback.Coverage.Formats {
+		if format.ID == "beacon.cline-plugin" && format.Files == 1 && format.RecordsImported == 1 {
+			clineFamilyFound = true
+		}
+	}
+	if !clineFamilyFound {
+		t.Fatalf("Cline plugin was not reconciled in its distinct coverage family: %#v", readback.Coverage.Formats)
+	}
+	records, err := migrate.ReadSnapshotRecords(readback.ManifestPath, readback.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Type != "beacon_cline_plugin_presence" || records[0].Scope != "local_pending_review" {
+		t.Fatalf("unexpected Cline plugin migration record: %#v", records)
+	}
+	if strings.Contains(string(records[0].Payload), "private-cline-plugin-source") ||
+		strings.Contains(string(records[0].Payload), ".cline/plugins/beacon.ts") {
+		t.Fatalf("normalized Cline record retained source content or local path: %s", records[0].Payload)
+	}
+}
+
 func TestRRSISyntheticTrialMigrationReadback(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "rrsi")
 	resultPath := filepath.Join(root, "runs", "coding", "jobs", "base", "task-1__trialhash", "result.json")
@@ -250,6 +287,7 @@ type migrationSourceReadbackResult struct {
 	Snapshot     migrate.Manifest
 	ManifestPath string
 	Verification migrationVerification
+	Coverage     migrationcoverage.Report
 }
 
 func runConfiguredMigrationSourceReadback(t *testing.T, product migrate.Product, sourceRoot string) migrationSourceReadbackResult {
@@ -359,7 +397,7 @@ func runConfiguredMigrationSourceReadback(t *testing.T, product migrate.Product,
 	t.Logf("reconciled migration round-trip: product=%s files=%d ready=%d credential_path_exclusions=%d records=%d source_bytes=%d",
 		product, snapshot.Summary.FilesScanned, snapshot.Summary.FilesReady,
 		snapshot.Summary.FilesCredentialBlocked, snapshot.Summary.RecordsImported, snapshot.Summary.TotalSourceBytes)
-	return migrationSourceReadbackResult{Snapshot: snapshot, ManifestPath: manifestPath, Verification: verification}
+	return migrationSourceReadbackResult{Snapshot: snapshot, ManifestPath: manifestPath, Verification: verification, Coverage: coverage}
 }
 
 func copyMigrationSourceTree(t *testing.T, sourceRoot, backupRoot string) {

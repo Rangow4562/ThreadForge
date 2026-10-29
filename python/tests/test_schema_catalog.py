@@ -68,6 +68,49 @@ def test_cutover_attestation_result_cannot_claim_execution_or_authority():
             validator.validate(invalid)
 
 
+def test_rrsi_domain_verification_v2_schema_never_claims_execution_or_accepts_task_ids():
+    schema = json.loads((SCHEMA_DIRECTORY / "evolution-domain-verification-v2.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.rrsi-domain-verification.v2",
+        "domain": "rrsi-agentic-workspace",
+        "status": "incomplete",
+        "expected_splits": ["harvey-lab/evolve", "harvey-lab/held-out", "jobbench", "gdpval", "apex-agents"],
+        "splits": [],
+        "missing_evidence": [],
+        "artifact_hashes_verified": False,
+        "verified_artifact_count": 0,
+        "artifact_manifest_sha256": None,
+        "required_split_scope_complete": False,
+        "source_inventory_coverage": [
+            {"source_id": "harvey-lab/evolve", "status": "verified"},
+            {"source_id": "harvey-lab/held-out", "status": "verified"},
+            {"source_id": "jobbench", "status": "unavailable", "reason": "source_manifest_task_set_conflict"},
+            {"source_id": "gdpval", "status": "unavailable", "reason": "external_runner_revision_unpinned"},
+            {"source_id": "apex-agents", "status": "unavailable", "reason": "external_runner_revision_unpinned"},
+        ],
+        "task_set_bindings": [],
+        "task_set_binding_verified": False,
+        "cross_split_overlaps": [],
+        "split_identity_verified": False,
+        "independent_split_sets_verified": False,
+        "acceptance_status": "not_evaluated",
+        "benchmark_execution_performed": False,
+        "cutover_evidence_eligible": False,
+        "human_approval_required": True,
+        "execution_authorized": False,
+    }
+    validator.validate(result)
+    for invalid in (
+        {**result, "benchmark_execution_performed": True},
+        {**result, "execution_authorized": True},
+        {**result, "cutover_evidence_eligible": True},
+        {**result, "splits": [{"task_ids": ["private-task"]}]},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_project_skill_result_schema_accepts_windsurf_and_rejects_unknown_hosts_or_paths():
     schema = json.loads((SCHEMA_DIRECTORY / "project-skill-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

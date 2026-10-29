@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-domain-verification-v2.schema.json",
+  "title": "Threadforge source-bound local RRSI domain artifact verification response v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "domain", "status", "expected_splits", "splits", "missing_evidence",
+    "artifact_hashes_verified", "verified_artifact_count", "artifact_manifest_sha256",
+    "required_split_scope_complete", "source_inventory_coverage", "task_set_bindings",
+    "task_set_binding_verified", "cross_split_overlaps", "split_identity_verified",
+    "independent_split_sets_verified", "acceptance_status", "benchmark_execution_performed",
+    "cutover_evidence_eligible", "human_approval_required", "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.rrsi-domain-verification.v2" },
+    "domain": { "enum": ["rrsi-coding", "rrsi-agentic-workspace", "rrsi-engineering-design"] },
+    "status": { "enum": ["artifacts_verified", "incomplete", "integrity_failed", "privacy_blocked"] },
+    "expected_splits": { "type": "array", "items": { "type": "string" } },
+    "splits": { "type": "array", "items": { "$ref": "#/$defs/split" } },
+    "missing_evidence": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["split_id", "item"],
+        "properties": { "split_id": { "type": "string" }, "item": { "type": "string" } }
+      }
+    },
+    "artifact_hashes_verified": { "type": "boolean" },
+    "verified_artifact_count": { "type": "integer", "minimum": 0, "maximum": 384 },
+    "artifact_manifest_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+    "required_split_scope_complete": { "type": "boolean" },
+    "source_inventory_coverage": { "type": "array", "items": { "$ref": "#/$defs/source_coverage" } },
+    "task_set_bindings": { "type": "array", "items": { "$ref": "#/$defs/task_set_binding" } },
+    "task_set_binding_verified": { "type": "boolean" },
+    "cross_split_overlaps": { "type": "array", "items": { "$ref": "#/$defs/overlap" } },
+    "split_identity_verified": { "type": "boolean" },
+    "independent_split_sets_verified": { "type": "boolean" },
+    "acceptance_status": { "const": "not_evaluated" },
+    "benchmark_execution_performed": { "const": false },
+    "cutover_evidence_eligible": { "const": false },
+    "human_approval_required": { "const": true },
+    "execution_authorized": { "const": false }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "run_summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["run_count", "metrics_mean"],
+      "properties": {
+        "run_count": { "type": "integer", "minimum": 0 },
+        "metrics_mean": { "type": "object", "additionalProperties": { "type": "number" } }
+      }
+    },
+    "split": {
+      "type": "object", "additionalProperties": false,
+      "required": ["split_id", "roles", "baseline", "candidate"],
+      "properties": {
+        "split_id": { "type": "string" },
+        "roles": { "type": "array", "items": { "enum": ["evolve", "held_out", "ood"] } },
+        "dataset_sha256": { "$ref": "#/$defs/sha256" },
+        "task_count": { "type": "integer", "minimum": 1 },
+        "evaluator": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string" },
+            "version": { "type": "string" },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "baseline": { "$ref": "#/$defs/run_summary" },
+        "candidate": { "$ref": "#/$defs/run_summary" }
+      }
+    },
+    "source_coverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_id", "status"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": { "enum": ["verified", "unavailable"] },
+        "reason": { "enum": ["external_runner_revision_unpinned", "source_split_unreconciled", "source_manifest_task_set_conflict", "inventory_not_supplied"] }
+      }
+    },
+    "task_set_binding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["split_id", "source_inventory_verified", "task_set_sha256", "baseline_runs_bound", "candidate_runs_bound"],
+      "properties": {
+        "split_id": { "type": "string" },
+        "source_inventory_verified": { "type": "boolean" },
+        "task_set_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "baseline_runs_bound": { "type": "integer", "minimum": 0, "maximum": 32 },
+        "candidate_runs_bound": { "type": "integer", "minimum": 0, "maximum": 32 }
+      }
+    },
+    "overlap": {
+      "type": "object", "additionalProperties": false,
+      "required": ["left_split_id", "right_split_id", "shared_task_count"],
+      "properties": {
+        "left_split_id": { "type": "string" },
+        "right_split_id": { "type": "string" },
+        "shared_task_count": { "type": "integer", "minimum": 1, "maximum": 2048 }
+      }
+    }
+  }
+}

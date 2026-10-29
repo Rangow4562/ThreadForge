@@ -63,6 +63,7 @@ def test_capabilities_are_local_first_and_do_not_require_optional_imports():
     }
     assert "evolution.screen.v2" in result["result"]["operations"]
     assert "evolution.domain.verify" in result["result"]["operations"]
+    assert "evolution.domain.verify.v2" in result["result"]["operations"]
     assert "evolution.inventory.harvey.derive" in result["result"]["operations"]
     assert "evolution.inventory.rrsi.derive" in result["result"]["operations"]
     assert "evolution.inventory.jobbench.derive" in result["result"]["operations"]
@@ -72,9 +73,10 @@ def test_capabilities_are_local_first_and_do_not_require_optional_imports():
     domains = {item["domain"]: item for item in coverage["domains"]}
     assert domains["rrsi-coding"]["domain_rules_complete"] is True
     assert domains["rrsi-agentic-workspace"]["anchored_sources"] == [
-        "harvey-lab/evolve", "harvey-lab/held-out", "jobbench",
+        "harvey-lab/evolve", "harvey-lab/held-out",
     ]
     assert domains["rrsi-agentic-workspace"]["unanchored_sources"] == [
+        {"source_id": "jobbench", "reason_code": "source_manifest_task_set_conflict"},
         {"source_id": "gdpval", "reason_code": "external_runner_revision_unpinned"},
         {"source_id": "apex-agents", "reason_code": "external_runner_revision_unpinned"},
     ]
@@ -211,6 +213,84 @@ def _domain_artifact_verification_params(root):
     }
 
 
+def _domain_artifact_verification_v2_params(root, monkeypatch):
+    domain = "rrsi-coding"
+    task_sets = {
+        "terminal-bench/terminal-bench-2-1": [f"private-terminal-task-{index:02}" for index in range(10)],
+        "swe-bench/swe-bench-verified": [f"private-swe-task-{index:02}" for index in range(10)],
+    }
+    source_file_hashes = {
+        "terminal-bench/terminal-bench-2-1": "c" * 64,
+        "swe-bench/swe-bench-verified": "d" * 64,
+    }
+    task_digests = {source_id: protocol._canonical_inventory_digest(task_ids)
+                    for source_id, task_ids in task_sets.items()}
+    monkeypatch.setitem(protocol.RRSI_TRUSTED_INVENTORIES, domain, {
+        "terminal-bench/terminal-bench-2-1": {
+            "source_file_sha256": source_file_hashes["terminal-bench/terminal-bench-2-1"],
+            "task_count": 10, "task_ids_sha256": task_digests["terminal-bench/terminal-bench-2-1"],
+        },
+        "swe-bench/swe-bench-verified": {
+            "source_revision": protocol.RRSI_SWE_BENCH_VERIFIED_REVISION,
+            "source_file_sha256": source_file_hashes["swe-bench/swe-bench-verified"],
+            "task_count": 10, "task_ids_sha256": task_digests["swe-bench/swe-bench-verified"],
+        },
+    })
+
+    def write(relative_path, content):
+        path = root.joinpath(*relative_path.split("/"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        return {"relative_path": relative_path, "sha256": hashlib.sha256(content).hexdigest()}
+
+    inventories = []
+    splits = []
+    for split_index, (source_id, task_ids) in enumerate(task_sets.items()):
+        inventories.append({
+            "source_id": source_id,
+            "source_revision": (protocol.RRSI_SOURCE_REVISION if split_index == 0
+                                else protocol.RRSI_SWE_BENCH_VERIFIED_REVISION),
+            "source_file_sha256": source_file_hashes[source_id],
+            "task_ids": task_ids,
+        })
+        dataset = write(f"datasets/{split_index}.bin", f"fixture dataset {split_index}\n".encode())
+        dataset["task_count"] = len(task_ids)
+        evaluator = write(f"evaluators/{split_index}.bin", f"fixture evaluator {split_index}\n".encode())
+        evaluator.update({"id": "frozen-evaluator", "version": "1.0"})
+        run_artifacts = {"baseline_runs": [], "candidate_runs": []}
+        for field, role in (("baseline_runs", "baseline"), ("candidate_runs", "candidate")):
+            for run_index in range(2):
+                run_id = f"fixture-{split_index}-{role}-{run_index}"
+                evidence = {
+                    "schema_version": "threadforge.rrsi-domain-run-evidence.v2",
+                    "domain": domain,
+                    "split_id": source_id,
+                    "role": role,
+                    "run_id": run_id,
+                    "task_set_sha256": task_digests[source_id],
+                    "metrics": _domain_metrics(domain, 4.5),
+                }
+                reference = write(
+                    f"runs/{split_index}-{role}-{run_index}.json",
+                    json.dumps(evidence, sort_keys=True).encode(),
+                )
+                run_artifacts[field].append(reference)
+        splits.append({
+            "split_id": source_id,
+            "roles": DOMAIN_SPLITS[domain][source_id],
+            "task_set_sha256": task_digests[source_id],
+            "dataset_artifact": dataset,
+            "evaluator": evaluator,
+            **run_artifacts,
+        })
+    return {
+        "domain": domain,
+        "evidence_root": str(root),
+        "benchmark_inventories": inventories,
+        "splits": splits,
+    }
+
+
 @pytest.mark.parametrize("domain", list(DOMAIN_SPLITS))
 def test_rrsi_domain_result_contract_validates_all_registered_domain_shapes(domain):
     result = dispatch(request("evolution.domain.validate", _domain_validation_params(domain)))["result"]
@@ -297,6 +377,73 @@ def test_rrsi_domain_artifact_verification_hashes_local_files_without_authorizin
     assert tampered["artifact_hashes_verified"] is False
     assert {item["item"] for item in tampered["missing_evidence"]} >= {"evaluator_0_hash_mismatch"}
     assert str(root) not in json.dumps(tampered)
+
+
+def test_rrsi_domain_verification_v2_binds_run_records_to_pinned_task_sets(tmp_path, monkeypatch):
+    root = tmp_path / "evidence-v2"
+    root.mkdir()
+    params = _domain_artifact_verification_v2_params(root, monkeypatch)
+    result = dispatch(request("evolution.domain.verify.v2", params))["result"]
+    encoded = json.dumps(result)
+    assert result["schema_version"] == "threadforge.rrsi-domain-verification.v2"
+    assert result["status"] == "artifacts_verified"
+    assert result["artifact_hashes_verified"] is True
+    assert result["required_split_scope_complete"] is True
+    assert result["task_set_binding_verified"] is True
+    assert result["split_identity_verified"] is True
+    assert result["independent_split_sets_verified"] is True
+    assert result["cross_split_overlaps"] == []
+    assert all(item["status"] == "verified" for item in result["source_inventory_coverage"])
+    assert result["benchmark_execution_performed"] is False
+    assert result["cutover_evidence_eligible"] is False
+    assert result["execution_authorized"] is False
+    assert "private-terminal-task-01" not in encoded
+    assert "private-swe-task-01" not in encoded
+    assert str(root) not in encoded
+
+    run_reference = params["splits"][0]["baseline_runs"][0]
+    run_path = root.joinpath(*run_reference["relative_path"].split("/"))
+    run_record = json.loads(run_path.read_text(encoding="utf-8"))
+    run_record["task_set_sha256"] = "f" * 64
+    mutated = json.dumps(run_record, sort_keys=True).encode()
+    run_path.write_bytes(mutated)
+    run_reference["sha256"] = hashlib.sha256(mutated).hexdigest()
+    tampered = dispatch(request("evolution.domain.verify.v2", params))["result"]
+    assert tampered["status"] == "integrity_failed"
+    assert tampered["artifact_hashes_verified"] is True
+    assert tampered["task_set_binding_verified"] is False
+    assert tampered["split_identity_verified"] is False
+    assert "private-terminal-task-01" not in json.dumps(tampered)
+
+
+def test_rrsi_domain_verification_v2_reports_known_unanchored_and_overlapping_sources(tmp_path):
+    root = tmp_path / "evidence-v2"
+    root.mkdir()
+    result = dispatch(request("evolution.domain.verify.v2", {
+        "domain": "rrsi-agentic-workspace", "evidence_root": str(root), "splits": [],
+        "benchmark_inventories": [
+            {"source_id": "jobbench", "source_revision": protocol.RRSI_JOBBENCH_REVISION,
+             "source_file_sha256": "a" * 64, "task_ids": ["private-job-task-01"]}
+        ],
+    }))["result"]
+    assert result["schema_version"] == "threadforge.rrsi-domain-verification.v2"
+    coverage = {entry["source_id"]: entry for entry in result["source_inventory_coverage"]}
+    assert coverage["jobbench"] == {
+        "source_id": "jobbench", "status": "unavailable", "reason": "source_manifest_task_set_conflict",
+    }
+    assert coverage["gdpval"]["reason"] == "external_runner_revision_unpinned"
+    assert coverage["apex-agents"]["reason"] == "external_runner_revision_unpinned"
+    assert result["split_identity_verified"] is False
+    assert "private-job-task-01" not in json.dumps(result)
+
+    overlaps = protocol._domain_inventory_overlaps("rrsi-engineering-design", {
+        "engdesign-open": ["private-eng-task-01", "private-eng-task-02"],
+        "engdesign-v1": ["private-eng-task-01", "private-eng-task-02"],
+    })
+    assert overlaps == [{
+        "left_split_id": "engdesign-open", "right_split_id": "engdesign-v1", "shared_task_count": 2,
+    }]
+    assert "private-eng-task-01" not in json.dumps(overlaps)
 
 
 def test_rrsi_domain_artifact_verification_separates_byte_hashes_from_run_record_validity(tmp_path):
@@ -1572,10 +1719,11 @@ def test_rrsi_screen_v2_rejects_incomplete_or_unpinned_task_sets_without_echo(mo
     assert "do-not-echo" not in json.dumps(privacy_blocked)
 
 
-def test_rrsi_pinned_inventory_commitments_include_jobbench_and_swe_bench_sources():
+def test_rrsi_pinned_inventory_commitments_exclude_conflicted_jobbench_and_include_swe_bench():
     coding = protocol.RRSI_TRUSTED_INVENTORIES["rrsi-coding"]["terminal-bench/terminal-bench-2-1"]
     swe = protocol.RRSI_TRUSTED_INVENTORIES["rrsi-coding"]["swe-bench/swe-bench-verified"]
-    jobbench = protocol.RRSI_TRUSTED_INVENTORIES["rrsi-agentic-workspace"]["jobbench"]
+    assert "jobbench" not in protocol.RRSI_TRUSTED_INVENTORIES["rrsi-agentic-workspace"]
+    assert protocol.RRSI_UNANCHORED_INVENTORY_REASONS["jobbench"] == "source_manifest_task_set_conflict"
     harvey_evolve = protocol.RRSI_TRUSTED_INVENTORIES["rrsi-agentic-workspace"]["harvey-lab/evolve"]
     harvey_held_out = protocol.RRSI_TRUSTED_INVENTORIES["rrsi-agentic-workspace"]["harvey-lab/held-out"]
     engineering = protocol.RRSI_TRUSTED_INVENTORIES["rrsi-engineering-design"]["engdesign-open"]
@@ -1587,16 +1735,6 @@ def test_rrsi_pinned_inventory_commitments_include_jobbench_and_swe_bench_source
     assert swe["source_file_sha256"] == "a45b1fe4e2f0c8390b2b2938ac83e92ed5979000856808f3679c07812e9e6dcd"
     assert swe["task_count"] == 500
     assert swe["task_ids_sha256"] == "a6b0fd7c8c2969a0eef892e032250adcfa6d32362d395c246930e61b575ac9b9"
-    assert jobbench["source_revision"] == "d43a66575635da0d3f6cb9a20976dc1a60f3ffc9"
-    assert jobbench["source_file"].endswith("dataset/main-file-manifest.v1")
-    assert jobbench["source_file_sha256"] == "8fee9939969c1a4fa68e280ea99743305d5dcecc2bee83d0f18fd0a532cbddcd"
-    assert jobbench["source_file_count"] == 566
-    assert jobbench["source_relationship_file"].endswith("README.md#main-task_id")
-    assert jobbench["source_relationship_file_sha256"] == "6793a68d3dac7c0deccd174a85d724e614706049f7579aaac9efe86da79be291"
-    assert jobbench["task_id_convention"] == "<occupation>__taskN from dataset/<occupation>/taskN"
-    assert jobbench["split"] == "main"
-    assert jobbench["task_count"] == 65
-    assert jobbench["task_ids_sha256"] == "baadaf4f2afd1fa31506f9b50e5d04078d51908435b2a5328cd0638bcf186171"
     for source, split, task_count, task_digest in (
         (harvey_evolve, "evolve", 120, "9d55740ad2cea88e6a094721f127f8e6b7a5902b2321b3e2fdd04accc605471b"),
         (harvey_held_out, "heldout", 40, "249c167630271857d81b2bc8ca2854bf287c38cbe7c331657957b57d3a7d601c"),
@@ -1624,22 +1762,20 @@ def test_rrsi_pinned_inventory_commitments_include_jobbench_and_swe_bench_source
     }
     assert missing == {
         "rrsi-coding": set(),
-        "rrsi-agentic-workspace": {"gdpval", "apex-agents"},
+        "rrsi-agentic-workspace": {"jobbench", "gdpval", "apex-agents"},
         "rrsi-engineering-design": {"frontier-eng"},
     }
 
 
-def test_jobbench_inventory_rejects_a_caller_supplied_wrong_task_set():
+def test_jobbench_inventory_cannot_be_verified_without_a_reconciled_trust_anchor():
     source_id = "jobbench"
-    commitment = protocol.RRSI_TRUSTED_INVENTORIES["rrsi-agentic-workspace"][source_id]
-    wrong_ids = [f"synthetic__task{index}" for index in range(commitment["task_count"])]
     inventory = {
         "source_id": source_id,
-        "source_revision": commitment["source_revision"],
-        "source_file_sha256": commitment["source_file_sha256"],
-        "task_ids": wrong_ids,
+        "source_revision": protocol.RRSI_JOBBENCH_REVISION,
+        "source_file_sha256": "0" * 64,
+        "task_ids": ["synthetic__task01"],
     }
-    with pytest.raises(ProtocolError, match="pinned complete task set"):
+    with pytest.raises(ProtocolError, match="no pinned Threadforge trust anchor"):
         protocol._validate_benchmark_inventories("rrsi-agentic-workspace", [inventory])
 
 
@@ -1725,6 +1861,20 @@ def test_jobbench_inventory_derives_only_pinned_git_metadata_and_never_authorize
         "screening_usable": False,
     }
     validator(schema).validate(schema_candidate)
+
+
+def test_jobbench_inventory_returns_unanchored_candidate_when_no_active_anchor_exists(tmp_path, monkeypatch):
+    root, _revision, _anchor, _task_ids, _files = _jobbench_checkout_fixture(tmp_path, monkeypatch)
+    monkeypatch.delitem(protocol.RRSI_TRUSTED_INVENTORIES["rrsi-agentic-workspace"], "jobbench")
+
+    result = protocol.derive_jobbench_inventory({"jobbench_source_root": str(root)})
+
+    assert result["status"] == "candidate_unanchored"
+    assert result["trust_anchor_status"] == "uncommitted"
+    assert result["screening_usable"] is False
+    assert result["benchmark_execution_performed"] is False
+    assert result["cutover_evidence_eligible"] is False
+    assert result["execution_authorized"] is False
 
 
 def test_jobbench_inventory_is_unanchored_on_manifest_mismatch_and_uses_only_the_pinned_git_tree(tmp_path, monkeypatch):

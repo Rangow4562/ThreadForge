@@ -47,6 +47,7 @@
         },
         "reason_code": {
           "enum": [
+            "source_manifest_task_set_conflict",
             "external_runner_revision_unpinned",
             "source_split_unreconciled",
             "trust_anchor_not_reviewed"

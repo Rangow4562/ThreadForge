@@ -428,7 +428,7 @@ func runEvolutionDomainVerify(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *file == "" || fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge evolution domain-verify --file <domain-verification-request.json> [--python python]")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge evolution domain-verify --file <domain-verification-request.v1-or-v2.json> [--python python]")
 		return 2
 	}
 	input, err := readBoundedText(*file, 4<<20)
@@ -442,7 +442,8 @@ func runEvolutionDomainVerify(args []string, stdout, stderr io.Writer) int {
 	}
 	var request evolutionJSONRequest
 	if err := decodeJSONBytes([]byte(input), &request); err != nil ||
-		request.SchemaVersion != "threadforge.evolution-domain-verification-request.v1" ||
+		(request.SchemaVersion != "threadforge.evolution-domain-verification-request.v1" &&
+			request.SchemaVersion != "threadforge.evolution-domain-verification-request.v2") ||
 		len(request.Params) == 0 || string(request.Params) == "null" {
 		_, _ = fmt.Fprintln(stderr, "invalid versioned evolution domain-verification request")
 		return 1
@@ -457,23 +458,40 @@ func runEvolutionDomainVerify(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "evolution domain-verification domain is required")
 		return 1
 	}
+	operation := "evolution.domain.verify"
+	resultSchema := "threadforge.rrsi-domain-verification.v1"
+	if request.SchemaVersion == "threadforge.evolution-domain-verification-request.v2" {
+		operation = "evolution.domain.verify.v2"
+		resultSchema = "threadforge.rrsi-domain-verification.v2"
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	response, err := invokePython(ctx, *python, "evolution-domain-verification", "evolution.domain.verify", request.Params)
+	response, err := invokePython(ctx, *python, "evolution-domain-verification", operation, request.Params)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "evolution domain artifact verification failed safely")
 		return 1
 	}
 	var result map[string]any
 	if err := decodeJSONBytes(response.Result, &result); err != nil ||
-		result["schema_version"] != "threadforge.rrsi-domain-verification.v1" || result["domain"] != domain ||
+		result["schema_version"] != resultSchema || result["domain"] != domain ||
 		(result["status"] != "artifacts_verified" && result["status"] != "incomplete" &&
 			result["status"] != "integrity_failed" && result["status"] != "privacy_blocked") ||
 		result["acceptance_status"] != "not_evaluated" || result["benchmark_execution_performed"] != false ||
-		result["cutover_evidence_eligible"] != false || result["split_identity_verified"] != false ||
+		result["cutover_evidence_eligible"] != false ||
 		result["human_approval_required"] != true || result["execution_authorized"] != false {
 		_, _ = fmt.Fprintln(stderr, "Python returned an invalid or unsafe domain-verification response")
 		return 1
+	}
+	if request.SchemaVersion == "threadforge.evolution-domain-verification-request.v1" {
+		if result["split_identity_verified"] != false {
+			_, _ = fmt.Fprintln(stderr, "Python returned an invalid or unsafe v1 domain-verification identity result")
+			return 1
+		}
+	} else {
+		if !validDomainVerificationV2Result(result, domain) {
+			_, _ = fmt.Fprintln(stderr, "Python returned an invalid or unsafe v2 source-bound identity result")
+			return 1
+		}
 	}
 	verified, hasVerified := result["artifact_hashes_verified"].(bool)
 	scopeComplete, hasScope := result["required_split_scope_complete"].(bool)
@@ -489,6 +507,131 @@ func runEvolutionDomainVerify(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return writeIndentedJSON(stdout, result, stderr)
+}
+
+func validDomainVerificationV2Result(result map[string]any, domain string) bool {
+	requiredSources := map[string][]string{
+		"rrsi-coding":             {"terminal-bench/terminal-bench-2-1", "swe-bench/swe-bench-verified"},
+		"rrsi-agentic-workspace":  {"harvey-lab/evolve", "harvey-lab/held-out", "jobbench", "gdpval", "apex-agents"},
+		"rrsi-engineering-design": {"engdesign-open", "engdesign-v1", "frontier-eng"},
+	}
+	expectedSplits := map[string][]string{
+		"rrsi-coding":             {"terminal-bench/terminal-bench-2-1", "swe-bench/swe-bench-verified"},
+		"rrsi-agentic-workspace":  {"harvey-lab/evolve", "harvey-lab/held-out", "jobbench", "gdpval", "apex-agents"},
+		"rrsi-engineering-design": {"engdesign-open", "engdesign-v1", "frontier-eng"},
+	}
+	required, ok := requiredSources[domain]
+	if !ok {
+		return false
+	}
+	splitIdentity, identityOK := result["split_identity_verified"].(bool)
+	taskBindingVerified, taskBindingOK := result["task_set_binding_verified"].(bool)
+	independent, independentOK := result["independent_split_sets_verified"].(bool)
+	artifactHashes, artifactsOK := result["artifact_hashes_verified"].(bool)
+	scopeComplete, scopeOK := result["required_split_scope_complete"].(bool)
+	coverage, coverageOK := result["source_inventory_coverage"].([]any)
+	bindings, bindingsOK := result["task_set_bindings"].([]any)
+	overlaps, overlapsOK := result["cross_split_overlaps"].([]any)
+	if !identityOK || !taskBindingOK || !independentOK || !artifactsOK || !scopeOK || !coverageOK || !bindingsOK || !overlapsOK ||
+		len(coverage) != len(required) || len(bindings) > len(expectedSplits[domain]) ||
+		(splitIdentity && (!taskBindingVerified || !scopeComplete || !artifactHashes)) ||
+		(independent && (!splitIdentity || len(overlaps) != 0)) || len(overlaps) > 32 {
+		return false
+	}
+	covered := make(map[string]string, len(coverage))
+	for _, raw := range coverage {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			return false
+		}
+		sourceID, idOK := entry["source_id"].(string)
+		status, statusOK := entry["status"].(string)
+		if !idOK || !statusOK || (status != "verified" && status != "unavailable") ||
+			!containsDomainValue(required, sourceID) || covered[sourceID] != "" {
+			return false
+		}
+		if status == "unavailable" {
+			reason, reasonOK := entry["reason"].(string)
+			if !reasonOK || reason == "" {
+				return false
+			}
+		} else if _, hasReason := entry["reason"]; hasReason {
+			return false
+		}
+		covered[sourceID] = status
+	}
+	for _, sourceID := range required {
+		if covered[sourceID] == "" || (splitIdentity && covered[sourceID] != "verified") {
+			return false
+		}
+	}
+	seenBindings := make(map[string]bool, len(bindings))
+	for _, raw := range bindings {
+		binding, ok := raw.(map[string]any)
+		if !ok {
+			return false
+		}
+		splitID, splitOK := binding["split_id"].(string)
+		sourceVerified, sourceOK := binding["source_inventory_verified"].(bool)
+		taskDigest, digestOK := binding["task_set_sha256"].(string)
+		baseline, baselineOK := binding["baseline_runs_bound"].(float64)
+		candidate, candidateOK := binding["candidate_runs_bound"].(float64)
+		if !splitOK || !sourceOK || !containsDomainValue(expectedSplits[domain], splitID) || seenBindings[splitID] ||
+			!baselineOK || !candidateOK || baseline < 0 || candidate < 0 || baseline > 32 || candidate > 32 ||
+			baseline != float64(int(baseline)) || candidate != float64(int(candidate)) {
+			return false
+		}
+		seenBindings[splitID] = true
+		if sourceVerified != (digestOK && validLowerHex(taskDigest, 64)) {
+			return false
+		}
+		if taskBindingVerified && (!sourceVerified || baseline < 1 || candidate < 1) {
+			return false
+		}
+	}
+	if taskBindingVerified && len(bindings) != len(expectedSplits[domain]) {
+		return false
+	}
+	if splitIdentity || independent {
+		if len(bindings) != len(expectedSplits[domain]) {
+			return false
+		}
+		for _, sourceID := range required {
+			if covered[sourceID] != "verified" {
+				return false
+			}
+		}
+	}
+	seenOverlaps := make(map[string]bool, len(overlaps))
+	for _, raw := range overlaps {
+		overlap, ok := raw.(map[string]any)
+		if !ok {
+			return false
+		}
+		left, leftOK := overlap["left_split_id"].(string)
+		right, rightOK := overlap["right_split_id"].(string)
+		shared, sharedOK := overlap["shared_task_count"].(float64)
+		pair := left + "\x00" + right
+		if !leftOK || !rightOK || !sharedOK || shared < 1 || shared > 2048 || shared != float64(int(shared)) ||
+			!containsDomainValue(expectedSplits[domain], left) || !containsDomainValue(expectedSplits[domain], right) ||
+			left >= right || seenOverlaps[pair] {
+			return false
+		}
+		seenOverlaps[pair] = true
+	}
+	if independent && len(overlaps) != 0 {
+		return false
+	}
+	return true
+}
+
+func containsDomainValue(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func validHarveyTaskID(value string) bool {

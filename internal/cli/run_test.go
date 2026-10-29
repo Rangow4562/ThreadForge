@@ -2709,6 +2709,30 @@ func TestEvolutionDomainVerificationCLIHashesLocalArtifactsAndRemainsAdvisory(t 
 		!strings.Contains(out.String(), `"artifact_hashes_verified": false`) || strings.Contains(out.String(), root) {
 		t.Fatalf("tampered domain verification code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
 	}
+
+	v2Request := map[string]any{
+		"schema_version": "threadforge.evolution-domain-verification-request.v2",
+		"params": map[string]any{
+			"domain": "rrsi-agentic-workspace", "evidence_root": root,
+			"benchmark_inventories": []any{}, "splits": []any{},
+		},
+	}
+	v2Encoded, err := json.Marshal(v2Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(requestPath, v2Encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	stderr.Reset()
+	code = Run([]string{"evolution", "domain-verify", "--file", requestPath, "--python", python}, &out, &stderr)
+	if code != 0 || !strings.Contains(out.String(), `"schema_version": "threadforge.rrsi-domain-verification.v2"`) ||
+		!strings.Contains(out.String(), `"source_manifest_task_set_conflict"`) ||
+		!strings.Contains(out.String(), `"task_set_binding_verified": false`) ||
+		!strings.Contains(out.String(), `"execution_authorized": false`) || strings.Contains(out.String(), root) {
+		t.Fatalf("source-bound v2 domain verification code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
 }
 
 func TestHarveyInventoryCandidateRequiresPinnedSourceAndExactTaskSetDigests(t *testing.T) {

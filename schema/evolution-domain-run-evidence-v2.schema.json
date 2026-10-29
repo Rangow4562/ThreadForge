@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/evolution-domain-run-evidence-v2.schema.json",
+  "title": "Threadforge source-bound normalized RRSI domain run evidence v2",
+  "description": "An aggregate metric record bound to a pinned task-set digest. It is not proof that a benchmark executed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "domain", "split_id", "role", "run_id", "task_set_sha256", "metrics"],
+  "properties": {
+    "schema_version": { "const": "threadforge.rrsi-domain-run-evidence.v2" },
+    "domain": { "enum": ["rrsi-coding", "rrsi-agentic-workspace", "rrsi-engineering-design"] },
+    "split_id": { "enum": [
+      "terminal-bench/terminal-bench-2-1", "swe-bench/swe-bench-verified",
+      "harvey-lab/evolve", "harvey-lab/held-out", "jobbench", "gdpval", "apex-agents",
+      "engdesign-open", "engdesign-v1", "frontier-eng"
+    ] },
+    "role": { "enum": ["baseline", "candidate"] },
+    "run_id": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$" },
+    "task_set_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "metrics": {
+      "oneOf": [
+        { "$ref": "evolution-domain-validation-request-v1.schema.json#/$defs/coding_metrics" },
+        { "$ref": "evolution-domain-validation-request-v1.schema.json#/$defs/workspace_metrics" },
+        { "$ref": "evolution-domain-validation-request-v1.schema.json#/$defs/engineering_metrics" }
+      ]
+    }
+  }
+}

@@ -129,6 +129,7 @@ RRSI_REQUIRED_INVENTORIES = {
     ],
 }
 RRSI_UNANCHORED_INVENTORY_REASONS = {
+    "jobbench": "source_manifest_task_set_conflict",
     "gdpval": "external_runner_revision_unpinned",
     "apex-agents": "external_runner_revision_unpinned",
     "frontier-eng": "source_split_unreconciled",
@@ -157,28 +158,6 @@ RRSI_TRUSTED_INVENTORIES = {
         },
     },
     "rrsi-agentic-workspace": {
-        # This is a derived metadata manifest, not a checked-in upstream file:
-        # sort dataset/ file rows by (path.casefold(), path), serialize each as
-        # path<TAB>size<TAB>blob_id<LF>, then SHA-256 the UTF-8 bytes. The
-        # task-ID commitment is derived separately from unique task paths.
-        "jobbench": {
-            "source_revision": RRSI_JOBBENCH_REVISION,
-            "source_file": (
-                "JobBench/job-bench@d43a66575635da0d3f6cb9a20976dc1a60f3ffc9/"
-                "dataset/main-file-manifest.v1"
-            ),
-            "source_file_sha256": "8fee9939969c1a4fa68e280ea99743305d5dcecc2bee83d0f18fd0a532cbddcd",
-            "source_file_count": 566,
-            "source_relationship_file": (
-                "JobBench/job-bench@d43a66575635da0d3f6cb9a20976dc1a60f3ffc9/"
-                "README.md#main-task_id"
-            ),
-            "source_relationship_file_sha256": "6793a68d3dac7c0deccd174a85d724e614706049f7579aaac9efe86da79be291",
-            "task_id_convention": "<occupation>__taskN from dataset/<occupation>/taskN",
-            "split": "main",
-            "task_count": 65,
-            "task_ids_sha256": "baadaf4f2afd1fa31506f9b50e5d04078d51908435b2a5328cd0638bcf186171",
-        },
         # These split commitments bind the Harvey dataset revision to the
         # separately pinned RRSI split-generator bytes. Only task-set digests
         # are committed; task IDs and benchmark files remain caller-local.
@@ -422,6 +401,8 @@ def dispatch(request: Any) -> dict[str, Any]:
         result = validate_domain_results(params)
     elif operation == "evolution.domain.verify":
         result = verify_domain_artifacts(params)
+    elif operation == "evolution.domain.verify.v2":
+        result = verify_domain_artifacts_v2(params)
     elif operation == "evolution.inventory.harvey.derive":
         result = derive_harvey_inventory(params)
     elif operation == "evolution.inventory.rrsi.derive":
@@ -465,7 +446,7 @@ def capabilities() -> dict[str, Any]:
     safetensors_available = importlib.util.find_spec("safetensors") is not None
     vllm_available = importlib.util.find_spec("vllm") is not None
     return {
-        "operations": ["capabilities", "decision.validate", "decision.decide", "decision.decide_batch", "decision.bundle.decide", "decision.bundle.decide_batch", "decision.bundle.validate", "decision.calibrate", "decision.observe", "decision.model.truncate", "decision.serve.pipeline", "decision.distill.fit", "decision.distill.soft", "decision.distill.label", "decision.distill.extract", "decision.distill.extract_gold", "decision.distill.pipeline", "decision.distill.synth", "decision.distill.export_cases", "evolution.select", "evolution.domain.validate", "evolution.domain.verify", "evolution.inventory.harvey.derive", "evolution.inventory.rrsi.derive", "evolution.inventory.jobbench.derive", "evolution.evaluate.paired", "evolution.evaluate.paired.v2", "evolution.screen", "evolution.screen.v2", "evolution.critic", "evolution.critic.v2", "evolution.repair", "evolution.repair.v2", "memory.learn"],
+        "operations": ["capabilities", "decision.validate", "decision.decide", "decision.decide_batch", "decision.bundle.decide", "decision.bundle.decide_batch", "decision.bundle.validate", "decision.calibrate", "decision.observe", "decision.model.truncate", "decision.serve.pipeline", "decision.distill.fit", "decision.distill.soft", "decision.distill.label", "decision.distill.extract", "decision.distill.extract_gold", "decision.distill.pipeline", "decision.distill.synth", "decision.distill.export_cases", "evolution.select", "evolution.domain.validate", "evolution.domain.verify", "evolution.domain.verify.v2", "evolution.inventory.harvey.derive", "evolution.inventory.rrsi.derive", "evolution.inventory.jobbench.derive", "evolution.evaluate.paired", "evolution.evaluate.paired.v2", "evolution.screen", "evolution.screen.v2", "evolution.critic", "evolution.critic.v2", "evolution.repair", "evolution.repair.v2", "memory.learn"],
         "decision_levels": ["raw", "L0", "L1", "L2", "auto"],
         "decision_backends": {
             "hf_local": numpy_available and transformers_available and torch_available,
@@ -510,6 +491,11 @@ def capabilities() -> dict[str, Any]:
         "local_file_access": {
             "operation": "evolution.domain.verify", "root_parameter": "evidence_root",
             "mode": "read_only", "returns_paths_or_file_content": False,
+        },
+        "source_bound_domain_verification": {
+            "operation": "evolution.domain.verify.v2", "inventory_parameter": "benchmark_inventories",
+            "task_set_binding_required": True, "returns_task_ids": False,
+            "benchmark_execution_performed": False, "cutover_evidence_eligible": False,
         },
         "source_inventory_access": {
             "operation": "evolution.inventory.harvey.derive", "root_parameter": "harvey_lab_root",
@@ -2208,7 +2194,10 @@ def _hash_domain_artifact(
     return digest.hexdigest(), original_size, bytes(content) if content is not None else None
 
 
-def _decode_domain_run_evidence(content: bytes, domain: str, split_id: str, role: str, task_count: int) -> dict[str, Any]:
+def _decode_domain_run_evidence(
+    content: bytes, domain: str, split_id: str, role: str, task_count: int,
+    expected_task_set_sha256: str | None = None, source_bound: bool = False,
+) -> dict[str, Any]:
     def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, value in pairs:
@@ -2223,14 +2212,24 @@ def _decode_domain_run_evidence(content: bytes, domain: str, split_id: str, role
         raise _DomainArtifactProblem("run_evidence_invalid") from None
     if _contains_credential(value):
         raise _DomainArtifactProblem("credential_material")
-    if not isinstance(value, dict) or set(value) != {
-        "schema_version", "domain", "split_id", "role", "run_id", "metrics",
-    }:
+    fields = {"schema_version", "domain", "split_id", "role", "run_id", "metrics"}
+    if source_bound:
+        fields.add("task_set_sha256")
+    if not isinstance(value, dict) or set(value) != fields:
         raise _DomainArtifactProblem("run_evidence_invalid")
-    if (value.get("schema_version") != "threadforge.rrsi-domain-run-evidence.v1"
+    expected_schema = ("threadforge.rrsi-domain-run-evidence.v2" if source_bound
+                       else "threadforge.rrsi-domain-run-evidence.v1")
+    if (value.get("schema_version") != expected_schema
             or value.get("domain") != domain or value.get("split_id") != split_id
             or value.get("role") != role):
         raise _DomainArtifactProblem("run_evidence_binding_mismatch")
+    task_set_sha256 = None
+    if source_bound:
+        task_set_sha256 = value.get("task_set_sha256")
+        if not _is_sha256(task_set_sha256):
+            raise _DomainArtifactProblem("run_task_set_binding_missing")
+        if expected_task_set_sha256 is not None and task_set_sha256 != expected_task_set_sha256:
+            raise _DomainArtifactProblem("run_task_set_binding_mismatch")
     run_id = value.get("run_id")
     if not isinstance(run_id, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}", run_id):
         raise _DomainArtifactProblem("run_evidence_invalid")
@@ -2238,18 +2237,42 @@ def _decode_domain_run_evidence(content: bytes, domain: str, split_id: str, role
         metrics = _validate_domain_metrics(domain, value.get("metrics"), task_count, f"{role} run evidence")
     except ProtocolError:
         raise _DomainArtifactProblem("run_evidence_invalid") from None
-    return {"run_id": run_id, "metrics": metrics}
+    result = {"run_id": run_id, "metrics": metrics}
+    if source_bound:
+        result["task_set_sha256"] = task_set_sha256
+    return result
 
 
 def verify_domain_artifacts(params: dict[str, Any]) -> dict[str, Any]:
-    """Hash local benchmark/evaluator/run artifacts; never infer execution or split authenticity."""
-    _only_fields(params, {"domain", "evidence_root", "splits"})
+    """Hash local artifacts without inferring execution or split identity."""
+    return _verify_domain_artifacts(params, source_bound=False)
+
+
+def verify_domain_artifacts_v2(params: dict[str, Any]) -> dict[str, Any]:
+    """Verify local run task-set digests against exact pinned RRSI inventories."""
+    return _verify_domain_artifacts(params, source_bound=True)
+
+
+def _verify_domain_artifacts(params: dict[str, Any], source_bound: bool) -> dict[str, Any]:
+    allowed = {"domain", "evidence_root", "splits"}
+    if source_bound:
+        allowed.add("benchmark_inventories")
+    _only_fields(params, allowed)
     domain = params.get("domain")
     if not isinstance(domain, str) or domain not in RRSI_DOMAIN_SPLITS:
         raise ProtocolError("domain must name one of the three versioned RRSI domains")
     if _contains_credential(params):
+        if source_bound:
+            return _domain_artifact_verification_result_v2(domain, "privacy_blocked", None, [], 0)
         return _domain_artifact_verification_result(domain, "privacy_blocked", None, [], 0)
     root = _domain_evidence_root(params.get("evidence_root"))
+    verified_inventories: dict[str, list[str]] = {}
+    verified_inventory_sources: list[str] = []
+    missing_inventory_sources: list[str] = []
+    if source_bound:
+        verified_inventories, verified_inventory_sources, missing_inventory_sources = (
+            _validate_domain_verification_inventories(domain, params.get("benchmark_inventories", []))
+        )
     raw_splits = params.get("splits", [])
     if not isinstance(raw_splits, list) or len(raw_splits) > 32:
         raise ProtocolError("splits must be an array containing no more than 32 entries")
@@ -2264,6 +2287,12 @@ def verify_domain_artifacts(params: dict[str, Any]) -> dict[str, Any]:
     artifact_verification_failed = False
     privacy_blocked = False
     run_ids: set[str] = set()
+    source_issues: list[dict[str, str]] = []
+    task_set_bindings: list[dict[str, Any]] = []
+    run_evidence_count = 0
+    run_artifact_reference_count = 0
+    bound_run_evidence_count = 0
+    task_set_binding_failed = False
 
     def artifact_digest(split_id: str, kind: str, index: int, reference: Any, retain_content: bool = False):
         nonlocal declared_references, integrity_failed, artifact_verification_failed, privacy_blocked
@@ -2305,9 +2334,10 @@ def verify_domain_artifacts(params: dict[str, Any]) -> dict[str, Any]:
     for split_index, raw_split in enumerate(raw_splits):
         if not isinstance(raw_split, dict):
             raise ProtocolError(f"splits[{split_index}] must be an object")
-        _only_fields(raw_split, {
-            "split_id", "roles", "dataset_artifact", "evaluator", "baseline_runs", "candidate_runs",
-        }, f"splits[{split_index}]")
+        split_fields = {"split_id", "roles", "dataset_artifact", "evaluator", "baseline_runs", "candidate_runs"}
+        if source_bound:
+            split_fields.add("task_set_sha256")
+        _only_fields(raw_split, split_fields, f"splits[{split_index}]")
         split_id = raw_split.get("split_id")
         if not isinstance(split_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9._/-]{0,127}", split_id):
             raise ProtocolError(f"splits[{split_index}].split_id must be a bounded lowercase identifier")
@@ -2324,6 +2354,28 @@ def verify_domain_artifacts(params: dict[str, Any]) -> dict[str, Any]:
             raise ProtocolError(f"split {split_id!r} roles do not match the registered domain contract")
 
         normalized: dict[str, Any] = {"split_id": split_id, "roles": roles}
+        expected_task_set_sha256 = None
+        supplied_task_set_sha256 = None
+        if source_bound:
+            raw_task_set_sha256 = raw_split.get("task_set_sha256")
+            if raw_task_set_sha256 is not None and not _is_sha256(raw_task_set_sha256):
+                raise ProtocolError(f"split {split_id!r} task_set_sha256 must be lowercase SHA-256")
+            supplied_task_set_sha256 = raw_task_set_sha256
+            if raw_task_set_sha256 is None:
+                source_issues.append({"split_id": split_id, "item": "task_set_sha256"})
+                task_set_binding_failed = True
+            commitment = RRSI_TRUSTED_INVENTORIES.get(domain, {}).get(split_id)
+            task_ids = verified_inventories.get(split_id)
+            if commitment is None or task_ids is None:
+                reason = (RRSI_UNANCHORED_INVENTORY_REASONS.get(split_id)
+                          or "inventory_not_supplied")
+                source_issues.append({"split_id": split_id, "item": "inventory_" + reason})
+            else:
+                expected_task_set_sha256 = commitment["task_ids_sha256"]
+                if supplied_task_set_sha256 is not None and supplied_task_set_sha256 != expected_task_set_sha256:
+                    source_issues.append({"split_id": split_id, "item": "task_set_source_binding_mismatch"})
+                    integrity_failed = True
+                    task_set_binding_failed = True
         task_count: int | None = None
         dataset_artifact = raw_split.get("dataset_artifact")
         if dataset_artifact is not None:
@@ -2342,6 +2394,12 @@ def verify_domain_artifacts(params: dict[str, Any]) -> dict[str, Any]:
                 normalized["dataset_sha256"] = dataset_result[0]
                 normalized["task_count"] = candidate_task_count
                 task_count = candidate_task_count
+                if source_bound:
+                    commitment = RRSI_TRUSTED_INVENTORIES.get(domain, {}).get(split_id)
+                    if commitment is not None and candidate_task_count != commitment["task_count"]:
+                        source_issues.append({"split_id": split_id, "item": "task_count_source_binding_mismatch"})
+                        integrity_failed = True
+                        task_set_binding_failed = True
 
         evaluator = raw_split.get("evaluator")
         if evaluator is not None:
@@ -2358,12 +2416,16 @@ def verify_domain_artifacts(params: dict[str, Any]) -> dict[str, Any]:
                     "id": evaluator_id, "version": evaluator_version, "sha256": evaluator_result[0],
                 }
 
+        bound_run_counts = {"baseline": 0, "candidate": 0}
         for side in ("baseline_runs", "candidate_runs"):
             raw_runs = raw_split.get(side, [])
             if not isinstance(raw_runs, list) or len(raw_runs) > 32:
                 raise ProtocolError(f"split {split_id!r} {side} must contain no more than 32 entries")
+            if source_bound:
+                run_artifact_reference_count += len(raw_runs)
             parsed_runs: list[dict[str, Any]] = []
             role = "baseline" if side == "baseline_runs" else "candidate"
+            bound_runs_for_side = 0
             for run_index, reference in enumerate(raw_runs):
                 run_result = artifact_digest(split_id, role, run_index, reference, retain_content=True)
                 if run_result is None:
@@ -2373,14 +2435,31 @@ def verify_domain_artifacts(params: dict[str, Any]) -> dict[str, Any]:
                     issues.append({"split_id": split_id, "item": f"{role}_{run_index}_missing_dataset_artifact"})
                     continue
                 try:
-                    parsed = _decode_domain_run_evidence(content, domain, split_id, role, task_count)
+                    parsed = _decode_domain_run_evidence(
+                        content, domain, split_id, role, task_count,
+                        expected_task_set_sha256=expected_task_set_sha256,
+                        source_bound=source_bound,
+                    )
                 except _DomainArtifactProblem as problem:
                     if problem.code == "credential_material":
                         privacy_blocked = True
                         break
                     issues.append({"split_id": split_id, "item": f"{role}_{run_index}_{problem.code}"})
-                    integrity_failed = True
+                    if problem.code == "run_task_set_binding_mismatch":
+                        integrity_failed = True
+                        task_set_binding_failed = True
+                    elif problem.code == "run_task_set_binding_missing":
+                        task_set_binding_failed = True
+                    else:
+                        integrity_failed = True
                     continue
+                if source_bound:
+                    run_evidence_count += 1
+                    if expected_task_set_sha256 is None or parsed.get("task_set_sha256") != expected_task_set_sha256:
+                        task_set_binding_failed = True
+                    else:
+                        bound_run_evidence_count += 1
+                        bound_runs_for_side += 1
                 if parsed["run_id"] in run_ids:
                     issues.append({"split_id": split_id, "item": f"{role}_{run_index}_run_id_duplicate"})
                     integrity_failed = True
@@ -2390,16 +2469,28 @@ def verify_domain_artifacts(params: dict[str, Any]) -> dict[str, Any]:
                     "run_id": parsed["run_id"], "evidence_sha256": run_sha256, "metrics": parsed["metrics"],
                 })
             normalized[side] = parsed_runs
+            bound_run_counts[role] = bound_runs_for_side
             if privacy_blocked:
                 break
         normalized_splits.append(normalized)
+        if source_bound:
+            task_set_bindings.append({
+                "split_id": split_id,
+                "source_inventory_verified": split_id in verified_inventories,
+                "task_set_sha256": expected_task_set_sha256,
+                "baseline_runs_bound": bound_run_counts["baseline"],
+                "candidate_runs_bound": bound_run_counts["candidate"],
+            })
         if privacy_blocked:
             break
 
     if privacy_blocked:
+        if source_bound:
+            return _domain_artifact_verification_result_v2(domain, "privacy_blocked", None, [], 0)
         return _domain_artifact_verification_result(domain, "privacy_blocked", None, [], 0)
     validation = validate_domain_results({"domain": domain, "splits": normalized_splits})
     issues.extend(validation["missing_evidence"])
+    issues.extend(source_issues)
     issues.sort(key=lambda item: (item["split_id"], item["item"]))
     all_submitted_artifacts_verified = (
         declared_references > 0 and len(manifest_records) == declared_references and not artifact_verification_failed
@@ -2418,6 +2509,35 @@ def verify_domain_artifacts(params: dict[str, Any]) -> dict[str, Any]:
         status = "artifacts_verified"
     else:
         status = "incomplete"
+    if source_bound:
+        source_inventory_complete = not missing_inventory_sources
+        binding_scope_complete = (
+            len(task_set_bindings) == len(RRSI_DOMAIN_SPLITS[domain])
+            and all(
+                binding["source_inventory_verified"] and _is_sha256(binding["task_set_sha256"])
+                and binding["baseline_runs_bound"] > 0 and binding["candidate_runs_bound"] > 0
+                for binding in task_set_bindings
+            )
+        )
+        task_set_binding_verified = (
+            run_evidence_count > 0 and run_evidence_count == run_artifact_reference_count
+            and bound_run_evidence_count == run_evidence_count and binding_scope_complete
+            and not task_set_binding_failed
+        )
+        split_identity_verified = (
+            source_inventory_complete and task_set_binding_verified and required_scope_complete
+            and validation["status"] == "validated" and all_submitted_artifacts_verified
+            and not integrity_failed and not source_issues
+        )
+        overlaps = _domain_inventory_overlaps(domain, verified_inventories)
+        independent_split_sets_verified = split_identity_verified and not overlaps
+        return _domain_artifact_verification_result_v2(
+            domain, status, validation, issues, len(manifest_records),
+            all_submitted_artifacts_verified, manifest_sha256, required_scope_complete,
+            [source for source in verified_inventory_sources],
+            task_set_bindings, task_set_binding_verified, overlaps,
+            split_identity_verified, independent_split_sets_verified,
+        )
     return _domain_artifact_verification_result(
         domain, status, validation, issues, len(manifest_records),
         all_submitted_artifacts_verified, manifest_sha256, required_scope_complete,
@@ -2441,6 +2561,72 @@ def _domain_artifact_verification_result(
         "artifact_manifest_sha256": artifact_manifest_sha256,
         "required_split_scope_complete": required_split_scope_complete,
         "split_identity_verified": False,
+        "acceptance_status": "not_evaluated",
+        "benchmark_execution_performed": False,
+        "cutover_evidence_eligible": False,
+        "human_approval_required": True,
+        "execution_authorized": False,
+    }
+
+
+def _domain_inventory_overlaps(domain: str, inventories: dict[str, list[str]]) -> list[dict[str, Any]]:
+    expected_roles = RRSI_DOMAIN_SPLITS[domain]
+    source_ids = sorted(source for source in inventories if source in expected_roles)
+    overlaps: list[dict[str, Any]] = []
+    normalized = {source: {task_id.casefold() for task_id in inventories[source]} for source in source_ids}
+    for left_index, left in enumerate(source_ids):
+        for right in source_ids[left_index + 1:]:
+            shared_count = len(normalized[left] & normalized[right])
+            if shared_count:
+                overlaps.append({
+                    "left_split_id": left, "right_split_id": right,
+                    "shared_task_count": shared_count,
+                })
+    return overlaps
+
+
+def _domain_source_inventory_coverage(domain: str, verified_sources: list[str]) -> list[dict[str, str]]:
+    verified = set(verified_sources)
+    rows = []
+    for source_id in RRSI_REQUIRED_INVENTORIES[domain]:
+        if source_id in verified:
+            rows.append({"source_id": source_id, "status": "verified"})
+            continue
+        reason = (RRSI_UNANCHORED_INVENTORY_REASONS.get(source_id)
+                  or "inventory_not_supplied")
+        rows.append({"source_id": source_id, "status": "unavailable", "reason": reason})
+    return rows
+
+
+def _domain_artifact_verification_result_v2(
+    domain: str, status: str, validation: dict[str, Any] | None, issues: list[dict[str, str]],
+    verified_artifact_count: int, artifact_hashes_verified: bool = False,
+    artifact_manifest_sha256: str | None = None, required_split_scope_complete: bool = False,
+    verified_inventory_sources: list[str] | None = None,
+    task_set_bindings: list[dict[str, Any]] | None = None,
+    task_set_binding_verified: bool = False,
+    cross_split_overlaps: list[dict[str, Any]] | None = None,
+    split_identity_verified: bool = False,
+    independent_split_sets_verified: bool = False,
+) -> dict[str, Any]:
+    verified_sources = verified_inventory_sources or []
+    return {
+        "schema_version": "threadforge.rrsi-domain-verification.v2",
+        "domain": domain,
+        "status": status,
+        "expected_splits": list(RRSI_DOMAIN_SPLITS[domain]),
+        "splits": validation["splits"] if validation is not None else [],
+        "missing_evidence": issues,
+        "artifact_hashes_verified": artifact_hashes_verified,
+        "verified_artifact_count": verified_artifact_count,
+        "artifact_manifest_sha256": artifact_manifest_sha256,
+        "required_split_scope_complete": required_split_scope_complete,
+        "source_inventory_coverage": _domain_source_inventory_coverage(domain, verified_sources),
+        "task_set_bindings": task_set_bindings or [],
+        "task_set_binding_verified": task_set_binding_verified,
+        "cross_split_overlaps": cross_split_overlaps or [],
+        "split_identity_verified": split_identity_verified,
+        "independent_split_sets_verified": independent_split_sets_verified,
         "acceptance_status": "not_evaluated",
         "benchmark_execution_performed": False,
         "cutover_evidence_eligible": False,
@@ -3695,9 +3881,10 @@ def derive_jobbench_inventory(params: dict[str, Any]) -> dict[str, Any]:
         "task_ids": task_ids,
     }
     task_ids_sha256 = _canonical_inventory_digest(task_ids)
-    anchor = RRSI_TRUSTED_INVENTORIES["rrsi-agentic-workspace"]["jobbench"]
+    anchor = RRSI_TRUSTED_INVENTORIES.get("rrsi-agentic-workspace", {}).get("jobbench")
     screening_usable = False
-    if (revision == RRSI_JOBBENCH_REVISION and file_count == anchor["source_file_count"] and
+    if (anchor is not None and revision == RRSI_JOBBENCH_REVISION and
+            file_count == anchor["source_file_count"] and
             readme_sha256 == anchor["source_relationship_file_sha256"] and
             len(task_ids) == anchor["task_count"] and task_ids_sha256 == anchor["task_ids_sha256"]):
         try:
@@ -4041,6 +4228,52 @@ def _validate_benchmark_inventories(domain: str, inventories: Any) -> tuple[set[
     verified_sources = sorted(seen_sources)
     missing_sources = [source for source in required if source not in seen_sources]
     return verified_ids, verified_sources, missing_sources
+
+
+def _validate_domain_verification_inventories(
+    domain: str, inventories: Any,
+) -> tuple[dict[str, list[str]], list[str], list[str]]:
+    if not isinstance(inventories, list) or len(inventories) > 8:
+        raise ProtocolError("benchmark_inventories must contain no more than eight source inventories")
+    if len(json.dumps(inventories, ensure_ascii=False).encode("utf-8")) > 384 << 10:
+        raise ProtocolError("benchmark_inventories exceed the 384 KiB limit")
+
+    source_ids: set[str] = set()
+    usable: list[dict[str, Any]] = []
+    disabled: set[str] = set()
+    for index, inventory in enumerate(inventories):
+        if not isinstance(inventory, dict) or set(inventory) != {
+            "source_id", "source_revision", "source_file_sha256", "task_ids",
+        }:
+            raise ProtocolError(f"benchmark_inventories[{index}] has an invalid shape")
+        source_id = inventory.get("source_id")
+        if not isinstance(source_id, str) or source_id not in RRSI_REQUIRED_INVENTORIES[domain]:
+            raise ProtocolError(f"benchmark_inventories[{index}] is not a required source for this domain")
+        if source_id in source_ids:
+            raise ProtocolError("benchmark inventory sources must be unique")
+        source_ids.add(source_id)
+        unavailable_reason = RRSI_UNANCHORED_INVENTORY_REASONS.get(source_id)
+        if unavailable_reason is None:
+            usable.append(inventory)
+            continue
+        revision = inventory.get("source_revision")
+        source_digest = inventory.get("source_file_sha256")
+        task_ids = inventory.get("task_ids")
+        if (not isinstance(revision, str) or not re.fullmatch(r"[a-f0-9]{40}", revision)
+                or not _is_sha256(source_digest) or not isinstance(task_ids, list) or len(task_ids) > 2048
+                or any(not isinstance(task_id, str) or len(task_id) > 128 for task_id in task_ids)):
+            raise ProtocolError(f"benchmark_inventories[{index}] has an invalid bounded shape")
+        # These unavailable sources are intentionally not passed to the legacy
+        # verifier: they are unanchored or their stored pins conflict with derivation.
+        disabled.add(source_id)
+
+    _, verified_sources, missing_sources = _validate_benchmark_inventories(domain, usable)
+    verified_source_set = set(verified_sources)
+    inventory_map = {
+        item["source_id"]: list(item["task_ids"])
+        for item in usable if item["source_id"] in verified_source_set
+    }
+    return inventory_map, verified_sources, missing_sources
 
 
 def screen_evolution_candidate(params: dict[str, Any]) -> dict[str, Any]:

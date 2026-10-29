@@ -4471,6 +4471,7 @@ Commands:
   handoff list|export|resume ...
   cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-trust.json>] [--repository-root <clean-checkout>]
   cutover attest-evaluation --report <report.json> --domain <domain> --evidence-root <artifacts-dir> --candidate-root <clean-checkout> --legacy-root <clean-checkout> --identity <private-identity.json> --trusted-evaluators <external-trust.json> --attestation-path <relative-new-path.json> --output-report <new-report.json> --confirm-evaluator-assertion
+  evolution domain-verify --file <domain-verification-request.v1-or-v2.json> [--python python]
   security scan [--traces <events.jsonl>] [--rules-dir <path>] [--rules-store <path>] [--min-severity info] [--session <id-substring>] [--fail-on <severity>]
   security reviews list [--limit 50] [--offset 0] [--db <path>]
   security reviews set --fingerprint <sha256> --expected-revision <n> --status <open|acknowledged|resolved|false_positive> [--actor <name>] [--db <path>]

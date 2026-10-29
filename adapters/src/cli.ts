@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';

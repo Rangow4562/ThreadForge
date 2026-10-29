@@ -5,8 +5,12 @@
   "type": "module",
   "files": [
     "src/**/*.ts",
+    "dist/**",
     "openclaw-plugin/**"
   ],
+  "bin": {
+    "threadforge-adapter": "./dist/cli.js"
+  },
   "exports": {
     "./mcp-config": "./src/mcp-config.ts",
     "./claude-hook": "./src/claude-hook.ts",
@@ -104,6 +108,8 @@
   },
   "scripts": {
     "adapter": "node --experimental-strip-types src/cli.ts",
+    "build:cli": "tsc -p tsconfig.cli.json",
+    "prepack": "npm run build:cli",
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "node --experimental-strip-types --test test/*.test.ts test/*.test.mjs",
     "build:cline-plugin": "node scripts/build-cline-plugin-package.mjs",

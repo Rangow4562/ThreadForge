@@ -13,6 +13,7 @@ adapters/browser-extension/dist-safari/
 adapters/browser-extension/artifacts/
 adapters/browser-extension/test-results/
 adapters/browser-extension/playwright-report/
+adapters/dist/
 
 # Local data and credentials
 .threadforge/local/

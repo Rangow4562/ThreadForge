@@ -9,7 +9,7 @@ npm.cmd run adapter -- openhands update --project-root <absolute-path>
 npm.cmd run adapter -- openhands uninstall --project-root <absolute-path>
 ```
 
-Install defaults to a command that calls the local Threadforge adapter through Node 22's TypeScript stripping support. To use a command available in every project environment, pass `--command-template` with exactly one `{event}` placeholder and the ownership marker `--threadforge-openhands-hook=v1`:
+Install defaults to a command that calls the local Threadforge adapter through Node 22's TypeScript stripping support. The packed `@threadforge/adapter-contracts` package exposes a `threadforge-adapter` executable (Node >=22.15), so a project can use the portable command template after installing an internally built package artifact in the environment that runs OpenHands. To use that command, pass `--command-template` with exactly one `{event}` placeholder and the ownership marker `--threadforge-openhands-hook=v1`:
 
 ```powershell
 npm.cmd run adapter -- openhands install --project-root <absolute-path> --command-template 'threadforge-adapter openhands hook {event} --threadforge-openhands-hook=v1'

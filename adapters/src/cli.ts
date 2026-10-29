@@ -130,7 +130,12 @@ import {
   type ProjectMcpHost,
 } from './mcp-config.ts';
 import { parseProjectBootstrapHosts, runProjectBootstrapMcp } from './project-bootstrap.ts';
-import { parseProjectInstructionHosts, runProjectInstructionBootstrap } from './project-instructions.ts';
+import {
+  parseProjectInstructionHosts,
+  runGooseProcedureBootstrap,
+  runProjectInstructionBootstrap,
+  type GooseProcedureAction,
+} from './project-instructions.ts';
 
 interface ParsedOptions {
   values: Map<string, string>;
@@ -151,7 +156,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   let hermesSubsystem: 'hooks' | 'sessions' | undefined;
   let grokSubsystem: 'hooks' | 'sessions' | undefined;
   let openClawSubsystem: 'otel' | 'sessions' | undefined;
-  let gooseSubsystem: 'otel' | 'sessions' | undefined;
+  let gooseSubsystem: 'otel' | 'sessions' | 'memory' | undefined;
   let vscodeSubsystem: 'otel' | undefined;
   let coworkSubsystem: 'otel' | undefined;
   let openCodeSubsystem: 'sessions' | 'plan-agent' | undefined;
@@ -368,6 +373,15 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   }
   if (family === 'goose' && action === 'sessions') {
     gooseSubsystem = 'sessions';
+    action = rest[0];
+    rest = rest.slice(1);
+    if (!action) {
+      stderr.write(`${usage()}\n`);
+      return 2;
+    }
+  }
+  if (family === 'goose' && action === 'memory') {
+    gooseSubsystem = 'memory';
     action = rest[0];
     rest = rest.slice(1);
     if (!action) {
@@ -1017,6 +1031,16 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       });
       stdout.write(`${JSON.stringify(syncResult)}\n`);
       return syncResult.complete ? 0 : 1;
+    } else if (family === 'goose' && gooseSubsystem === 'memory') {
+      if (!['plan', 'install', 'uninstall', 'status'].includes(action)) throw new Error('Goose memory action must be plan, install, uninstall, or status');
+      rejectUnexpected(options, ['project-root', 'skill-file', 'sha256'], [], ['privacy-reviewed']);
+      const result = await runGooseProcedureBootstrap(action as GooseProcedureAction, required(options, 'project-root'), {
+        ...(options.values.has('skill-file') ? { skillFile: required(options, 'skill-file') } : {}),
+        ...(options.values.has('sha256') ? { sha256: required(options, 'sha256') } : {}),
+        privacyReviewed: options.switches.has('privacy-reviewed'),
+      });
+      stdout.write(`${JSON.stringify(result)}\n`);
+      return result.result === 'modified' ? 1 : 0;
     } else if (family === 'grok' && grokSubsystem === 'sessions' && action === 'status') {
       rejectUnexpected(options, ['sessions-dir', 'state-path', 'max-sessions']);
       const status = await getGrokHistoryStatus({
@@ -1696,6 +1720,7 @@ function parseOptions(args: string[]): ParsedOptions {
     if (!key?.startsWith('--') || key.length < 3) throw new Error('adapter options must use --name value form');
     const name = key.slice(2);
     if (name === 'print' || name === 'include-content' || name === 'watch' || name === 'acknowledge-local-source' ||
+        name === 'privacy-reviewed' ||
         name === 'memory-discover-active-task' || name === 'discover-active-task' ||
         name === 'json' || name === 'capture-content' || name === 'allow-remote') {
       if (switches.has(name)) throw new Error(`adapter option --${name} was repeated`);
@@ -1886,6 +1911,8 @@ function usage(): string {
     '  npm run adapter -- goose otel validate [--since <duration>] [--config-path <config.yaml>] [--log-path <events.jsonl>] [--json]',
     '  npm run adapter -- goose sessions status [--db-path <absolute-path>] [--state-path <absolute-path>] [--max-sessions <1-500>]',
     '  npm run adapter -- goose sessions sync [--db-path <absolute-path>] [--state-path <absolute-path>] [--endpoint <loopback-v1-events-url>] [--max-sessions <1-500>] [--max-messages <1-2000>] [--print] [--include-content]',
+    '  npm run adapter -- goose memory plan|install --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest> --privacy-reviewed',
+    '  npm run adapter -- goose memory uninstall|status --project-root <absolute-path> --sha256 <export-digest>',
     '  npm run adapter -- vscode otel print-config [--endpoint <loopback-http-base-url>]',
     '  npm run adapter -- vscode otel status [--settings-path <settings.json>] [--log-path <events.jsonl>] [--json]',
     '  npm run adapter -- vscode otel validate [--since <duration>] [--settings-path <settings.json>] [--log-path <events.jsonl>] [--json]',

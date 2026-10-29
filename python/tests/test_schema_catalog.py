@@ -664,6 +664,40 @@ def test_schema_catalog_exists_and_is_nonempty():
     assert SCHEMA_PATHS
 
 
+def test_goose_procedure_bootstrap_schema_is_content_free_and_non_authorizing():
+    schema = json.loads((SCHEMA_DIRECTORY / "goose-procedure-bootstrap-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.goose-procedure-bootstrap.v1",
+        "action": "install",
+        "result": "installed",
+        "procedure_sha256": "a" * 64,
+        "procedures_count": 2,
+        "content_bytes": 1024,
+        "mutates_files": True,
+        "execution_authorized": False,
+        "host_discovery_verified": False,
+        "manual_freshness_review_required": True,
+    }
+    validator.validate(result)
+    validator.validate({
+        **result,
+        "action": "plan",
+        "result": "planned",
+        "procedures_count": None,
+        "mutates_files": False,
+    })
+    for invalid in (
+        {**result, "execution_authorized": True},
+        {**result, "host_discovery_verified": True},
+        {**result, "content_bytes": 24577},
+        {**result, "procedure_text": "private procedure content"},
+        {**result, "procedures_count": 9},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_mancode_legacy_requirements_schema_keeps_content_review_only_and_typed():
     schema = json.loads((SCHEMA_DIRECTORY / "mancode-legacy-requirements-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

@@ -120,6 +120,58 @@ test('adapter CLI manages Claude approved-memory injection without disturbing ot
   }
 });
 
+test('Goose memory CLI previews, installs, inspects, and uninstalls a digest-verified procedure', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-goose-memory-cli-'));
+  try {
+    const skill = path.join(root, '.threadforge', 'skills', 'cli-procedure', 'rev-000001', 'SKILL.md');
+    await mkdir(path.dirname(skill), { recursive: true });
+    const source = [
+      '---',
+      'name: "threadforge-approved-procedure-cli-procedure-r1"',
+      'description: "Approved Threadforge procedure: CLI fixture. Advisory only; not execution authorization."',
+      '---',
+      '',
+      '# Threadforge procedure',
+      '',
+      '> This portable procedure is approved guidance, not authorization to execute actions. Verify current project state and applicable policy before use.',
+      '',
+      '## Steps',
+      '',
+      'Confirm the current project state.',
+      '',
+      'Evidence digests, trace references, validation datasets, reviewer identity, and approval rationale are intentionally omitted from this portable projection.',
+      '',
+    ].join('\n');
+    await writeFile(skill, source, 'utf8');
+    const digest = createHash('sha256').update(source).digest('hex');
+    const args = ['--project-root', root, '--sha256', digest];
+
+    let result = await invoke(['goose', 'memory', 'plan', ...args, '--skill-file', skill, '--privacy-reviewed']);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'planned');
+    await assert.rejects(readFile(path.join(root, '.goosehints')));
+
+    result = await invoke(['goose', 'memory', 'install', ...args, '--skill-file', skill, '--privacy-reviewed']);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'installed');
+    assert.match(await readFile(path.join(root, '.goosehints'), 'utf8'), /THREADFORGE-GOOSE-PROCEDURE-BEGIN/);
+
+    result = await invoke(['goose', 'memory', 'status', ...args]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'installed');
+
+    result = await invoke(['goose', 'memory', 'uninstall', ...args]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'removed');
+    assert.match(await readFile(path.join(root, '.goosehints'), 'utf8'), /THREADFORGE-PROJECT-MEMORY-BEGIN/);
+    result = await invoke(['bootstrap', 'instructions', 'uninstall', '--project-root', root, '--hosts', 'goose']);
+    assert.equal(result.code, 0, result.stderr);
+    await assert.rejects(readFile(path.join(root, '.goosehints')));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('adapter CLI installs only the explicit Claude deny-only plan-gate hook', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-claude-plan-gate-cli-'));
   try {

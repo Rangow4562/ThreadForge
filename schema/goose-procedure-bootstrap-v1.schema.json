@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/goose-procedure-bootstrap-v1.schema.json",
+  "title": "Threadforge Goose Procedure Bootstrap Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "action",
+    "result",
+    "procedure_sha256",
+    "procedures_count",
+    "content_bytes",
+    "mutates_files",
+    "execution_authorized",
+    "host_discovery_verified",
+    "manual_freshness_review_required"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.goose-procedure-bootstrap.v1" },
+    "action": { "enum": ["plan", "install", "uninstall", "status"] },
+    "result": { "enum": ["planned", "installed", "unchanged", "removed", "absent", "modified"] },
+    "procedure_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "procedures_count": {
+      "anyOf": [
+        { "type": "integer", "minimum": 0, "maximum": 8 },
+        { "type": "null" }
+      ]
+    },
+    "content_bytes": { "type": "integer", "minimum": 0, "maximum": 24576 },
+    "mutates_files": { "type": "boolean" },
+    "execution_authorized": { "const": false },
+    "host_discovery_verified": { "const": false },
+    "manual_freshness_review_required": { "const": true }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "action": { "const": "plan" } }, "required": ["action"] },
+      "then": {
+        "properties": {
+          "result": { "const": "planned" },
+          "procedures_count": { "type": "null" },
+          "mutates_files": { "const": false }
+        }
+      }
+    }
+  ]
+}

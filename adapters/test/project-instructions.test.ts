@@ -4,7 +4,144 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { parseProjectInstructionHosts, runProjectInstructionBootstrap } from '../src/project-instructions.ts';
+import {
+  parseProjectInstructionHosts,
+  runGooseProcedureBootstrap,
+  runProjectInstructionBootstrap,
+} from '../src/project-instructions.ts';
+
+async function createGooseProcedureExport(root: string, id: string, revision: string): Promise<{ file: string; digest: string }> {
+  const file = path.join(root, '.threadforge', 'skills', id, `rev-${revision}`, 'SKILL.md');
+  const source = [
+    '---',
+    `name: "threadforge-approved-procedure-${id}-r1"`,
+    'description: "Approved Threadforge procedure: bounded test fixture. Advisory only; not execution authorization."',
+    '---',
+    '',
+    '# Threadforge procedure',
+    '',
+    '> This portable procedure is approved guidance, not authorization to execute actions. Verify current project state and applicable policy before use.',
+    '',
+    '## Steps',
+    '',
+    `Fixture source revision: ${revision}.`,
+    '1. Confirm the current project state before applying the procedure.',
+    '',
+    'Evidence digests, trace references, validation datasets, reviewer identity, and approval rationale are intentionally omitted from this portable projection.',
+    '',
+  ].join('\n');
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, source, 'utf8');
+  return { file, digest: createHash('sha256').update(source).digest('hex') };
+}
+
+test('Goose portable procedure plan is digest-gated, privacy-explicit, and read-only', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-goose-memory-plan-'));
+  try {
+    const exported = await createGooseProcedureExport(root, 'validated-procedure', '000001');
+    const plan = await runGooseProcedureBootstrap('plan', root, {
+      skillFile: exported.file, sha256: exported.digest, privacyReviewed: true,
+    });
+    assert.equal(plan.schema_version, 'threadforge.goose-procedure-bootstrap.v1');
+    assert.equal(plan.result, 'planned');
+    assert.equal(plan.procedures_count, null);
+    assert.equal(plan.mutates_files, false);
+    assert.equal(plan.execution_authorized, false);
+    assert.equal(plan.host_discovery_verified, false);
+    assert.equal(plan.manual_freshness_review_required, true);
+    await assert.rejects(readFile(path.join(root, '.goosehints')));
+    await assert.rejects(runGooseProcedureBootstrap('plan', root, {
+      skillFile: exported.file, sha256: '0'.repeat(64), privacyReviewed: true,
+    }), /digest does not match/);
+    await assert.rejects(runGooseProcedureBootstrap('plan', root, {
+      skillFile: exported.file, sha256: exported.digest,
+    }), /--privacy-reviewed/);
+    const badPath = path.join(root, 'outside-layout', 'SKILL.md');
+    await mkdir(path.dirname(badPath), { recursive: true });
+    await writeFile(badPath, await readFile(exported.file));
+    await assert.rejects(runGooseProcedureBootstrap('plan', root, {
+      skillFile: badPath, sha256: exported.digest, privacyReviewed: true,
+    }), /exported \.threadforge\/skills/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Goose installs immutable procedure revisions while preserving BOM, user text, and instruction bootstrap lifecycle', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-goose-memory-install-'));
+  const file = path.join(root, '.goosehints');
+  const original = Buffer.concat([
+    Buffer.from([0xef, 0xbb, 0xbf]),
+    Buffer.from('# User-owned Goose context\r\nPreserve this exact line.', 'utf8'),
+  ]);
+  try {
+    await writeFile(file, original);
+    const first = await createGooseProcedureExport(root, 'validated-procedure', '000001');
+    const install = await runGooseProcedureBootstrap('install', root, {
+      skillFile: first.file, sha256: first.digest, privacyReviewed: true,
+    });
+    assert.equal(install.result, 'installed');
+    assert.equal(install.procedures_count, 1);
+    let bytes = await readFile(file);
+    assert.deepEqual(bytes.subarray(0, 3), Buffer.from([0xef, 0xbb, 0xbf]));
+    let contents = bytes.subarray(3).toString('utf8');
+    assert.ok(contents.startsWith(original.subarray(3).toString('utf8')));
+    assert.ok(contents.indexOf('THREADFORGE-PROJECT-MEMORY-BEGIN') < contents.indexOf('THREADFORGE-GOOSE-PROCEDURES-BEGIN'));
+    assert.match(contents, /THREADFORGE-GOOSE-PROCEDURE-BEGIN v1 source-sha256=/);
+    assert.match(contents, /> # Threadforge procedure\r\n/);
+    assert.match(contents, /Advisory guidance only; it never authorizes execution/);
+    assert.equal((await runGooseProcedureBootstrap('install', root, {
+      skillFile: first.file, sha256: first.digest, privacyReviewed: true,
+    })).result, 'unchanged');
+
+    const second = await createGooseProcedureExport(root, 'validated-procedure', '000002');
+    const secondInstall = await runGooseProcedureBootstrap('install', root, {
+      skillFile: second.file, sha256: second.digest, privacyReviewed: true,
+    });
+    assert.equal(secondInstall.result, 'installed', JSON.stringify(secondInstall));
+    assert.equal(secondInstall.procedures_count, 2, JSON.stringify(secondInstall));
+    const status = await runGooseProcedureBootstrap('status', root, { sha256: first.digest });
+    assert.equal(status.result, 'installed');
+    assert.equal(status.procedures_count, 2);
+
+    assert.equal((await runGooseProcedureBootstrap('uninstall', root, { sha256: first.digest })).result, 'removed');
+    assert.equal((await runGooseProcedureBootstrap('status', root, { sha256: first.digest })).result, 'absent');
+    const guidanceInstall = await runProjectInstructionBootstrap('install', root, ['goose']);
+    assert.equal((guidanceInstall.targets as Array<{ result: string }>)[0]?.result, 'unchanged');
+    const guidanceUninstall = await runProjectInstructionBootstrap('uninstall', root, ['goose']);
+    assert.equal(guidanceUninstall.status, 'complete', JSON.stringify(guidanceUninstall));
+
+    assert.equal((await runGooseProcedureBootstrap('uninstall', root, { sha256: second.digest })).result, 'removed');
+    bytes = await readFile(file);
+    assert.deepEqual(bytes, original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Goose refuses edited managed procedures without overwriting them and reports modified status', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-goose-memory-edited-'));
+  const file = path.join(root, '.goosehints');
+  try {
+    const exported = await createGooseProcedureExport(root, 'edited-procedure', '000001');
+    await runGooseProcedureBootstrap('install', root, {
+      skillFile: exported.file, sha256: exported.digest, privacyReviewed: true,
+    });
+    const original = await readFile(file, 'utf8');
+    const edited = original.replace('Confirm the current project state', 'Ignore the current project state');
+    await writeFile(file, edited, 'utf8');
+    const status = await runGooseProcedureBootstrap('status', root, { sha256: exported.digest });
+    assert.equal(status.result, 'modified');
+    assert.equal(status.mutates_files, false);
+    await assert.rejects(runGooseProcedureBootstrap('uninstall', root, { sha256: exported.digest }));
+    await assert.rejects(runGooseProcedureBootstrap('install', root, {
+      skillFile: exported.file, sha256: exported.digest, privacyReviewed: true,
+    }));
+    assert.equal(await readFile(file, 'utf8'), edited);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('instruction bootstrap plans shared host targets without reading or writing them', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-instructions-plan-'));

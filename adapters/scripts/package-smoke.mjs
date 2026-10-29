@@ -40,9 +40,9 @@ for (const filePath of paths) {
 }
 assert.ok(files.length <= 300, `adapter package unexpectedly contains ${files.length} files`);
 
-assert.deepEqual(manifest.bin, { 'threadforge-adapter': './dist/cli.js' },
+assert.deepEqual(manifest.bin, { 'threadforge-adapter': './dist/bin.js' },
   'the portable adapter command must have one explicit package entry point');
-assert.ok(paths.has('dist/cli.js'), 'compiled CLI entry point is missing from the package');
+assert.ok(paths.has('dist/bin.js'), 'compiled bin entry point is missing from the package');
 const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'threadforge-adapter-package-smoke-'));
 let launcherVerified = false;
 try {

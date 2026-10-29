@@ -9,7 +9,7 @@
     "openclaw-plugin/**"
   ],
   "bin": {
-    "threadforge-adapter": "./dist/cli.js"
+    "threadforge-adapter": "./dist/bin.js"
   },
   "exports": {
     "./mcp-config": "./src/mcp-config.ts",

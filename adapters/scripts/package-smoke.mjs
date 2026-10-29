@@ -32,7 +32,11 @@ const files = packed[0].files;
 assert.ok(Array.isArray(files), 'npm did not return package file inventory');
 const paths = new Set(files.map((file) => file.path));
 for (const target of Object.values(manifest.exports)) {
-  assert.ok(paths.has(target.replace(/^\.\//, '')), `package export target is missing: ${target}`);
+  const packagePath = target.replace(/^\.\//, '');
+  assert.ok(paths.has(packagePath), `package export target is missing: ${target}`);
+  if (packagePath.startsWith('dist/') && packagePath.endsWith('.js')) {
+    assert.ok(paths.has(packagePath.slice(0, -3) + '.d.ts'), `package export declaration is missing: ${target}`);
+  }
 }
 for (const filePath of paths) {
   assert.equal(/(^|\/)(node_modules|browser-extension|test|scripts)(\/|$)/.test(filePath), false,
@@ -78,6 +82,18 @@ try {
   const installedRoot = path.join(installRoot, 'node_modules', '@threadforge', 'adapter-contracts');
   const installedManifest = JSON.parse(readFileSync(path.join(installedRoot, 'package.json'), 'utf8'));
   assert.deepEqual(installedManifest.bin, manifest.bin, 'installed package lost its command mapping');
+  const exportedSpecifiers = Object.keys(manifest.exports).map((subpath) => `${manifest.name}/${subpath.slice(2)}`);
+  const importAllExports = spawnSync(process.execPath, [
+    '--input-type=module', '--eval',
+    `await Promise.all(${JSON.stringify(exportedSpecifiers)}.map((specifier) => import(specifier)));`,
+  ], {
+    cwd: installRoot,
+    encoding: 'utf8',
+    timeout: 30_000,
+    maxBuffer: 2 << 20,
+  });
+  assert.equal(importAllExports.status, 0,
+    `installed package exports failed to import: ${(importAllExports.stderr || importAllExports.stdout).trim().slice(0, 2000)}`);
   const launch = spawnSync(process.execPath, [npmCli, 'exec', '--offline', '--prefix', installRoot, '--', 'threadforge-adapter'], {
     cwd: tempRoot,
     encoding: 'utf8',
@@ -101,4 +117,5 @@ console.log(JSON.stringify({
   unpacked_bytes: packed[0].unpackedSize,
   private: manifest.private === true,
   portable_bin_verified: launcherVerified,
+  importable_exports_verified: Object.keys(manifest.exports).length,
 }));

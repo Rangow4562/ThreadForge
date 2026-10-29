@@ -237,99 +237,42 @@ test('adapter CLI installs only the explicit GitHub Copilot CLI deny-only plan-g
   }
 });
 
-test('adapter CLI explicitly installs and removes GitHub Copilot CLI approved-memory hooks', async () => {
+test('adapter CLI rejects unsupported Copilot memory injection and can uninstall legacy hooks', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-copilot-memory-cli-'));
   try {
     const runner = '--threadforge-managed-copilot-memory=v1';
     const marker = '--threadforge-memory=copilot-v1';
     const bashCommand = `threadforge memory inject-copilot --project-id demo-project ${runner} ${marker}`;
     const powershellCommand = `threadforge.exe memory inject-copilot --project-id demo-project ${runner} ${marker}`;
-    let result = await invoke(['copilot', 'memory', 'install', '--project-root', root,
-      '--bash-command', bashCommand, '--powershell-command', powershellCommand]);
-    assert.equal(result.code, 0, result.stderr);
-    assert.equal(JSON.parse(result.stdout).result, 'installed');
-    assert.match(JSON.parse(result.stdout).warning, /userPromptTransformed/);
-    assert.match(JSON.parse(result.stdout).warning, /session history/);
     const configPath = path.join(root, '.github', 'hooks', 'threadforge-memory.json');
-    let config = JSON.parse(await readFile(configPath, 'utf8'));
-    assert.equal(config.version, 1);
-    assert.deepEqual(config.hooks.userPromptTransformed, [{
-      type: 'command', bash: bashCommand, powershell: powershellCommand, timeoutSec: 3,
-    }]);
-
-    result = await invoke(['copilot', 'memory', 'update', '--project-root', root,
+    const resultInstall = await invoke(['copilot', 'memory', 'install', '--project-root', root,
       '--bash-command', bashCommand, '--powershell-command', powershellCommand]);
-    assert.equal(result.code, 0, result.stderr);
-    assert.equal(JSON.parse(result.stdout).result, 'unchanged');
+    assert.equal(resultInstall.code, 1);
+    assert.match(resultInstall.stderr, /userPromptTransformed is an SDK callback/);
+    assert.match(resultInstall.stderr, /explicit memory reads/);
+    await assert.rejects(readFile(configPath), /ENOENT/);
 
-    result = await invoke([
-      'copilot', 'memory', 'update', '--project-root', root,
+    const legacyHook = { type: 'command', bash: bashCommand, powershell: powershellCommand, timeoutSec: 3 };
+    const userHook = { type: 'command', command: 'user-hook --preserve' };
+    const before = `${JSON.stringify({ version: 1, preserved: true, hooks: { userPromptTransformed: [legacyHook, userHook] } }, null, 2)}\n`;
+    await mkdir(path.dirname(configPath), { recursive: true });
+    await writeFile(configPath, before);
+    const resultUpdate = await invoke(['copilot', 'memory', 'update', '--project-root', root,
       '--bash-command', bashCommand, '--powershell-command', powershellCommand,
-      '--task-id', 'copilot-task', '--session-id', 'copilot-session', '--max-task-entries', '2',
-    ]);
-    assert.equal(result.code, 0, result.stderr);
-    const explicitBashCommand = bashCommand.replace(
-      marker, `--task-id copilot-task --session-id copilot-session --max-task-entries 2 ${marker}`,
-    );
-    const explicitPowerShellCommand = powershellCommand.replace(
-      marker, `--task-id copilot-task --session-id copilot-session --max-task-entries 2 ${marker}`,
-    );
-    config = JSON.parse(await readFile(configPath, 'utf8'));
-    assert.deepEqual(config.hooks.userPromptTransformed, [{
-      type: 'command', bash: explicitBashCommand, powershell: explicitPowerShellCommand, timeoutSec: 3,
-    }]);
+      '--task-id', 'copilot-task', '--max-task-entries', '2']);
+    assert.equal(resultUpdate.code, 1);
+    assert.match(resultUpdate.stderr, /userPromptTransformed is an SDK callback/);
+    assert.equal(await readFile(configPath, 'utf8'), before);
 
-    result = await invoke([
-      'copilot', 'memory', 'update', '--project-root', root,
-      '--bash-command', bashCommand, '--powershell-command', powershellCommand, '--discover-active-task',
-    ]);
-    assert.equal(result.code, 0, result.stderr);
-    const discoveryBashCommand = bashCommand.replace(marker, `--discover-active-task --max-task-entries 6 ${marker}`);
-    const discoveryPowerShellCommand = powershellCommand.replace(marker, `--discover-active-task --max-task-entries 6 ${marker}`);
-    config = JSON.parse(await readFile(configPath, 'utf8'));
-    assert.deepEqual(config.hooks.userPromptTransformed, [{
-      type: 'command', bash: discoveryBashCommand, powershell: discoveryPowerShellCommand, timeoutSec: 3,
-    }]);
-
-    const beforeInvalidOptions = await readFile(configPath, 'utf8');
-    for (const [invalidOptions, expectedError] of [
-      [['--task-id', 'copilot-task', '--discover-active-task'], /mutually exclusive/],
-      [['--session-id', 'copilot-session'], /requires --task-id/],
-      [['--task-id', 'Copilot/Task'], /--task-id must match/],
-      [['--discover-active-task', '--max-task-entries', '21'], /between 1 and 20/],
-      [['--max-task-entries', '2'], /requires --task-id or --discover-active-task/],
-    ] as const) {
-      result = await invoke([
-        'copilot', 'memory', 'update', '--project-root', root,
-        '--bash-command', bashCommand, '--powershell-command', powershellCommand, ...invalidOptions,
-      ]);
-      assert.equal(result.code, 1);
-      assert.match(result.stderr, expectedError);
-    }
-    assert.equal(await readFile(configPath, 'utf8'), beforeInvalidOptions);
-    result = await invoke([
-      'copilot', 'memory', 'update', '--project-root', root,
-      '--bash-command', `${bashCommand} --task-id copilot-manual-task`, '--powershell-command', powershellCommand,
-      '--discover-active-task',
-    ]);
-    assert.equal(result.code, 1);
-    assert.match(result.stderr, /already contains task-resume options/);
-    assert.equal(await readFile(configPath, 'utf8'), beforeInvalidOptions);
-
-    result = await invoke(['copilot', 'memory', 'uninstall', '--project-root', root]);
+    const result = await invoke(['copilot', 'memory', 'uninstall', '--project-root', root]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'removed');
-    config = JSON.parse(await readFile(configPath, 'utf8'));
-    assert.deepEqual(config, { version: 1 });
-
-    result = await invoke(['copilot', 'memory', 'install', '--project-root', root, '--command',
-      `threadforge memory inject-copilot --project-id demo ${marker}`]);
-    assert.equal(result.code, 1);
-    assert.match(result.stderr, /managed-copilot-memory/);
-
-    result = await invoke(['copilot', 'memory', 'install', '--project-root', root, '--bash-command', bashCommand]);
-    assert.equal(result.code, 1);
-    assert.match(result.stderr, /both --bash-command and --powershell-command/);
+    const after = JSON.parse(await readFile(configPath, 'utf8'));
+    assert.equal(after.preserved, true);
+    assert.deepEqual(after.hooks.userPromptTransformed, [userHook]);
+    const resultAgain = await invoke(['copilot', 'memory', 'uninstall', '--project-root', root]);
+    assert.equal(resultAgain.code, 0, resultAgain.stderr);
+    assert.equal(JSON.parse(resultAgain.stdout).result, 'absent');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

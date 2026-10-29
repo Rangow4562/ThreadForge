@@ -8,7 +8,7 @@ The current report schema is [`cutover-evidence-v5.schema.json`](../schema/cutov
 
 The newly tracked Beacon session-handoff feature row maps to the distinct required feature ID `beacon.session-handoff`; it is not covered by the existing Beacon capture or Mancode task-continuity rows.
 
-The GitHub Copilot CLI memory-injection row maps to the distinct required feature ID `beacon.adapter.github-copilot-cli-memory`; this host-specific prompt-transform integration does not inherit the broad `beacon.memory` acceptance result.
+The GitHub Copilot CLI memory-access row maps to the distinct required feature ID `beacon.adapter.github-copilot-cli-memory`; this host-specific MCP/SDK integration does not inherit the broad `beacon.memory` acceptance result, and explicit MCP transport does not prove automatic injection or efficacy.
 
 The AnyJev serving-depth benchmark is separately required as `anyjev.serving-benchmark`; completing the general AnyJev decision row does not substitute for a real serving-depth baseline comparison and independent held-out evidence.
 

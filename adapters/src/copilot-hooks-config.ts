@@ -7,7 +7,6 @@ export const copilotPlanGateManagedMarker = '--threadforge-plan-gate=copilot-v1'
 const copilotPlanGateRunnerMarker = '--threadforge-managed-copilot-plan-gate=v1';
 const configName = 'threadforge-plan-gate.json';
 export const copilotMemoryManagedMarker = '--threadforge-memory=copilot-v1';
-const copilotMemoryRunnerMarker = '--threadforge-managed-copilot-memory=v1';
 const memoryConfigName = 'threadforge-memory.json';
 const lockName = '.threadforge-plan-gate.lock';
 const memoryLockName = '.threadforge-memory.lock';
@@ -84,41 +83,6 @@ export async function removeCopilotProjectPlanGateHook(projectRoot: string): Pro
     await atomicWrite(filePath, read.snapshot, next);
     return 'removed';
   });
-}
-
-/** Installs approved-memory retrieval on Copilot CLI's prompt-transform event. */
-export async function installCopilotProjectMemoryHook(options: {
-  bashCommand: string;
-  powershellCommand: string;
-  projectRoot: string;
-}): Promise<CopilotPlanGateChange> {
-  validateCommand(options.bashCommand, copilotMemoryRunnerMarker, copilotMemoryManagedMarker);
-  validateCommand(options.powershellCommand, copilotMemoryRunnerMarker, copilotMemoryManagedMarker);
-  const filePath = await hooksConfigPath(options.projectRoot, true, memoryConfigName);
-  if (!filePath) throw new Error('unable to resolve Copilot memory hooks path');
-  return withLock(filePath, async () => {
-    const read = await readConfig(filePath);
-    const settings = read.value;
-    if (settings.version !== undefined && settings.version !== 1) {
-      throw new Error('Copilot memory hooks file has an unsupported version; no changes were made');
-    }
-    const before = JSON.stringify(canonicalize(settings));
-    const hooks = readHookMap(settings);
-    const cleaned = removeManagedHooks(hooks, copilotMemoryManagedMarker);
-    const nextHooks: JsonObject = { ...cleaned.value };
-    const current = readEventHooks(nextHooks, 'userPromptTransformed');
-    nextHooks.userPromptTransformed = [...current, {
-      type: 'command',
-      bash: options.bashCommand,
-      powershell: options.powershellCommand,
-      timeoutSec: 3,
-    }];
-    settings.version = 1;
-    settings.hooks = nextHooks;
-    if (before === JSON.stringify(canonicalize(settings))) return 'unchanged';
-    await atomicWrite(filePath, read.snapshot, settings);
-    return cleaned.found ? 'updated' : 'installed';
-  }, memoryLockName);
 }
 
 /** Removes only Threadforge-owned Copilot prompt-memory hooks. */

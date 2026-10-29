@@ -66,7 +66,6 @@ import { getOpenCodeHistoryStatus, syncOpenCodeHistory } from './opencode-histor
 import { getClaudeHistoryStatus, syncClaudeHistory } from './claude-history.ts';
 import { getCopilotHistoryStatus, syncCopilotHistory } from './copilot-history.ts';
 import {
-  installCopilotProjectMemoryHook,
   installCopilotProjectPlanGateHook,
   removeCopilotProjectMemoryHook,
   removeCopilotProjectPlanGateHook,
@@ -1608,16 +1607,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       rejectUnexpected(options, ['project-root']);
       result = await removeCopilotProjectPlanGateHook(projectRoot);
     } else if (family === 'copilot' && copilotSubsystem === 'memory' && (action === 'install' || action === 'update')) {
-      rejectUnexpected(options,
-        ['project-root', 'command', 'bash-command', 'powershell-command', 'task-id', 'session-id', 'max-task-entries'],
-        [], ['discover-active-task']);
-      const commands = copilotMemoryHookCommands(options);
-      result = await installCopilotProjectMemoryHook({
-        bashCommand: addTaskAwareMemoryOptions(commands.bashCommand, options, 'GitHub Copilot', '--threadforge-memory=copilot-v1'),
-        powershellCommand: addTaskAwareMemoryOptions(commands.powershellCommand, options, 'GitHub Copilot', '--threadforge-memory=copilot-v1'),
-        projectRoot,
-      });
-      warning = 'Copilot CLI userPromptTransformed rewrites model-bound text and may persist in session history; the host may call it for preceding messages in a batched submission. Retrieval is advisory, and this installer does not change Copilot trust or permissions.';
+      throw new Error('Copilot CLI command hooks cannot inject memory: userPromptTransformed is an SDK callback and CLI hook outputs are ignored. Install Threadforge as a project MCP server for explicit memory reads; use uninstall to remove a legacy Threadforge memory hook.');
     } else if (family === 'copilot' && copilotSubsystem === 'memory' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
       result = await removeCopilotProjectMemoryHook(projectRoot);
@@ -1792,18 +1782,6 @@ function copilotPlanGateCommands(options: ParsedOptions): { bashCommand: string;
   throw new Error('Copilot plan-gate requires --command or both --bash-command and --powershell-command');
 }
 
-function copilotMemoryHookCommands(options: ParsedOptions): { bashCommand: string; powershellCommand: string } {
-  const shared = options.values.get('command');
-  const bashCommand = options.values.get('bash-command');
-  const powershellCommand = options.values.get('powershell-command');
-  if (shared && (bashCommand || powershellCommand)) {
-    throw new Error('use either --command or both --bash-command and --powershell-command');
-  }
-  if (shared) return { bashCommand: shared, powershellCommand: shared };
-  if (bashCommand && powershellCommand) return { bashCommand, powershellCommand };
-  throw new Error('Copilot memory requires --command or both --bash-command and --powershell-command');
-}
-
 function parseDeepSeekDuration(value: string): number {
   const match = /^(\d+)(ms|s|m|h)$/.exec(value.trim());
   if (!match) throw new Error('--interval must use a positive duration such as 30s, 5m, or 1h');
@@ -1875,7 +1853,6 @@ function usage(): string {
     '  npm run adapter -- qwen plan-gate uninstall --scope project --project-root <absolute-path>',
     '  npm run adapter -- copilot plan-gate install|update --project-root <absolute-path> (--command <shared-shell-command> | --bash-command <command> --powershell-command <command>)',
     '  npm run adapter -- copilot plan-gate uninstall --project-root <absolute-path>',
-    '  npm run adapter -- copilot memory install|update --project-root <absolute-path> (--command <shared-shell-command> | --bash-command <command> --powershell-command <command>) [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]',
     '  npm run adapter -- copilot memory uninstall --project-root <absolute-path>',
     '  npm run adapter -- kimi install|update --command <shell-command-with-marker> [--kimi-code-home <absolute-path>]',
     '  npm run adapter -- kimi uninstall [--kimi-code-home <absolute-path>]',

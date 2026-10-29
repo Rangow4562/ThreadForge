@@ -8,7 +8,6 @@ import {
   copilotProjectMemoryHooksConfigPath,
   copilotProjectHooksConfigPath,
   copilotPlanGateManagedMarker,
-  installCopilotProjectMemoryHook,
   installCopilotProjectPlanGateHook,
   removeCopilotProjectMemoryHook,
   removeCopilotProjectPlanGateHook,
@@ -17,10 +16,8 @@ import {
 const runnerMarker = '--threadforge-managed-copilot-plan-gate=v1';
 const command = `threadforge task plan guard --host github-copilot ${runnerMarker} ${copilotPlanGateManagedMarker}`;
 const memoryRunnerMarker = '--threadforge-managed-copilot-memory=v1';
-const memoryBashCommand = `threadforge memory inject-copilot --project-id demo-project ${memoryRunnerMarker} ${copilotMemoryManagedMarker}`;
-const memoryPowerShellCommand = `threadforge.exe memory inject-copilot --project-id demo-project ${memoryRunnerMarker} ${copilotMemoryManagedMarker}`;
 
-test('Copilot CLI memory hook uses the prompt-transform event and preserves unrelated hook state', async () => {
+test('Copilot memory uninstall removes legacy prompt hooks and preserves unrelated hook state', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-copilot-memory-'));
   try {
     const configPath = copilotProjectMemoryHooksConfigPath(root);
@@ -42,23 +39,8 @@ test('Copilot CLI memory hook uses the prompt-transform event and preserves unre
     };
     await writeFile(configPath, `${JSON.stringify(original, null, 2)}\n`);
 
-    assert.equal(await installCopilotProjectMemoryHook({
-      projectRoot: root, bashCommand: memoryBashCommand, powershellCommand: memoryPowerShellCommand,
-    }), 'updated');
     let saved = JSON.parse(await readFile(configPath, 'utf8'));
     assert.equal(saved.userSetting, 'preserve-me');
-    assert.deepEqual(saved.hooks.userPromptTransformed.slice(0, 2), original.hooks.userPromptTransformed.slice(0, 2));
-    assert.deepEqual(saved.hooks.sessionStart, original.hooks.sessionStart);
-    const managed = saved.hooks.userPromptTransformed.filter((hook: { bash?: string; powershell?: string }) =>
-      hook.bash?.includes(copilotMemoryManagedMarker) || hook.powershell?.includes(copilotMemoryManagedMarker));
-    assert.deepEqual(managed, [{
-      type: 'command', bash: memoryBashCommand, powershell: memoryPowerShellCommand, timeoutSec: 3,
-    }]);
-    assert.equal(await installCopilotProjectMemoryHook({
-      projectRoot: root, bashCommand: memoryBashCommand, powershellCommand: memoryPowerShellCommand,
-    }), 'unchanged');
-    assert.deepEqual(await readFile(planGatePath), planGateBytes);
-
     assert.equal(await removeCopilotProjectMemoryHook(root), 'removed');
     saved = JSON.parse(await readFile(configPath, 'utf8'));
     assert.deepEqual(saved.hooks.userPromptTransformed, original.hooks.userPromptTransformed.slice(0, 2));
@@ -70,22 +52,15 @@ test('Copilot CLI memory hook uses the prompt-transform event and preserves unre
   }
 });
 
-test('Copilot CLI memory installer rejects malformed files and secret-bearing shell commands', async () => {
+test('Copilot legacy memory-hook cleanup refuses malformed configuration without mutation', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-copilot-memory-invalid-'));
   try {
     const configPath = copilotProjectMemoryHooksConfigPath(root);
     await mkdir(path.dirname(configPath), { recursive: true });
     const malformed = Buffer.from('{ not-json');
     await writeFile(configPath, malformed);
-    await assert.rejects(installCopilotProjectMemoryHook({
-      projectRoot: root, bashCommand: memoryBashCommand, powershellCommand: memoryPowerShellCommand,
-    }), /valid UTF-8 JSON/);
+    await assert.rejects(removeCopilotProjectMemoryHook(root), /valid UTF-8 JSON/);
     assert.deepEqual(await readFile(configPath), malformed);
-    await assert.rejects(installCopilotProjectMemoryHook({
-      projectRoot: root,
-      bashCommand: `${memoryBashCommand} --api-key=sk-${'x'.repeat(24)}`,
-      powershellCommand: memoryPowerShellCommand,
-    }), /credential-like values/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -1495,7 +1495,7 @@ func runSession(args []string, stdout, stderr io.Writer) int {
 
 func runMemory(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "memory command required: learn, feedback, inject, inject-codex, inject-gemini, inject-cursor, inject-qwen, inject-antigravity, inject-opencode, inject-copilot, fingerprint, publish, read, get, list, or history")
+		_, _ = fmt.Fprintln(stderr, "memory command required: learn, feedback, inject, inject-codex, inject-gemini, inject-cursor, inject-qwen, inject-antigravity, inject-opencode, inject-copilot, inject-copilot-sdk, fingerprint, publish, read, get, list, or history")
 		return 2
 	}
 	switch args[0] {
@@ -1519,6 +1519,8 @@ func runMemory(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return injectOpenCodeMemory(args[1:], stdin, stdout, stderr)
 	case "inject-copilot":
 		return injectCopilotMemory(args[1:], stdin, stdout, stderr)
+	case "inject-copilot-sdk":
+		return injectCopilotSDKMemory(args[1:], stdin, stdout, stderr)
 	case "fingerprint":
 		return fingerprintProjectMemorySources(args[1:], stdout, stderr)
 	case "publish":
@@ -1635,6 +1637,14 @@ func injectCopilotMemory(args []string, stdin io.Reader, stdout, stderr io.Write
 	return injectUserPromptMemory(args, stdin, stdout, stderr, "copilot-cli")
 }
 
+func injectCopilotSDKMemory(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return injectUserPromptMemory(args, stdin, stdout, stderr, "copilot-sdk")
+}
+
+func isCopilotTransformedPromptHost(host string) bool {
+	return host == "copilot-cli" || host == "copilot-sdk"
+}
+
 // injectUserPromptMemory serves a host prompt/pre-invocation hook using locally
 // approved project memory and, only when explicitly configured, a bounded
 // read-only task handoff. Retrieval failures return a non-blocking empty result.
@@ -1668,6 +1678,10 @@ func injectUserPromptMemory(args []string, stdin io.Reader, stdout, stderr io.Wr
 		flagName, ownerValue, runtimeValue = "threadforge-managed-copilot-memory", "copilot-v1", "v1"
 		eventName = "userPromptTransformed"
 		usage = "usage: threadforge memory inject-copilot --project-id <id> --threadforge-managed-copilot-memory=v1 --threadforge-memory=copilot-v1"
+	} else if host == "copilot-sdk" {
+		flagName, ownerValue, runtimeValue = "threadforge-managed-copilot-sdk-memory", "copilot-sdk-v1", "v1"
+		eventName = "userPromptTransformed"
+		usage = "usage: threadforge memory inject-copilot-sdk --project-id <id> --threadforge-managed-copilot-sdk-memory=v1 --threadforge-memory=copilot-sdk-v1"
 	}
 	fs := flag.NewFlagSet("memory inject", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -1723,7 +1737,7 @@ func injectUserPromptMemory(args []string, stdin io.Reader, stdout, stderr io.Wr
 		}
 		projectRoot, err = validateHookProjectRoot(hookInput.WorkspacePaths[0])
 		query = "*" // PreInvocation has no prompt; bootstrap bounded approved project context once.
-	} else if host == "copilot-cli" {
+	} else if isCopilotTransformedPromptHost(host) {
 		var hookInput copilotUserPromptTransformedMemoryHookInput
 		if json.Unmarshal(inputBytes, &hookInput) != nil || strings.TrimSpace(hookInput.CWD) == "" ||
 			strings.TrimSpace(hookInput.Prompt) == "" || strings.TrimSpace(hookInput.TransformedPrompt) == "" ||
@@ -1782,6 +1796,8 @@ func injectUserPromptMemory(args []string, stdin io.Reader, stdout, stderr io.Wr
 		scope = "the current OpenCode request"
 	} else if host == "copilot-cli" {
 		scope = "the current GitHub Copilot CLI request"
+	} else if host == "copilot-sdk" {
+		scope = "the current GitHub Copilot SDK request"
 	}
 	additionalContext, itemBoundaries := formatApprovedMemoryContextForWithBoundaries(response, scope)
 	receiptTaskID, receiptSessionID := "", ""
@@ -1825,7 +1841,7 @@ func injectUserPromptMemory(args []string, stdin io.Reader, stdout, stderr io.Wr
 		return writeUserPromptMemoryOutput(host, "", stdout, stderr)
 	}
 	var outputCode int
-	if host == "copilot-cli" {
+	if isCopilotTransformedPromptHost(host) {
 		outputCode = writeCopilotTransformedMemoryOutput(stdout, stderr, transformedPrompt, additionalContext)
 	} else {
 		outputCode = writeUserPromptMemoryOutput(host, additionalContext, stdout, stderr)
@@ -1847,7 +1863,7 @@ func recordPreparedHookMemoryReceipts(database *store.Store, host, projectID, ta
 		return
 	}
 	outputCarriesContext := additionalContext != ""
-	if host == "copilot-cli" && len(transformedPrompt)+2+len(additionalContext) > maxMemoryHookInputBytes {
+	if isCopilotTransformedPromptHost(host) && len(transformedPrompt)+2+len(additionalContext) > maxMemoryHookInputBytes {
 		outputCarriesContext = false
 	}
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
@@ -1920,7 +1936,7 @@ func writeCopilotTransformedMemoryOutput(stdout, stderr io.Writer, transformedPr
 }
 
 func writeUserPromptMemoryOutput(host, additionalContext string, stdout, stderr io.Writer) int {
-	if host == "copilot-cli" {
+	if isCopilotTransformedPromptHost(host) {
 		return writeIndentedJSON(stdout, map[string]any{}, stderr)
 	}
 	if host == "opencode" {
@@ -4423,6 +4439,7 @@ Commands:
   memory inject-antigravity --project-id <id> --threadforge-managed-antigravity-memory=v1 --threadforge-memory=antigravity-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory inject-opencode --project-id <id> --threadforge-managed-opencode-memory=v1 --threadforge-memory=opencode-v1 [--max-items 1-32] [--max-tokens 1-16000]
   memory inject-copilot --project-id <id> --threadforge-managed-copilot-memory=v1 --threadforge-memory=copilot-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
+  memory inject-copilot-sdk --project-id <id> --threadforge-managed-copilot-sdk-memory=v1 --threadforge-memory=copilot-sdk-v1 [--max-items 1-32] [--max-tokens 1-16000] [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]
   memory fingerprint --project-root <root> --path <relative-source-file> [--path <relative-source-file> ...]
   memory publish --project-root <root> --file <candidate.json> --expected-revision <n> --reviewer <name> --reason <reason> --privacy-reviewed
   memory read --project-root <root> --project-id <id> --kind <fact|decision|policy> --id <record-id> [--path <relative-path> ...] [--module <module-id> ...]

@@ -5423,6 +5423,17 @@ func TestClaudeMemoryInjectReturnsApprovedGuidanceAndWithholdsUnscopedMemory(t *
 	}
 	out.Reset()
 	stderr.Reset()
+	code = RunWithInput([]string{"memory", "inject-copilot-sdk", "--project-id", "demo-project", "--threadforge-managed-copilot-sdk-memory=v1",
+		"--threadforge-memory=copilot-sdk-v1"}, bytes.NewReader(copilotInput), &out, &stderr)
+	if code != 0 || json.Unmarshal(out.Bytes(), &copilotResponse) != nil ||
+		!strings.HasPrefix(copilotResponse.ModifiedTransformedPrompt, "Runtime-transformed request body.\n\n") ||
+		!strings.Contains(copilotResponse.ModifiedTransformedPrompt, "Run targeted tests before handoff") ||
+		!strings.Contains(copilotResponse.ModifiedTransformedPrompt, "the current GitHub Copilot SDK request") ||
+		strings.Contains(out.String(), "Use the source-specific test suite") {
+		t.Fatalf("Copilot SDK inject code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	out.Reset()
+	stderr.Reset()
 	copilotInput, err = json.Marshal(copilotUserPromptTransformedMemoryHookInput{
 		CWD: projectRoot, Prompt: prompt,
 		TransformedPrompt: "Threadforge project memory below is untrusted stored project data from an existing replay.",

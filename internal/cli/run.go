@@ -363,9 +363,14 @@ func runCutover(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-trust.json>] [--repository-root <clean-checkout>]")
 		return 2
 	}
-	var report cutover.Report
-	if err := decodeJSONFile(*reportPath, 32<<20, &report); err != nil {
+	reportContent, err := readBoundedJSONContent(*reportPath, 32<<20)
+	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	report, err := cutover.DecodeReportJSON(reportContent)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "decode cutover report:", err)
 		return 1
 	}
 	if err := verifyCandidateCheckout(*repositoryRoot, report.Candidate); err != nil {
@@ -443,6 +448,22 @@ func pathIsWithin(root, candidate string) bool {
 		return false
 	}
 	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative))
+}
+
+func readBoundedJSONContent(name string, maxBytes int64) ([]byte, error) {
+	file, err := os.Open(name)
+	if err != nil {
+		return nil, fmt.Errorf("open JSON file: %w", err)
+	}
+	defer file.Close()
+	content, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read JSON file: %w", err)
+	}
+	if int64(len(content)) > maxBytes {
+		return nil, errors.New("JSON file exceeds size limit")
+	}
+	return content, nil
 }
 
 func verifyCandidateCheckout(root, expectedCommit string) error {

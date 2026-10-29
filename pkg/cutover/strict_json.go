@@ -13,6 +13,16 @@ const (
 	maxCutoverJSONTokens = 4_000_000
 )
 
+// DecodeReportJSON decodes a top-level cutover report using the same strict
+// duplicate-key, field, and resource checks as the report's evidence artifacts.
+func DecodeReportJSON(data []byte) (Report, error) {
+	var report Report
+	if err := decodeUniqueJSON(data, &report); err != nil {
+		return report, err
+	}
+	return report, nil
+}
+
 // decodeUniqueJSON rejects duplicate object keys before decoding into a typed
 // value. encoding/json otherwise accepts duplicates and keeps the later value,
 // which makes signed evidence ambiguous to other JSON implementations.

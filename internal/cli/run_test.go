@@ -3385,7 +3385,19 @@ func TestCutoverAssessmentFailsClosedAndDoesNotMutateSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, stderr bytes.Buffer
-	code := Run([]string{"cutover", "assess", "--report", reportPath, "--evidence-root", evidenceRoot, "--repository-root", repositoryRoot}, &out, &stderr)
+	duplicateReportPath := filepath.Join(root, "duplicate-cutover-report.json")
+	duplicateReport := strings.Replace(report, `"candidate_commit"`, `"schema_version":"threadforge.cutover-evidence.v5","candidate_commit"`, 1)
+	if err := os.WriteFile(duplicateReportPath, []byte(duplicateReport), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code := Run([]string{"cutover", "assess", "--report", duplicateReportPath, "--evidence-root", evidenceRoot,
+		"--repository-root", repositoryRoot}, &out, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "duplicate object key") || out.Len() != 0 {
+		t.Fatalf("duplicate top-level report key code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	out.Reset()
+	stderr.Reset()
+	code = Run([]string{"cutover", "assess", "--report", reportPath, "--evidence-root", evidenceRoot, "--repository-root", repositoryRoot}, &out, &stderr)
 	if code != 1 || !strings.Contains(out.String(), `"ready": false`) || !strings.Contains(out.String(), "beacon.capture") {
 		t.Fatalf("incomplete cutover code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
 	}

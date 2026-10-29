@@ -2735,6 +2735,239 @@ func TestEvolutionDomainVerificationCLIHashesLocalArtifactsAndRemainsAdvisory(t 
 	}
 }
 
+func TestValidDomainVerificationV2ResultRejectsUnexpectedOrSensitiveFields(t *testing.T) {
+	makeValidResult := func() map[string]any {
+		sources := []string{"harvey-lab/evolve", "harvey-lab/held-out", "jobbench", "gdpval", "apex-agents"}
+		expected := make([]any, len(sources))
+		coverage := make([]any, len(sources))
+		for index, source := range sources {
+			expected[index] = source
+			coverage[index] = map[string]any{
+				"source_id": source, "status": "unavailable", "reason": "inventory_not_supplied",
+			}
+		}
+		return map[string]any{
+			"schema_version": "threadforge.rrsi-domain-verification.v2",
+			"domain":         "rrsi-agentic-workspace", "status": "incomplete",
+			"expected_splits": expected, "splits": []any{}, "missing_evidence": []any{},
+			"artifact_hashes_verified": false, "verified_artifact_count": float64(0),
+			"artifact_manifest_sha256": nil, "required_split_scope_complete": false,
+			"source_inventory_coverage": coverage, "task_set_bindings": []any{},
+			"task_set_binding_verified": false, "cross_split_overlaps": []any{},
+			"split_identity_verified": false, "independent_split_sets_verified": false,
+			"acceptance_status": "not_evaluated", "benchmark_execution_performed": false,
+			"cutover_evidence_eligible": false, "human_approval_required": true,
+			"execution_authorized": false,
+		}
+	}
+	makeCompleteSplitResult := func() map[string]any {
+		result := makeValidResult()
+		sources := []string{"harvey-lab/evolve", "harvey-lab/held-out", "jobbench", "gdpval", "apex-agents"}
+		roles := map[string]string{
+			"harvey-lab/evolve": "evolve", "harvey-lab/held-out": "held_out",
+			"jobbench": "ood", "gdpval": "ood", "apex-agents": "ood",
+		}
+		splits := make([]any, 0, len(sources))
+		bindings := make([]any, 0, len(sources))
+		issues := make([]any, 0, len(sources)*2)
+		for _, source := range sources {
+			splits = append(splits, map[string]any{
+				"split_id": source, "roles": []any{roles[source]},
+				"baseline":  map[string]any{"run_count": float64(0), "metrics_mean": map[string]any{}},
+				"candidate": map[string]any{"run_count": float64(0), "metrics_mean": map[string]any{}},
+			})
+			bindings = append(bindings, map[string]any{
+				"split_id": source, "source_inventory_verified": false, "task_set_sha256": nil,
+				"baseline_runs_bound": float64(0), "candidate_runs_bound": float64(0),
+			})
+			issues = append(issues,
+				map[string]any{"split_id": source, "item": "baseline_runs_minimum_2"},
+				map[string]any{"split_id": source, "item": "candidate_runs_minimum_2"},
+			)
+		}
+		result["splits"] = splits
+		result["task_set_bindings"] = bindings
+		result["missing_evidence"] = issues
+		result["required_split_scope_complete"] = true
+		return result
+	}
+	if !validDomainVerificationV2Result(makeValidResult(), "rrsi-agentic-workspace") {
+		t.Fatal("well-formed incomplete v2 result was rejected")
+	}
+	if !validDomainVerificationV2Result(makeCompleteSplitResult(), "rrsi-agentic-workspace") {
+		t.Fatal("well-formed complete-scope v2 result was rejected")
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{
+			name: "unexpected top-level task IDs",
+			mutate: func(result map[string]any) {
+				result["task_ids"] = []any{"private-task-id"}
+			},
+		},
+		{
+			name: "incorrect expected split list",
+			mutate: func(result map[string]any) {
+				result["expected_splits"] = []any{"jobbench"}
+			},
+		},
+		{
+			name: "unexpected split task IDs",
+			mutate: func(result map[string]any) {
+				result["splits"] = []any{map[string]any{
+					"split_id": "harvey-lab/evolve", "roles": []any{"evolve"},
+					"baseline":  map[string]any{"run_count": float64(0), "metrics_mean": map[string]any{}},
+					"candidate": map[string]any{"run_count": float64(0), "metrics_mean": map[string]any{}},
+					"task_ids":  []any{"private-task-id"},
+				}}
+			},
+		},
+		{
+			name: "unrecognized source reason",
+			mutate: func(result map[string]any) {
+				result["source_inventory_coverage"].([]any)[0].(map[string]any)["reason"] = `D:\\private\\source.json`
+			},
+		},
+		{
+			name: "unrecognized missing-evidence content",
+			mutate: func(result map[string]any) {
+				result["missing_evidence"] = []any{map[string]any{
+					"split_id": "jobbench", "item": `D:\\private\\source.json`,
+				}}
+			},
+		},
+		{
+			name: "unavailable source with malformed digest",
+			mutate: func(result map[string]any) {
+				result["task_set_bindings"].([]any)[2].(map[string]any)["task_set_sha256"] = "bad"
+			},
+		},
+		{
+			name: "wrong registered split role",
+			mutate: func(result map[string]any) {
+				result["splits"].([]any)[0].(map[string]any)["roles"] = []any{"ood"}
+			},
+		},
+		{
+			name: "unknown metric summary field",
+			mutate: func(result map[string]any) {
+				result["splits"].([]any)[0].(map[string]any)["baseline"].(map[string]any)["metrics_mean"] = map[string]any{
+					"criteria_passed": float64(1), "private_task_id": float64(1),
+				}
+			},
+		},
+		{
+			name: "scope flag does not match split list",
+			mutate: func(result map[string]any) {
+				result["required_split_scope_complete"] = false
+			},
+		},
+		{
+			name: "verified task binding with unavailable source coverage",
+			mutate: func(result map[string]any) {
+				result["task_set_binding_verified"] = true
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := makeCompleteSplitResult()
+			test.mutate(result)
+			if validDomainVerificationV2Result(result, "rrsi-agentic-workspace") {
+				t.Fatal("unsafe or inconsistent v2 result was accepted")
+			}
+		})
+	}
+}
+
+func TestValidDomainVerificationV2ResultAcceptsRegisteredRoleSets(t *testing.T) {
+	tests := []struct {
+		domain string
+		splits []string
+		roles  map[string][]string
+	}{
+		{
+			domain: "rrsi-coding",
+			splits: []string{"terminal-bench/terminal-bench-2-1", "swe-bench/swe-bench-verified"},
+			roles: map[string][]string{
+				"terminal-bench/terminal-bench-2-1": {"evolve"},
+				"swe-bench/swe-bench-verified":      {"held_out", "ood"},
+			},
+		},
+		{
+			domain: "rrsi-agentic-workspace",
+			splits: []string{"harvey-lab/evolve", "harvey-lab/held-out", "jobbench", "gdpval", "apex-agents"},
+			roles: map[string][]string{
+				"harvey-lab/evolve":   {"evolve"},
+				"harvey-lab/held-out": {"held_out"},
+				"jobbench":            {"ood"},
+				"gdpval":              {"ood"},
+				"apex-agents":         {"ood"},
+			},
+		},
+		{
+			domain: "rrsi-engineering-design",
+			splits: []string{"engdesign-open", "engdesign-v1", "frontier-eng"},
+			roles: map[string][]string{
+				"engdesign-open": {"evolve"},
+				"engdesign-v1":   {"ood"},
+				"frontier-eng":   {"held_out", "ood"},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.domain, func(t *testing.T) {
+			sources := test.splits
+			expectedSplits := make([]any, len(sources))
+			summaries := make([]any, 0, len(sources))
+			coverage := make([]any, 0, len(sources))
+			bindings := make([]any, 0, len(sources))
+			issues := make([]any, 0, len(sources)*2)
+			for index, splitID := range sources {
+				expectedSplits[index] = splitID
+				roles := make([]any, len(test.roles[splitID]))
+				for roleIndex, role := range test.roles[splitID] {
+					roles[roleIndex] = role
+				}
+				summaries = append(summaries, map[string]any{
+					"split_id": splitID, "roles": roles,
+					"baseline":  map[string]any{"run_count": float64(0), "metrics_mean": map[string]any{}},
+					"candidate": map[string]any{"run_count": float64(0), "metrics_mean": map[string]any{}},
+				})
+				coverage = append(coverage, map[string]any{
+					"source_id": splitID, "status": "unavailable", "reason": "inventory_not_supplied",
+				})
+				bindings = append(bindings, map[string]any{
+					"split_id": splitID, "source_inventory_verified": false, "task_set_sha256": nil,
+					"baseline_runs_bound": float64(0), "candidate_runs_bound": float64(0),
+				})
+				issues = append(issues,
+					map[string]any{"split_id": splitID, "item": "baseline_runs_minimum_2"},
+					map[string]any{"split_id": splitID, "item": "candidate_runs_minimum_2"},
+				)
+			}
+			result := map[string]any{
+				"schema_version": "threadforge.rrsi-domain-verification.v2", "domain": test.domain,
+				"status": "incomplete", "expected_splits": expectedSplits, "splits": summaries,
+				"missing_evidence": issues, "artifact_hashes_verified": false,
+				"verified_artifact_count": float64(0), "artifact_manifest_sha256": nil,
+				"required_split_scope_complete": true, "source_inventory_coverage": coverage,
+				"task_set_bindings": bindings, "task_set_binding_verified": false,
+				"cross_split_overlaps": []any{}, "split_identity_verified": false,
+				"independent_split_sets_verified": false, "acceptance_status": "not_evaluated",
+				"benchmark_execution_performed": false, "cutover_evidence_eligible": false,
+				"human_approval_required": true, "execution_authorized": false,
+			}
+			if !validDomainVerificationV2Result(result, test.domain) {
+				t.Fatalf("registered RRSI split roles were rejected: %#v", test.roles)
+			}
+		})
+	}
+}
+
 func TestHarveyInventoryCandidateRequiresPinnedSourceAndExactTaskSetDigests(t *testing.T) {
 	makeInventory := func(sourceID string, count int) evolutionHarveyInventory {
 		taskIDs := make([]string, count)

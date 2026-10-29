@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -515,13 +516,59 @@ func validDomainVerificationV2Result(result map[string]any, domain string) bool 
 		"rrsi-agentic-workspace":  {"harvey-lab/evolve", "harvey-lab/held-out", "jobbench", "gdpval", "apex-agents"},
 		"rrsi-engineering-design": {"engdesign-open", "engdesign-v1", "frontier-eng"},
 	}
-	expectedSplits := map[string][]string{
-		"rrsi-coding":             {"terminal-bench/terminal-bench-2-1", "swe-bench/swe-bench-verified"},
-		"rrsi-agentic-workspace":  {"harvey-lab/evolve", "harvey-lab/held-out", "jobbench", "gdpval", "apex-agents"},
-		"rrsi-engineering-design": {"engdesign-open", "engdesign-v1", "frontier-eng"},
+	expectedRoles := map[string]map[string][]string{
+		"rrsi-coding": {
+			"terminal-bench/terminal-bench-2-1": {"evolve"},
+			"swe-bench/swe-bench-verified":      {"held_out", "ood"},
+		},
+		"rrsi-agentic-workspace": {
+			"harvey-lab/evolve":   {"evolve"},
+			"harvey-lab/held-out": {"held_out"},
+			"jobbench":            {"ood"},
+			"gdpval":              {"ood"},
+			"apex-agents":         {"ood"},
+		},
+		"rrsi-engineering-design": {
+			"engdesign-open": {"evolve"},
+			"engdesign-v1":   {"ood"},
+			"frontier-eng":   {"held_out", "ood"},
+		},
 	}
 	required, ok := requiredSources[domain]
 	if !ok {
+		return false
+	}
+	expected := make([]string, len(required))
+	copy(expected, required)
+	fields := []string{
+		"schema_version", "domain", "status", "expected_splits", "splits", "missing_evidence",
+		"artifact_hashes_verified", "verified_artifact_count", "artifact_manifest_sha256",
+		"required_split_scope_complete", "source_inventory_coverage", "task_set_bindings",
+		"task_set_binding_verified", "cross_split_overlaps", "split_identity_verified",
+		"independent_split_sets_verified", "acceptance_status", "benchmark_execution_performed",
+		"cutover_evidence_eligible", "human_approval_required", "execution_authorized",
+	}
+	if !hasExactDomainFields(result, fields) ||
+		result["schema_version"] != "threadforge.rrsi-domain-verification.v2" || result["domain"] != domain ||
+		(result["status"] != "artifacts_verified" && result["status"] != "incomplete" &&
+			result["status"] != "integrity_failed" && result["status"] != "privacy_blocked") ||
+		result["acceptance_status"] != "not_evaluated" || result["benchmark_execution_performed"] != false ||
+		result["cutover_evidence_eligible"] != false || result["human_approval_required"] != true ||
+		result["execution_authorized"] != false {
+		return false
+	}
+	rawExpected, ok := result["expected_splits"].([]any)
+	if !ok || len(rawExpected) != len(expected) {
+		return false
+	}
+	for index, splitID := range expected {
+		if rawExpected[index] != splitID {
+			return false
+		}
+	}
+	splitSummaries, splitSummariesOK := result["splits"].([]any)
+	if !splitSummariesOK || !validDomainVerificationSplitSummaries(splitSummaries, expectedRoles[domain], domain) ||
+		!validDomainVerificationIssues(result["missing_evidence"], expected) {
 		return false
 	}
 	splitIdentity, identityOK := result["split_identity_verified"].(bool)
@@ -533,7 +580,8 @@ func validDomainVerificationV2Result(result map[string]any, domain string) bool 
 	bindings, bindingsOK := result["task_set_bindings"].([]any)
 	overlaps, overlapsOK := result["cross_split_overlaps"].([]any)
 	if !identityOK || !taskBindingOK || !independentOK || !artifactsOK || !scopeOK || !coverageOK || !bindingsOK || !overlapsOK ||
-		len(coverage) != len(required) || len(bindings) > len(expectedSplits[domain]) ||
+		len(coverage) != len(required) || len(bindings) > len(expected) ||
+		scopeComplete != (len(splitSummaries) == len(expected)) ||
 		(splitIdentity && (!taskBindingVerified || !scopeComplete || !artifactHashes)) ||
 		(independent && (!splitIdentity || len(overlaps) != 0)) || len(overlaps) > 32 {
 		return false
@@ -541,7 +589,7 @@ func validDomainVerificationV2Result(result map[string]any, domain string) bool 
 	covered := make(map[string]string, len(coverage))
 	for _, raw := range coverage {
 		entry, ok := raw.(map[string]any)
-		if !ok {
+		if !ok || !hasDomainFields(entry, []string{"source_id", "status"}, []string{"reason"}) {
 			return false
 		}
 		sourceID, idOK := entry["source_id"].(string)
@@ -552,7 +600,10 @@ func validDomainVerificationV2Result(result map[string]any, domain string) bool 
 		}
 		if status == "unavailable" {
 			reason, reasonOK := entry["reason"].(string)
-			if !reasonOK || reason == "" {
+			if !reasonOK || !containsDomainValue([]string{
+				"external_runner_revision_unpinned", "source_split_unreconciled",
+				"source_manifest_task_set_conflict", "inventory_not_supplied",
+			}, reason) {
 				return false
 			}
 		} else if _, hasReason := entry["reason"]; hasReason {
@@ -561,14 +612,24 @@ func validDomainVerificationV2Result(result map[string]any, domain string) bool 
 		covered[sourceID] = status
 	}
 	for _, sourceID := range required {
-		if covered[sourceID] == "" || (splitIdentity && covered[sourceID] != "verified") {
+		if covered[sourceID] == "" || ((splitIdentity || taskBindingVerified) && covered[sourceID] != "verified") {
 			return false
 		}
 	}
+	splitSummaryIDs := make(map[string]bool, len(splitSummaries))
+	for _, raw := range splitSummaries {
+		splitSummaryIDs[raw.(map[string]any)["split_id"].(string)] = true
+	}
+	if len(bindings) != len(splitSummaryIDs) {
+		return false
+	}
 	seenBindings := make(map[string]bool, len(bindings))
+	bindingSourcesVerified := make(map[string]bool, len(bindings))
 	for _, raw := range bindings {
 		binding, ok := raw.(map[string]any)
-		if !ok {
+		if !ok || !hasExactDomainFields(binding, []string{
+			"split_id", "source_inventory_verified", "task_set_sha256", "baseline_runs_bound", "candidate_runs_bound",
+		}) {
 			return false
 		}
 		splitID, splitOK := binding["split_id"].(string)
@@ -576,24 +637,30 @@ func validDomainVerificationV2Result(result map[string]any, domain string) bool 
 		taskDigest, digestOK := binding["task_set_sha256"].(string)
 		baseline, baselineOK := binding["baseline_runs_bound"].(float64)
 		candidate, candidateOK := binding["candidate_runs_bound"].(float64)
-		if !splitOK || !sourceOK || !containsDomainValue(expectedSplits[domain], splitID) || seenBindings[splitID] ||
+		if !splitOK || !sourceOK || !containsDomainValue(expected, splitID) || !splitSummaryIDs[splitID] || seenBindings[splitID] ||
 			!baselineOK || !candidateOK || baseline < 0 || candidate < 0 || baseline > 32 || candidate > 32 ||
 			baseline != float64(int(baseline)) || candidate != float64(int(candidate)) {
 			return false
 		}
 		seenBindings[splitID] = true
-		if sourceVerified != (digestOK && validLowerHex(taskDigest, 64)) {
+		bindingSourcesVerified[splitID] = sourceVerified
+		if sourceVerified != (covered[splitID] == "verified") {
+			return false
+		}
+		rawDigest := binding["task_set_sha256"]
+		if (sourceVerified && (!digestOK || !validLowerHex(taskDigest, 64))) ||
+			(!sourceVerified && rawDigest != nil) {
 			return false
 		}
 		if taskBindingVerified && (!sourceVerified || baseline < 1 || candidate < 1) {
 			return false
 		}
 	}
-	if taskBindingVerified && len(bindings) != len(expectedSplits[domain]) {
+	if taskBindingVerified && len(bindings) != len(expected) {
 		return false
 	}
 	if splitIdentity || independent {
-		if len(bindings) != len(expectedSplits[domain]) {
+		if len(bindings) != len(expected) {
 			return false
 		}
 		for _, sourceID := range required {
@@ -605,7 +672,7 @@ func validDomainVerificationV2Result(result map[string]any, domain string) bool 
 	seenOverlaps := make(map[string]bool, len(overlaps))
 	for _, raw := range overlaps {
 		overlap, ok := raw.(map[string]any)
-		if !ok {
+		if !ok || !hasExactDomainFields(overlap, []string{"left_split_id", "right_split_id", "shared_task_count"}) {
 			return false
 		}
 		left, leftOK := overlap["left_split_id"].(string)
@@ -613,7 +680,8 @@ func validDomainVerificationV2Result(result map[string]any, domain string) bool 
 		shared, sharedOK := overlap["shared_task_count"].(float64)
 		pair := left + "\x00" + right
 		if !leftOK || !rightOK || !sharedOK || shared < 1 || shared > 2048 || shared != float64(int(shared)) ||
-			!containsDomainValue(expectedSplits[domain], left) || !containsDomainValue(expectedSplits[domain], right) ||
+			!containsDomainValue(expected, left) || !containsDomainValue(expected, right) ||
+			!bindingSourcesVerified[left] || !bindingSourcesVerified[right] ||
 			left >= right || seenOverlaps[pair] {
 			return false
 		}
@@ -621,6 +689,188 @@ func validDomainVerificationV2Result(result map[string]any, domain string) bool 
 	}
 	if independent && len(overlaps) != 0 {
 		return false
+	}
+	if result["status"] == "privacy_blocked" &&
+		(len(result["splits"].([]any)) != 0 || len(result["missing_evidence"].([]any)) != 0 ||
+			artifactHashes || result["verified_artifact_count"] != float64(0) ||
+			result["artifact_manifest_sha256"] != nil || scopeComplete || taskBindingVerified ||
+			splitIdentity || independent || len(bindings) != 0 || len(overlaps) != 0) {
+		return false
+	}
+	return true
+}
+
+func validDomainVerificationSplitSummaries(raw any, expectedRoles map[string][]string, domain string) bool {
+	splits, ok := raw.([]any)
+	if !ok || len(splits) > len(expectedRoles) {
+		return false
+	}
+	metricNames := map[string][]string{
+		"rrsi-coding":             {"total_passes", "n_trials", "pass_rate"},
+		"rrsi-agentic-workspace":  {"criteria_passed", "criteria_total", "all_pass_tasks", "criterion_rate", "all_pass_rate"},
+		"rrsi-engineering-design": {"total_passes", "n_trials", "pass_rate", "mean_combined_score", "valid_rate", "no_payload_rate"},
+	}
+	seen := make(map[string]bool, len(splits))
+	for _, rawSplit := range splits {
+		split, ok := rawSplit.(map[string]any)
+		if !ok || !hasDomainFields(split,
+			[]string{"split_id", "roles", "baseline", "candidate"},
+			[]string{"dataset_sha256", "task_count", "evaluator"}) {
+			return false
+		}
+		splitID, ok := split["split_id"].(string)
+		roles, rolesOK := split["roles"].([]any)
+		expected, expectedOK := expectedRoles[splitID]
+		if !ok || !rolesOK || !expectedOK || seen[splitID] || len(roles) != len(expected) {
+			return false
+		}
+		seen[splitID] = true
+		roleSet := make(map[string]bool, len(roles))
+		for _, rawRole := range roles {
+			role, ok := rawRole.(string)
+			if !ok || !containsDomainValue(expected, role) || roleSet[role] {
+				return false
+			}
+			roleSet[role] = true
+		}
+		if datasetDigest, present := split["dataset_sha256"]; present {
+			digest, ok := datasetDigest.(string)
+			if !ok || !validLowerHex(digest, 64) {
+				return false
+			}
+		}
+		if rawTaskCount, present := split["task_count"]; present {
+			taskCount, ok := rawTaskCount.(float64)
+			if !ok || math.IsNaN(taskCount) || math.IsInf(taskCount, 0) || taskCount < 1 || math.Trunc(taskCount) != taskCount {
+				return false
+			}
+		}
+		if rawEvaluator, present := split["evaluator"]; present {
+			evaluator, ok := rawEvaluator.(map[string]any)
+			if !ok || len(evaluator) == 0 || !hasDomainFields(evaluator, nil, []string{"id", "version", "sha256"}) {
+				return false
+			}
+			for key, value := range evaluator {
+				switch key {
+				case "id", "version":
+					text, ok := value.(string)
+					if !ok || strings.TrimSpace(text) == "" || len(text) > 128 {
+						return false
+					}
+				case "sha256":
+					digest, ok := value.(string)
+					if !ok || !validLowerHex(digest, 64) {
+						return false
+					}
+				}
+			}
+		}
+		for _, treatment := range []string{"baseline", "candidate"} {
+			summary, ok := split[treatment].(map[string]any)
+			if !ok || !hasExactDomainFields(summary, []string{"run_count", "metrics_mean"}) {
+				return false
+			}
+			runCount, ok := summary["run_count"].(float64)
+			if !ok || runCount < 0 || runCount > 32 || runCount != float64(int(runCount)) {
+				return false
+			}
+			means, ok := summary["metrics_mean"].(map[string]any)
+			if !ok || len(means) > len(metricNames[domain]) {
+				return false
+			}
+			for name, value := range means {
+				if !containsDomainValue(metricNames[domain], name) {
+					return false
+				}
+				if _, ok := value.(float64); !ok {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func validDomainVerificationIssues(raw any, expectedSplits []string) bool {
+	issues, ok := raw.([]any)
+	if !ok || len(issues) > 4096 {
+		return false
+	}
+	for _, rawIssue := range issues {
+		issue, ok := rawIssue.(map[string]any)
+		if !ok || !hasExactDomainFields(issue, []string{"split_id", "item"}) {
+			return false
+		}
+		splitID, splitOK := issue["split_id"].(string)
+		item, itemOK := issue["item"].(string)
+		if !splitOK || !itemOK || !containsDomainValue(expectedSplits, splitID) ||
+			len(item) > 128 || !validDomainVerificationIssueItem(item) {
+			return false
+		}
+	}
+	return true
+}
+
+func validDomainVerificationIssueItem(item string) bool {
+	fixed := []string{
+		"roles", "dataset_sha256", "task_count", "evaluator", "evaluator.id", "evaluator.version",
+		"evaluator.sha256", "baseline_runs", "candidate_runs", "baseline_runs_minimum_2",
+		"candidate_runs_minimum_2", "split", "task_set_sha256", "task_set_source_binding_mismatch",
+		"task_count_source_binding_mismatch", "inventory_source_manifest_task_set_conflict",
+		"inventory_external_runner_revision_unpinned", "inventory_source_split_unreconciled",
+		"inventory_inventory_not_supplied",
+	}
+	if containsDomainValue(fixed, item) {
+		return true
+	}
+	for index := 0; index < 32; index++ {
+		for _, field := range []string{"baseline_runs", "candidate_runs"} {
+			for _, suffix := range []string{"run_id", "evidence_sha256", "metrics"} {
+				if item == fmt.Sprintf("%s[%d].%s", field, index, suffix) {
+					return true
+				}
+			}
+		}
+		for _, kind := range []string{"dataset", "evaluator", "baseline", "candidate"} {
+			for _, suffix := range []string{
+				"artifact_missing", "artifact_unsafe", "artifact_limit_exceeded", "artifact_changed", "hash_mismatch",
+			} {
+				if item == fmt.Sprintf("%s_%d_%s", kind, index, suffix) {
+					return true
+				}
+			}
+		}
+		for _, treatment := range []string{"baseline", "candidate"} {
+			for _, suffix := range []string{
+				"missing_dataset_artifact", "run_evidence_invalid", "run_task_set_binding_missing",
+				"run_task_set_binding_mismatch", "run_evidence_binding_mismatch", "run_id_duplicate",
+			} {
+				if item == fmt.Sprintf("%s_%d_%s", treatment, index, suffix) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func hasExactDomainFields(value map[string]any, fields []string) bool {
+	return hasDomainFields(value, fields, nil)
+}
+
+func hasDomainFields(value map[string]any, required, optional []string) bool {
+	if len(value) < len(required) {
+		return false
+	}
+	for _, key := range required {
+		if _, exists := value[key]; !exists {
+			return false
+		}
+	}
+	for key := range value {
+		if !containsDomainValue(required, key) && !containsDomainValue(optional, key) {
+			return false
+		}
 	}
 	return true
 }

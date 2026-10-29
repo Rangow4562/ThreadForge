@@ -1,13 +1,10 @@
 package cutover
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"sort"
 	"strings"
@@ -89,14 +86,8 @@ func (v *artifactVerifier) readEvaluationTrials(evidence Evidence) (EvaluationTr
 	if actual != evidence.SHA256 {
 		return trials, errors.New("artifact digest mismatch")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(content))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&trials); err != nil {
-		return trials, fmt.Errorf("invalid JSON: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return trials, errors.New("artifact must contain exactly one JSON value")
+	if err := decodeUniqueJSON(content, &trials); err != nil {
+		return trials, fmt.Errorf("invalid evaluation trials artifact: %w", err)
 	}
 	return trials, nil
 }

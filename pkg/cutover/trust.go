@@ -1,7 +1,6 @@
 package cutover
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -94,14 +93,8 @@ func ReadEvaluatorTrustStore(path string) (EvaluatorTrustStore, string, error) {
 	if readErr != nil || statErr != nil || closeErr != nil || int64(len(content)) != info.Size() || finalInfo.Size() != info.Size() || !finalInfo.ModTime().Equal(info.ModTime()) {
 		return trust, "", errors.New("trusted evaluator file changed or could not be read consistently")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(content))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&trust); err != nil {
+	if err := decodeUniqueJSON(content, &trust); err != nil {
 		return trust, "", fmt.Errorf("decode trusted evaluator file: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return trust, "", errors.New("trusted evaluator file contains trailing data")
 	}
 	if err := ValidateEvaluatorTrustStore(trust); err != nil {
 		return trust, "", err
@@ -233,14 +226,8 @@ func (v *artifactVerifier) readEvaluationAttestation(evidence Evidence) (Evaluat
 	if actual != evidence.SHA256 {
 		return attestation, errors.New("attestation artifact digest mismatch")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(content))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&attestation); err != nil {
+	if err := decodeUniqueJSON(content, &attestation); err != nil {
 		return attestation, fmt.Errorf("invalid attestation JSON: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return attestation, errors.New("attestation artifact must contain exactly one JSON value")
 	}
 	return attestation, nil
 }

@@ -3,7 +3,6 @@ package cutover
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -397,16 +396,9 @@ func validateMigrationSourceBackup(assessment *Assessment, verifier *artifactVer
 		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" source backup verification digest mismatch")
 		return
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(content)))
-	decoder.DisallowUnknownFields()
 	var report migrationbackup.Report
-	if err := decoder.Decode(&report); err != nil {
+	if err := decodeUniqueJSON(content, &report); err != nil {
 		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" source backup verification is invalid JSON")
-		return
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" source backup verification has trailing data")
 		return
 	}
 	if err := migrationbackup.Validate(report); err != nil {
@@ -431,16 +423,9 @@ func validateMigrationFormatCoverage(assessment *Assessment, verifier *artifactV
 		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" format coverage digest mismatch")
 		return
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(content)))
-	decoder.DisallowUnknownFields()
 	var coverage migrationcoverage.Report
-	if err := decoder.Decode(&coverage); err != nil {
+	if err := decodeUniqueJSON(content, &coverage); err != nil {
 		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" format coverage is invalid JSON: "+err.Error())
-		return
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" format coverage has trailing data")
 		return
 	}
 	if err := migrationcoverage.Validate(coverage); err != nil {

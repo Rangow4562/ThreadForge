@@ -101,6 +101,75 @@ func TestHandoffResumeRequiresConfirmationBeforeBriefOrLaunch(t *testing.T) {
 	}
 }
 
+func TestHandoffResumeRejectsChangedRuntimeLogBeforeWritingBriefOrLaunching(t *testing.T) {
+	stubResumeRuntime(t)
+	tracePath, workspace := resumeTraceFixture(t)
+	outputDir := filepath.Join(t.TempDir(), "must-not-exist-after-stale-plan")
+	previousLookPath := handoffResumeLookPath
+	mutated := false
+	handoffResumeLookPath = func(name string) (string, error) {
+		if name == "gemini" && !mutated {
+			mutated = true
+			event := handoffFixtureEvent("codex-cli", "resume-source-123", "assistant.message.completed", "PRIVATE_POST_PLAN_EVENT")
+			event.Session.WorkingDirectory = workspace
+			appendHandoffFixture(t, tracePath, event)
+		}
+		return filepath.Join("/fixture/bin", name), nil
+	}
+	t.Cleanup(func() { handoffResumeLookPath = previousLookPath })
+	previousLaunch := handoffResumeLaunch
+	launched := false
+	handoffResumeLaunch = func(resumePlan, io.Reader, io.Writer, io.Writer) (int, error) {
+		launched = true
+		return 0, nil
+	}
+	t.Cleanup(func() { handoffResumeLaunch = previousLaunch })
+	var stdout, stderr bytes.Buffer
+	code := RunWithInput([]string{"handoff", "resume", "resume-source-123", "--source", "runtime-log", "--harness", "codex", "--agent", "gemini", "--traces", tracePath, "--output-dir", outputDir, "--yes"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 1 || !mutated || launched || !strings.Contains(stderr.String(), "source session changed after planning") || stdout.Len() != 0 {
+		t.Fatalf("stale resume code=%d mutated=%t launched=%t stdout=%q stderr=%q", code, mutated, launched, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "PRIVATE_POST_PLAN_EVENT") {
+		t.Fatalf("stale event content leaked in error: %q", stderr.String())
+	}
+	if _, err := os.Lstat(outputDir); !os.IsNotExist(err) {
+		t.Fatalf("stale plan created a private brief directory: %v", err)
+	}
+}
+
+func TestHandoffResumeRechecksNativeReopenReference(t *testing.T) {
+	stubResumeRuntime(t)
+	root := t.TempDir()
+	codexDir := filepath.Join(root, ".codex")
+	rolloutDir := filepath.Join(codexDir, "sessions", "2026", "10", "09")
+	project := filepath.Join(root, "repo")
+	if err := os.MkdirAll(rolloutDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(project, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeCodexHandoffFixture(t, codexDir, rolloutDir, project)
+	rolloutPath := filepath.Join(rolloutDir, "rollout-2026-10-09T10-00-00-native-session-123.jsonl")
+	subject, err := readResumeSubject("native", "native-session-123", "codex_cli", "", []string{"codex=" + codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, _, err := buildResumePlan(subject, "codex_cli", "", "", false)
+	if err != nil || plan.Mode != "native" {
+		t.Fatalf("native plan=%#v err=%v", plan, err)
+	}
+	if err := revalidateResumeSubject(subject, plan); err != nil {
+		t.Fatalf("unchanged native session failed revalidation: %v", err)
+	}
+	if err := os.Remove(rolloutPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := revalidateResumeSubject(subject, plan); err == nil || !strings.Contains(err.Error(), "no longer available") {
+		t.Fatalf("vanished native session revalidation error=%v", err)
+	}
+}
+
 func TestHandoffResumeYesWritesBriefBeforeLaunchAndPreservesChildExit(t *testing.T) {
 	stubResumeRuntime(t)
 	tracePath, _ := resumeTraceFixture(t)

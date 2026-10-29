@@ -50,11 +50,14 @@ type resumePlan struct {
 }
 
 type resumeSubject struct {
-	session handoffpkg.Session
-	events  []beacon.Event
-	scan    handoffpkg.ScanStatus
-	source  string
-	native  handoffbridge.NativeSession
+	session           handoffpkg.Session
+	events            []beacon.Event
+	scan              handoffpkg.ScanStatus
+	source            string
+	native            handoffbridge.NativeSession
+	tracePath         string
+	storeOverrides    []string
+	sourceFingerprint string
 }
 
 type resumeLaunch func(resumePlan, io.Reader, io.Writer, io.Writer) (int, error)
@@ -249,6 +252,10 @@ func runHandoffResume(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 			return 0
 		}
 	}
+	if err := revalidateResumeSubject(subject, plan); err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
 	if plan.Mode == "new_session" {
 		path, err := handoffpkg.WritePrivateBrief(filepath.Dir(plan.BriefPath), filepath.Base(plan.BriefPath), brief.Render())
 		if err != nil {
@@ -295,7 +302,16 @@ func readResumeSubject(source, id, harness, tracePath string, storeOverrides []s
 		}
 		s := response.Session
 		session := handoffpkg.Session{ID: s.ID, Harness: s.Harness, Directory: s.Directory, Branch: s.Branch, UpdatedAt: s.UpdatedAt, EventCount: len(response.Events)}
-		return resumeSubject{session: session, events: response.Events, scan: handoffpkg.ScanStatus{Truncated: response.Truncated}, source: "native", native: s}, nil
+		subject := resumeSubject{
+			session: session, events: response.Events, scan: handoffpkg.ScanStatus{Truncated: response.Truncated},
+			source: "native", native: s, tracePath: tracePath, storeOverrides: append([]string(nil), storeOverrides...),
+		}
+		fingerprint, err := resumeSubjectFingerprint(subject)
+		if err != nil {
+			return resumeSubject{}, errors.New("native session snapshot could not be verified")
+		}
+		subject.sourceFingerprint = fingerprint
+		return subject, nil
 	}
 	session, events, scan, err := handoffpkg.ReadSession(tracePath, id, harness)
 	if err != nil {
@@ -304,7 +320,82 @@ func readResumeSubject(source, id, harness, tracePath string, storeOverrides []s
 	if scan.Changed {
 		return resumeSubject{}, errors.New("local trace changed during read; no resume plan was created")
 	}
-	return resumeSubject{session: session, events: events, scan: scan, source: "runtime-log"}, nil
+	subject := resumeSubject{
+		session: session, events: events, scan: scan, source: "runtime-log", tracePath: tracePath,
+		storeOverrides: append([]string(nil), storeOverrides...),
+	}
+	fingerprint, err := resumeSubjectFingerprint(subject)
+	if err != nil {
+		return resumeSubject{}, errors.New("runtime-log session snapshot could not be verified")
+	}
+	subject.sourceFingerprint = fingerprint
+	return subject, nil
+}
+
+func resumeSubjectFingerprint(subject resumeSubject) (string, error) {
+	type nativeReference struct {
+		Session      handoffbridge.NativeSession `json:"session"`
+		ResumePath   string                      `json:"resume_path,omitempty"`
+		NativeResume bool                        `json:"native_resume"`
+	}
+	snapshot := struct {
+		Source  string                `json:"source"`
+		Session handoffpkg.Session    `json:"session"`
+		Events  []beacon.Event        `json:"events"`
+		Scan    handoffpkg.ScanStatus `json:"scan"`
+		Native  nativeReference       `json:"native"`
+	}{
+		Source: subject.source, Session: subject.session, Events: subject.events, Scan: subject.scan,
+		Native: nativeReference{Session: subject.native, ResumePath: subject.native.ResumePath, NativeResume: subject.native.NativeResume},
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func sameNativeResumeReference(left, right handoffbridge.NativeSession) bool {
+	return left.Harness == right.Harness && left.ID == right.ID && left.Directory == right.Directory &&
+		left.Store == right.Store && left.Key == right.Key && left.ResumePath == right.ResumePath &&
+		left.NativeResume == right.NativeResume && left.Subagent == right.Subagent && left.ParentID == right.ParentID
+}
+
+func revalidateResumeSubject(original resumeSubject, plan resumePlan) error {
+	current, err := readResumeSubject(original.source, original.session.ID, original.session.Harness, original.tracePath, original.storeOverrides)
+	if err != nil {
+		return errors.New("source session changed or is no longer available; inspect it and create a new resume plan")
+	}
+	if plan.Mode == "native" {
+		if !sameNativeResumeReference(original.native, current.native) ||
+			!sameResumeDirectory(original.session.Directory, current.session.Directory) {
+			return errors.New("native session reference changed after planning; inspect it and create a new resume plan")
+		}
+		currentPlan, _, err := buildResumePlan(current, plan.Target, plan.Directory, "", false)
+		if err != nil || currentPlan.Mode != "native" || currentPlan.Executable != plan.Executable ||
+			currentPlan.Target != plan.Target || !equalResumeArgs(currentPlan.Args, plan.Args) ||
+			!sameResumeDirectory(currentPlan.Directory, plan.Directory) {
+			return errors.New("native session is no longer safely reopenable; inspect it and create a new resume plan")
+		}
+		return nil
+	}
+	if current.sourceFingerprint != original.sourceFingerprint {
+		return errors.New("source session changed after planning; inspect it and create a new resume plan")
+	}
+	return nil
+}
+
+func equalResumeArgs(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func buildResumePlan(subject resumeSubject, targetHarness, cwd, outputDir string, forceNew bool) (resumePlan, handoffpkg.Brief, error) {

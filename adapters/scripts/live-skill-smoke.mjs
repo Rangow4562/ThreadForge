@@ -479,9 +479,14 @@ async function runCopilotPlanGateHostSmoke(version) {
   }
 }
 
-async function runCopilotTaskResumeHostSmoke(version, taskFixture) {
-  if (!version) return { status: 'not-installed', real_model_invocations: 0 };
-  const copilotHome = path.join(isolatedHome, 'copilot-task-resume-home');
+async function runCopilotTaskResumeHostSmoke(version, taskFixture, memoryFixture = undefined) {
+  const memoryRead = memoryFixture !== undefined;
+  if (!version) {
+    return memoryRead
+      ? { schema_version: 'threadforge.copilot-project-memory-mcp-smoke.v1', status: 'not-installed', real_model_invocations: 0 }
+      : { status: 'not-installed', real_model_invocations: 0 };
+  }
+  const copilotHome = path.join(isolatedHome, memoryRead ? 'copilot-memory-mcp-home' : 'copilot-task-resume-home');
   mkdirSync(copilotHome, { recursive: true });
   const settingsPath = path.join(copilotHome, 'config.json');
   writeFileSync(settingsPath, `${JSON.stringify({
@@ -495,9 +500,23 @@ async function runCopilotTaskResumeHostSmoke(version, taskFixture) {
   let availableToolsRestricted = false;
   let fixtureError;
   const providerDiagnostics = [];
-  const taskID = taskFixture.id;
-  const objective = taskFixture.objective;
-  const requiredMarkers = [
+  const taskID = taskFixture?.id;
+  const objective = taskFixture?.objective;
+  const toolName = memoryRead ? 'threadforge_project_memory_read_v2' : 'threadforge_task_resume_context';
+  const expectedContent = memoryRead ? memoryFixture.guidance : objective;
+  const toolArguments = memoryRead ? {
+    project_id: memoryFixture.projectID, kind: memoryFixture.kind, id: memoryFixture.id,
+  } : { task_id: taskID };
+  const expectedFinalResponse = memoryRead
+    ? 'The approved project fact is fresh local guidance, not authorization.'
+    : 'The task objective was read. Requirements are not finalized, context is guidance only, and execution is not authorized.';
+  const expectedPrompt = memoryRead
+    ? 'Read the explicitly selected approved project fact through the Threadforge MCP tool and report its freshness and advisory status.'
+    : 'Read the explicitly selected task through the Threadforge task-resume MCP tool and report its objective and advisory status.';
+  const requiredMarkers = memoryRead ? [
+    'threadforge.project-memory-read.v2', '"status":"complete"', '"freshness":"verified"',
+    '"action_ready":false', '"guidance_only":true', '"execution_authorized":false',
+  ] : [
     'threadforge.task-resume-context.v1', 'requirements_not_finalized',
     '"action_ready":false', '"guidance_only":true', '"execution_authorized":false',
   ];
@@ -511,15 +530,15 @@ async function runCopilotTaskResumeHostSmoke(version, taskFixture) {
     });
     request.on('end', () => {
       try {
-        if (requestBytes > 8 << 20) throw new Error('Copilot task-resume request exceeded the local size bound');
+        if (requestBytes > 8 << 20) throw new Error('Copilot MCP request exceeded the local size bound');
         if (request.method === 'GET' && /\/models$/.test(requestPath)) {
           response.writeHead(200, { 'content-type': 'application/json', connection: 'close' }).end(JSON.stringify({
-            object: 'list', data: [{ id: 'threadforge-copilot-task-resume-fixture', object: 'model', created: 0, owned_by: 'threadforge-local' }],
+            object: 'list', data: [{ id: 'threadforge-copilot-read-fixture', object: 'model', created: 0, owned_by: 'threadforge-local' }],
           }));
           return;
         }
         if (request.method !== 'POST' || !/\/chat\/completions$/.test(requestPath)) {
-          throw new Error('Copilot requested an unexpected local task-resume provider route');
+          throw new Error('Copilot requested an unexpected local MCP provider route');
         }
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         const messages = Array.isArray(body.messages) ? body.messages : [];
@@ -530,15 +549,13 @@ async function runCopilotTaskResumeHostSmoke(version, taskFixture) {
           const resultText = toolResults.map((message) => toolMessageText(message.content)).join('\n');
           const compactResultText = resultText.replace(/\s+/g, '');
           const markersPresent = requiredMarkers.every((marker) => compactResultText.includes(marker.replace(/\s+/g, '')));
-          if (toolResults.length !== 1 || !resultText.includes(objective) || !markersPresent || toolCallCount !== 1) {
-            fixtureError = 'Copilot Threadforge MCP result omitted the selected task objective or advisory safety fields';
-            sendFixtureCompletion(request, response, body, { content: 'The task-resume result omitted required advisory safety fields.' });
+          if (toolResults.length !== 1 || !resultText.includes(expectedContent) || !markersPresent || toolCallCount !== 1) {
+            fixtureError = 'Copilot Threadforge MCP result omitted selected content or advisory safety fields';
+            sendFixtureCompletion(request, response, body, { content: 'The MCP result omitted required advisory safety fields.' });
             return;
           }
           toolResultObserved = true;
-          sendFixtureCompletion(request, response, body, {
-            content: 'The task objective was read. Requirements are not finalized, context is guidance only, and execution is not authorized.',
-          });
+          sendFixtureCompletion(request, response, body, { content: expectedFinalResponse });
           return;
         }
 
@@ -552,36 +569,38 @@ async function runCopilotTaskResumeHostSmoke(version, taskFixture) {
         }
         if (tools.length === 0 && toolCallCount === 0 && auxiliaryProviderRequests < 2) {
           auxiliaryProviderRequests++;
-          sendFixtureCompletion(request, response, body, { content: 'Threadforge task-resume verification' });
+          sendFixtureCompletion(request, response, body, { content: 'Threadforge read-only MCP verification' });
           return;
         }
         const tool = tools.find((candidate) => {
           const name = candidate?.function?.name ?? candidate?.name;
-          return typeof name === 'string' && name.endsWith('threadforge_task_resume_context');
+          return typeof name === 'string' && name.endsWith(toolName);
         });
-        if (!tool) throw new Error(`Copilot did not expose the Threadforge task-resume MCP tool; tools=${JSON.stringify(tools.map((candidate) => candidate?.function?.name ?? candidate?.name ?? 'unknown').slice(0, 32))}`);
+        if (!tool) throw new Error(`Copilot did not expose the selected Threadforge MCP tool; tools=${JSON.stringify(tools.map((candidate) => candidate?.function?.name ?? candidate?.name ?? 'unknown').slice(0, 32))}`);
         availableToolsRestricted = tools.length === 1;
-        const toolName = tool.function?.name ?? tool.name;
+        const invokedToolName = tool.function?.name ?? tool.name;
         const schema = tool.function?.parameters ?? tool.parameters ?? {};
         const properties = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
-        const required = Array.isArray(schema.required) ? schema.required : ['task_id'];
+        const required = Array.isArray(schema.required) ? schema.required : Object.keys(toolArguments);
         const argumentsValue = {};
         for (const key of required) {
-          if (key === 'task_id') argumentsValue[key] = taskID;
-          else throw new Error('Copilot task-resume MCP tool exposed an unsupported required argument');
+          if (Object.hasOwn(toolArguments, key)) argumentsValue[key] = toolArguments[key];
+          else throw new Error('Copilot MCP tool exposed an unsupported required argument');
         }
-        if (argumentsValue.task_id !== taskID || !Object.hasOwn(properties, 'task_id')) {
-          throw new Error('Copilot task-resume MCP tool schema did not require task_id');
+        const expectedArgumentNames = Object.keys(toolArguments).sort();
+        if (JSON.stringify(Object.keys(argumentsValue).sort()) !== JSON.stringify(expectedArgumentNames) ||
+            expectedArgumentNames.some((key) => !Object.hasOwn(properties, key))) {
+          throw new Error('Copilot MCP tool schema did not require the exact selected read arguments');
         }
-        if (toolCallCount !== 0) throw new Error('Copilot attempted more than one Threadforge task-resume MCP call');
+        if (toolCallCount !== 0) throw new Error('Copilot attempted more than one Threadforge MCP read');
         toolCallCount++;
         sendFixtureCompletion(request, response, body, {
-          toolCall: { id: 'call_copilot_threadforge_task_resume', name: toolName, arguments: JSON.stringify(argumentsValue) },
+          toolCall: { id: 'call_copilot_threadforge_read', name: invokedToolName, arguments: JSON.stringify(argumentsValue) },
         });
       } catch (error) {
-        fixtureError ??= String(error?.message ?? 'Copilot task-resume fixture failed').slice(0, 256);
+        fixtureError ??= String(error?.message ?? 'Copilot MCP fixture failed').slice(0, 256);
         response.writeHead(500, { 'content-type': 'application/json', connection: 'close' })
-          .end(JSON.stringify({ error: { message: 'deterministic local Copilot task-resume fixture failed' } }));
+          .end(JSON.stringify({ error: { message: 'deterministic local Copilot MCP fixture failed' } }));
       }
     });
   });
@@ -604,25 +623,41 @@ async function runCopilotTaskResumeHostSmoke(version, taskFixture) {
     COPILOT_PROVIDER_WIRE_API: 'completions',
     COPILOT_MODEL: 'gpt-4.1',
     COPILOT_PROVIDER_MODEL_ID: 'gpt-4.1',
-    COPILOT_PROVIDER_WIRE_MODEL: 'threadforge-copilot-task-resume-fixture',
+    COPILOT_PROVIDER_WIRE_MODEL: 'threadforge-copilot-read-fixture',
   };
   try {
     const mcpListing = runHost('copilot', ['mcp', 'list', '--json'], {
       cwd: projectRoot, env: environment, timeout: 30_000,
     });
     assert.equal(hasNamedMcpServer(JSON.parse(mcpListing), 'threadforge'), true,
-      'Copilot task-resume smoke home did not discover the project Threadforge MCP server');
+      'Copilot smoke home did not discover the project Threadforge MCP server');
     const output = await runCopilotAgent([
-      '--prompt', 'Read the explicitly selected task through the Threadforge task-resume MCP tool and report its objective and advisory status.',
-      '--available-tools=threadforge-threadforge_task_resume_context', '--allow-all-tools', '--no-auto-update', '--silent',
+      '--prompt', expectedPrompt,
+      `--available-tools=threadforge-${toolName}`, '--allow-all-tools', '--no-auto-update', '--silent',
     ], { cwd: projectRoot, env: environment, timeout: 90_000 });
-    if (fixtureError) throw new Error(`Copilot task-resume fixture failed: ${fixtureError}; provider_requests=${providerRequests}`);
+    if (fixtureError) throw new Error(`Copilot MCP fixture failed: ${fixtureError}; provider_requests=${providerRequests}`);
     assert.equal(toolCallCount, 1,
-      `Copilot did not make exactly one Threadforge task-resume MCP call; provider_requests=${providerRequests}; provider_diagnostics=${JSON.stringify(providerDiagnostics)}`);
+      `Copilot did not make exactly one selected Threadforge MCP call; provider_requests=${providerRequests}; provider_diagnostics=${JSON.stringify(providerDiagnostics)}`);
     assert.equal(availableToolsRestricted, true,
-      `Copilot exposed tools beyond the selected read-only task-resume MCP tool; provider_diagnostics=${JSON.stringify(providerDiagnostics)}`);
-    assert.equal(toolResultObserved, true, 'Copilot did not receive the Threadforge task-resume MCP result');
-    assert.ok(output.includes('Requirements are not finalized'), 'Copilot final response omitted the scripted advisory status');
+      `Copilot exposed tools beyond the selected read-only MCP tool; provider_diagnostics=${JSON.stringify(providerDiagnostics)}`);
+    assert.equal(toolResultObserved, true, 'Copilot did not receive the selected Threadforge MCP result');
+    assert.ok(output.includes(memoryRead ? 'fresh local guidance' : 'Requirements are not finalized'),
+      'Copilot final response omitted the scripted advisory status');
+    if (memoryRead) {
+      return {
+        schema_version: 'threadforge.copilot-project-memory-mcp-smoke.v1',
+        status: 'verified', host_cli_version: version,
+        provider: 'deterministic-loopback-fixture', tool: toolName,
+        tool_call_count: toolCallCount, tool_result_observed: toolResultObserved,
+        memory_content_retained_in_report: false,
+        approved_memory_readback_verified: true, memory_freshness_verified: true,
+        advisory_result_markers_verified: true,
+        action_ready: false, guidance_only: true, execution_authorized: false,
+        available_tools_restricted_to_project_memory_read: availableToolsRestricted,
+        provider_requests: providerRequests, auxiliary_provider_requests: auxiliaryProviderRequests,
+        real_model_invocations: 0,
+      };
+    }
     return {
       schema_version: 'threadforge.copilot-task-resume-smoke.v1',
       status: 'verified', host_cli_version: version,
@@ -1443,6 +1478,7 @@ try {
   let commandCodeAgentMcpRead;
   let copilotProjectMcpDiscovery;
   let copilotTaskResumeSmoke;
+  let copilotProjectMemoryReadSmoke;
   let copilotPlanGateSmoke;
   if (process.env.THREADFORGE_OPENCODE_MEMORY_SMOKE_ONLY !== '1') {
   const commandCodeMcpConfig = {
@@ -1597,6 +1633,14 @@ try {
     console.log(JSON.stringify(opencodeMemoryInjectionReport));
     return;
   }
+  copilotProjectMemoryReadSmoke = await runCopilotTaskResumeHostSmoke(
+    copilotProjectMcpDiscovery?.status === 'verified' ? copilotProjectMcpDiscovery.version : undefined,
+    undefined,
+    {
+      projectID: 'cross-harness-smoke', kind: 'fact', id: 'claude-local-smoke-guidance',
+      guidance: claudeGuidance,
+    },
+  );
   const claudeTaskResumeMarkers = [
     openCodeTaskFixture.objective,
     'requirements are not finalized',
@@ -1666,7 +1710,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v39',
+    schema_version: 'threadforge.installed-skill-smoke.v40',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,
@@ -1730,6 +1774,7 @@ try {
     },
     github_copilot_project_mcp: copilotProjectMcpDiscovery,
     github_copilot_task_resume: copilotTaskResumeSmoke,
+    github_copilot_project_memory_read: copilotProjectMemoryReadSmoke,
     github_copilot_plan_gate: copilotPlanGateSmoke,
     diagnostics: {
       claude_code: { version: claudeVersion, doctor_completed: true },

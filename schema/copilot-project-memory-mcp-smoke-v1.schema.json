@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/copilot-project-memory-mcp-smoke-v1.schema.json",
+  "title": "Threadforge installed GitHub Copilot project-memory MCP smoke result",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "status", "real_model_invocations"],
+      "properties": {
+        "schema_version": { "const": "threadforge.copilot-project-memory-mcp-smoke.v1" },
+        "status": { "const": "not-installed" },
+        "real_model_invocations": { "const": 0 }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "status", "host_cli_version", "provider", "tool", "tool_call_count",
+        "tool_result_observed", "memory_content_retained_in_report", "approved_memory_readback_verified",
+        "memory_freshness_verified", "advisory_result_markers_verified", "action_ready", "guidance_only",
+        "execution_authorized", "available_tools_restricted_to_project_memory_read", "provider_requests",
+        "auxiliary_provider_requests", "real_model_invocations"
+      ],
+      "properties": {
+        "schema_version": { "const": "threadforge.copilot-project-memory-mcp-smoke.v1" },
+        "status": { "const": "verified" },
+        "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "provider": { "const": "deterministic-loopback-fixture" },
+        "tool": { "const": "threadforge_project_memory_read_v2" },
+        "tool_call_count": { "const": 1 },
+        "tool_result_observed": { "const": true },
+        "memory_content_retained_in_report": { "const": false },
+        "approved_memory_readback_verified": { "const": true },
+        "memory_freshness_verified": { "const": true },
+        "advisory_result_markers_verified": { "const": true },
+        "action_ready": { "const": false },
+        "guidance_only": { "const": true },
+        "execution_authorized": { "const": false },
+        "available_tools_restricted_to_project_memory_read": { "const": true },
+        "provider_requests": { "type": "integer", "minimum": 2, "maximum": 20 },
+        "auxiliary_provider_requests": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "real_model_invocations": { "const": 0 }
+      }
+    }
+  ]
+}

@@ -1997,6 +1997,15 @@ function usage(): string {
   ].join('\n');
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+let invokedScriptPath: string | undefined;
+if (process.argv[1]) {
+  try {
+    invokedScriptPath = await realpath(process.argv[1]);
+  } catch {
+    invokedScriptPath = path.resolve(process.argv[1]);
+  }
+}
+
+if (invokedScriptPath && import.meta.url === pathToFileURL(invokedScriptPath).href) {
   process.exitCode = await runAdapterCLI(process.argv.slice(2), process.stdout, process.stderr);
 }

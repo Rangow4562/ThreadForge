@@ -38,6 +38,36 @@ def test_mcp_resource_document_schema_requires_explicit_advisory_only_boundary()
             validator.validate(invalid)
 
 
+def test_cutover_attestation_result_cannot_claim_execution_or_authority():
+    schema = json.loads((SCHEMA_DIRECTORY / "cutover-evaluation-attestation-result-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.cutover-evaluation-attestation-result.v1",
+        "domain": "beacon",
+        "evaluator_id": "independent-evaluator",
+        "key_id": "a" * 64,
+        "attestation": {"path": "attestations/beacon.json", "sha256": "b" * 64},
+        "report_sha256": "c" * 64,
+        "trusted_signature_verified": True,
+        "evaluator_assertion_signed": True,
+        "benchmark_execution_performed": False,
+        "independent_execution_verified": False,
+        "execution_authorized": False,
+        "cutover_ready": False,
+        "human_review_required": True,
+    }
+    validator.validate(result)
+    for invalid in (
+        {**result, "benchmark_execution_performed": True},
+        {**result, "independent_execution_verified": True},
+        {**result, "execution_authorized": True},
+        {**result, "cutover_ready": True},
+        {**result, "attestation": {"path": "../outside.json", "sha256": "b" * 64}},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_project_skill_result_schema_accepts_windsurf_and_rejects_unknown_hosts_or_paths():
     schema = json.loads((SCHEMA_DIRECTORY / "project-skill-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

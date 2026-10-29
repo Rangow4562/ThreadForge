@@ -299,24 +299,9 @@ func AssessWithTrustAndMigrationReviewers(report Report, evidenceRoot string, tr
 		trials, trialErr := verifier.readEvaluationTrials(evaluation.OutcomeArtifact)
 		if trialErr != nil {
 			assessment.Blockers = append(assessment.Blockers, fmt.Sprintf("evaluation %s outcome artifact: %v", domain, trialErr))
-		} else if metrics, deriveErr := DeriveEvaluationMetrics(trials); deriveErr != nil {
-			assessment.Blockers = append(assessment.Blockers, fmt.Sprintf("evaluation %s outcome artifact: %v", domain, deriveErr))
+		} else if metrics, bindingErr := ValidateEvaluationTrialBinding(evaluation, trials); bindingErr != nil {
+			assessment.Blockers = append(assessment.Blockers, fmt.Sprintf("evaluation %s outcome artifact: %v", domain, bindingErr))
 		} else {
-			if trials.Domain != evaluation.Domain || trials.LegacyVersion != evaluation.LegacyVersion || trials.LegacyCommit != evaluation.LegacyCommit ||
-				trials.DatasetSHA256 != evaluation.DatasetSHA256 || trials.HeldOut != evaluation.HeldOut || metrics.TaskCount != evaluation.TaskCount ||
-				metrics.TaskSetSHA256 != evaluation.TaskSetSHA256 || metrics.BaselineRuns != evaluation.BaselineRuns || metrics.CandidateRuns != evaluation.CandidateRuns {
-				assessment.Blockers = append(assessment.Blockers, "evaluation "+domain+" report identity/counts do not match its outcome artifact")
-			}
-			if !closeMetric(metrics.BaselineRepeatFailureRate, evaluation.BaselineRepeatFailureRate) ||
-				!closeMetric(metrics.CandidateRepeatFailureRate, evaluation.CandidateRepeatFailureRate) ||
-				!closeMetric(metrics.NoiseFloor, evaluation.NoiseFloor) ||
-				!closeMetric(metrics.BaselineTaskSuccessRate, evaluation.BaselineTaskSuccessRate) ||
-				!closeMetric(metrics.CandidateTaskSuccessRate, evaluation.CandidateTaskSuccessRate) ||
-				!closeMetric(metrics.BaselineCostUSD, evaluation.BaselineCostUSD) ||
-				!closeMetric(metrics.CandidateCostUSD, evaluation.CandidateCostUSD) ||
-				metrics.BaselineTokens != evaluation.BaselineTokens || metrics.CandidateTokens != evaluation.CandidateTokens {
-				assessment.Blockers = append(assessment.Blockers, "evaluation "+domain+" declared metrics do not match its outcome artifact")
-			}
 			if trustErr == nil {
 				attestation, attestationErr := verifier.readEvaluationAttestation(evaluation.Attestation)
 				if attestationErr == nil {

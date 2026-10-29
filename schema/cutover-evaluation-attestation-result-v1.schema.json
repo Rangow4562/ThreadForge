@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/cutover-evaluation-attestation-result-v1.schema.json",
+  "title": "Cutover evaluator attestation creation result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "domain",
+    "evaluator_id",
+    "key_id",
+    "attestation",
+    "report_sha256",
+    "trusted_signature_verified",
+    "evaluator_assertion_signed",
+    "benchmark_execution_performed",
+    "independent_execution_verified",
+    "execution_authorized",
+    "cutover_ready",
+    "human_review_required"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.cutover-evaluation-attestation-result.v1" },
+    "domain": { "enum": ["beacon", "mancode", "anyjev", "rrsi-coding", "rrsi-agentic-workspace", "rrsi-engineering-design"] },
+    "evaluator_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "key_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "attestation": { "$ref": "#/$defs/evidence" },
+    "report_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "trusted_signature_verified": { "const": true },
+    "evaluator_assertion_signed": { "const": true },
+    "benchmark_execution_performed": { "const": false },
+    "independent_execution_verified": { "const": false },
+    "execution_authorized": { "const": false },
+    "cutover_ready": { "const": false },
+    "human_review_required": { "const": true }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$))(?!.*//)[^\\\\:]+$" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

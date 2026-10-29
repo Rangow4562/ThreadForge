@@ -345,8 +345,11 @@ func validSeverityName(value beacon.Severity) bool {
 }
 
 func runCutover(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "attest-evaluation" {
+		return runCutoverAttestation(args[1:], stdout, stderr)
+	}
 	if len(args) == 0 || args[0] != "assess" {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-trust.json>] [--repository-root <clean-checkout>]")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover <assess|attest-evaluation> ...")
 		return 2
 	}
 	fs := flag.NewFlagSet("cutover assess", flag.ContinueOnError)
@@ -467,33 +470,40 @@ func readBoundedJSONContent(name string, maxBytes int64) ([]byte, error) {
 }
 
 func verifyCandidateCheckout(root, expectedCommit string) error {
+	return verifyPinnedCleanCheckout(root, expectedCommit, "candidate")
+}
+
+func verifyPinnedCleanCheckout(root, expectedCommit, label string) error {
 	absolute, err := filepath.Abs(root)
 	if err != nil {
 		return err
 	}
 	info, err := os.Lstat(absolute)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return errors.New("repository-root must be an existing directory, not a symlink")
+		return fmt.Errorf("%s-root must be an existing directory, not a symlink", label)
 	}
 	rootOutput, err := exec.Command("git", "-C", absolute, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
-		return errors.New("repository-root must be a git worktree")
+		return fmt.Errorf("%s-root must be a git worktree", label)
 	}
 	gitRoot := strings.TrimSpace(string(rootOutput))
 	gitRootInfo, err := os.Stat(gitRoot)
 	if err != nil || !gitRootInfo.IsDir() || !os.SameFile(info, gitRootInfo) {
-		return errors.New("repository-root must name the checkout root, not a subdirectory")
+		return fmt.Errorf("%s-root must name the checkout root, not a subdirectory", label)
 	}
 	commitOutput, err := exec.Command("git", "-C", absolute, "rev-parse", "HEAD").Output()
 	if err != nil || strings.TrimSpace(string(commitOutput)) != expectedCommit {
-		return errors.New("cutover evidence candidate_commit does not match repository HEAD")
+		if label == "candidate" {
+			return errors.New("cutover evidence candidate_commit does not match repository HEAD")
+		}
+		return errors.New("selected evaluation legacy_commit does not match repository HEAD")
 	}
 	statusOutput, err := exec.Command("git", "-C", absolute, "status", "--porcelain", "--untracked-files=all").Output()
 	if err != nil {
-		return errors.New("could not verify repository status")
+		return fmt.Errorf("could not verify %s repository status", label)
 	}
 	if len(strings.TrimSpace(string(statusOutput))) != 0 {
-		return errors.New("cutover assessment requires a clean candidate checkout")
+		return fmt.Errorf("cutover assessment requires a clean %s checkout", label)
 	}
 	return nil
 }
@@ -4460,6 +4470,7 @@ Commands:
   session history --id <id> [--db <path>]
   handoff list|export|resume ...
   cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-trust.json>] [--repository-root <clean-checkout>]
+  cutover attest-evaluation --report <report.json> --domain <domain> --evidence-root <artifacts-dir> --candidate-root <clean-checkout> --legacy-root <clean-checkout> --identity <private-identity.json> --trusted-evaluators <external-trust.json> --attestation-path <relative-new-path.json> --output-report <new-report.json> --confirm-evaluator-assertion
   security scan [--traces <events.jsonl>] [--rules-dir <path>] [--rules-store <path>] [--min-severity info] [--session <id-substring>] [--fail-on <severity>]
   security reviews list [--limit 50] [--offset 0] [--db <path>]
   security reviews set --fingerprint <sha256> --expected-revision <n> --status <open|acknowledged|resolved|false_positive> [--actor <name>] [--db <path>]

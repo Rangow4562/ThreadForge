@@ -92,6 +92,47 @@ func (v *artifactVerifier) readEvaluationTrials(evidence Evidence) (EvaluationTr
 	return trials, nil
 }
 
+// ReadEvaluationTrialsArtifact loads a trials artifact through the same bounded,
+// path-safe digest verifier used by cutover assessment.
+func ReadEvaluationTrialsArtifact(evidenceRoot string, evidence Evidence) (EvaluationTrials, error) {
+	var trials EvaluationTrials
+	root, err := checkedEvidenceRoot(evidenceRoot)
+	if err != nil {
+		return trials, err
+	}
+	verifier := &artifactVerifier{root: root, verified: make(map[string]string)}
+	return verifier.readEvaluationTrials(evidence)
+}
+
+// ValidateEvaluationTrialBinding recomputes all trial metrics and checks that
+// the selected report evaluation names the same held-out artifact and metrics.
+// It validates artifact/report consistency only; it does not verify that any
+// benchmark was actually executed.
+func ValidateEvaluationTrialBinding(evaluation Evaluation, trials EvaluationTrials) (EvaluationMetrics, error) {
+	metrics, err := DeriveEvaluationMetrics(trials)
+	if err != nil {
+		return metrics, err
+	}
+	if trials.Domain != evaluation.Domain || trials.LegacyVersion != evaluation.LegacyVersion ||
+		trials.LegacyCommit != evaluation.LegacyCommit || trials.DatasetSHA256 != evaluation.DatasetSHA256 ||
+		trials.HeldOut != evaluation.HeldOut || !evaluation.HeldOut ||
+		metrics.TaskCount != evaluation.TaskCount || metrics.TaskSetSHA256 != evaluation.TaskSetSHA256 ||
+		metrics.BaselineRuns != evaluation.BaselineRuns || metrics.CandidateRuns != evaluation.CandidateRuns {
+		return EvaluationMetrics{}, errors.New("evaluation identity or run counts do not match its outcome artifact")
+	}
+	if !closeMetric(metrics.BaselineRepeatFailureRate, evaluation.BaselineRepeatFailureRate) ||
+		!closeMetric(metrics.CandidateRepeatFailureRate, evaluation.CandidateRepeatFailureRate) ||
+		!closeMetric(metrics.NoiseFloor, evaluation.NoiseFloor) ||
+		!closeMetric(metrics.BaselineTaskSuccessRate, evaluation.BaselineTaskSuccessRate) ||
+		!closeMetric(metrics.CandidateTaskSuccessRate, evaluation.CandidateTaskSuccessRate) ||
+		!closeMetric(metrics.BaselineCostUSD, evaluation.BaselineCostUSD) ||
+		!closeMetric(metrics.CandidateCostUSD, evaluation.CandidateCostUSD) ||
+		metrics.BaselineTokens != evaluation.BaselineTokens || metrics.CandidateTokens != evaluation.CandidateTokens {
+		return EvaluationMetrics{}, errors.New("declared metrics do not match its outcome artifact")
+	}
+	return metrics, nil
+}
+
 // DeriveEvaluationMetrics validates the task/run artifact and derives every
 // acceptance metric. Baseline/candidate runs are ordered; a repeated failure is
 // the same task and failure-signature digest recurring after its first occurrence

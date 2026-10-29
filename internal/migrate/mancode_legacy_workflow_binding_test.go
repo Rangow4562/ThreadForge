@@ -356,6 +356,138 @@ func TestMancodeLegacyWorkflowReferencedTextFormatsImportAsReviewOnlyDocuments(t
 	}
 }
 
+func TestMancodeLegacyWorkflowReferenceImportsExtensionlessTextAndRejectsUnsafeTargets(t *testing.T) {
+	tests := []struct {
+		name       string
+		reference  string
+		content    string
+		wantImport bool
+		wantSecret bool
+	}{
+		{"extensionless", "reports/evidence", "Historical review-only text.\n", true, false},
+		{"unlisted suffix", "reports/evidence.workflow-output", "Historical generated evidence.\n", true, false},
+		{"unrecognized JSON content", "reports/evidence.json", "Not valid JSON, but still bounded UTF-8 evidence.\n", true, false},
+		{"binary suffix", "reports/evidence.exe", "This is not a text artifact.\n", false, false},
+		{"credential content", "reports/evidence.workflow-output", "token=opaque-secret-value\n", false, true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root, dataRoot := t.TempDir(), t.TempDir()
+			taskID := writeMancodeLegacyBindingFixture(t, root, map[string]func(map[string]any){
+				"artifact_reference": func(ledger map[string]any) {
+					checks := ledger["checks"].([]any)
+					automated := checks[0].(map[string]any)["automated"].(map[string]any)
+					automated["evidenceFile"] = test.reference
+				},
+			})
+			relative := filepath.ToSlash(filepath.Join(".mancode", "workflows", taskID, filepath.FromSlash(test.reference)))
+			writeMancodeFixture(t, root, relative, []byte(test.content))
+
+			manifest, err := Inspect(Mancode, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(manifest.MancodeLegacyWorkflowChecks) != 1 {
+				t.Fatalf("expected one workflow binding check, got %#v", manifest.MancodeLegacyWorkflowChecks)
+			}
+			check := manifest.MancodeLegacyWorkflowChecks[0]
+			if check.ArtifactReferences == nil {
+				t.Fatal("referenced-artifact coverage is missing")
+			}
+			bound, imported := isMancodeLegacyWorkflowArtifactTarget(relative, root, manifest.MancodeLegacyWorkflowChecks)
+			if test.wantImport && (!bound || !imported) {
+				t.Fatalf("referenced source path did not bind to its workflow target: bound=%t imported=%t check=%#v",
+					bound, imported, check.ArtifactReferences)
+			}
+			var inspectedFiles []scannedFile
+			if _, err := inspect(Mancode, root, &inspectedFiles); err != nil {
+				t.Fatal(err)
+			}
+			for _, scanned := range inspectedFiles {
+				if scanned.entry.Path == relative && test.wantImport &&
+					(len(scanned.records) != 1 || scanned.records[0].Type != "workflow_document") {
+					t.Fatalf("inspect sink lacks the referenced workflow document: %#v", scanned)
+				}
+			}
+			var artifact *FileEntry
+			for index := range manifest.Files {
+				if manifest.Files[index].Path == relative {
+					artifact = &manifest.Files[index]
+					break
+				}
+			}
+			if artifact == nil {
+				t.Fatal("referenced source file is missing from the migration inventory")
+			}
+			if test.wantImport {
+				if artifact.ImportedCount != 1 || artifact.RecordCount != 1 || artifact.Status != "ready" {
+					t.Fatalf("bounded referenced text did not import: %#v", artifact)
+				}
+			} else if artifact.ImportedCount != 0 {
+				t.Fatalf("unsafe/credential-bearing reference was imported: %#v", artifact)
+			}
+			if test.wantSecret && artifact.ExcludedCount != 1 {
+				t.Fatalf("credential-bearing reference was not excluded: %#v", artifact)
+			}
+			snapshot, err := CreateSnapshot(Mancode, root, dataRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coverage, err := BuildFormatCoverage(snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if coverage.UnclassifiedFiles != 0 {
+				t.Fatalf("bound artifact path became unclassified: %#v", coverage)
+			}
+			var documentFormat *migrationcoverage.Format
+			for index := range coverage.Formats {
+				if coverage.Formats[index].ID == "mancode.workflow-document" {
+					documentFormat = &coverage.Formats[index]
+					break
+				}
+			}
+			if documentFormat == nil || documentFormat.Files < 1 {
+				t.Fatalf("referenced artifact was not assigned to the workflow-document family: %#v", coverage.Formats)
+			}
+			if !test.wantImport {
+				return
+			}
+
+			manifestPath := filepath.Join(dataRoot, "migrations", "snapshots", string(Mancode), snapshot.SourceFingerprint, "manifest.json")
+			records, err := ReadSnapshotRecords(manifestPath, snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, record := range records {
+				if record.SourcePath != relative {
+					continue
+				}
+				var payload map[string]any
+				if err := json.Unmarshal(record.Payload, &payload); err != nil || record.Type != "workflow_document" ||
+					record.Scope != "local_pending_review" || payload["content"] != test.content {
+					t.Fatalf("extension-independent source was not preserved as inert review text: record=%#v payload=%#v err=%v", record, payload, err)
+				}
+				return
+			}
+			t.Fatalf("snapshot readback omitted referenced source document %q", relative)
+		})
+	}
+}
+
+func TestMancodeUnreferencedUnlistedWorkflowFileIsNotScanned(t *testing.T) {
+	root := t.TempDir()
+	relative := filepath.ToSlash(filepath.Join(".mancode", "workflows", "unreferenced-workflow", "reports", "evidence.payload"))
+	writeMancodeFixture(t, root, relative, []byte("must not be captured without an explicit ledger reference"))
+	manifest, err := Inspect(Mancode, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Files) != 0 || manifest.Summary.FilesScanned != 0 {
+		t.Fatalf("unreferenced uncommon-suffix file expanded workflow scan scope: files=%#v summary=%#v", manifest.Files, manifest.Summary)
+	}
+}
+
 func TestMancodeLegacyWorkflowBindingSurfacesSiblingMismatches(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -462,12 +462,25 @@ func CreateSnapshotWithOptions(product Product, sourceRoot, dataRoot string, opt
 		if entry.ImportedCount == 0 || entry.Status == "unsupported" {
 			continue
 		}
+		inspectedFile := inspectedByPath[entry.Path]
+		boundWorkflowDocument := product == Mancode && len(inspectedFile.records) == 1 &&
+			inspectedFile.records[0].Type == "workflow_document"
+		if boundWorkflowDocument {
+			found, imported := isMancodeLegacyWorkflowArtifactTarget(entry.Path, manifest.SourceRoot, manifest.MancodeLegacyWorkflowChecks)
+			boundWorkflowDocument = found && imported
+		}
 		fullPath := filepath.Join(manifest.SourceRoot, filepath.FromSlash(entry.Path))
 		var data []byte
 		if entry.Virtual {
 			data = inspectedByPath[entry.Path].sourceData
 			if int64(len(data)) != entry.SourceBytes || digest(data) != entry.SourceSHA256 {
 				return Manifest{}, fmt.Errorf("virtual migration source changed during snapshot: %s", entry.Path)
+			}
+		} else if boundWorkflowDocument {
+			var current FileEntry
+			data, current, err = readSafeMancodeReferencedText(manifest.SourceRoot, entry.Path, maxFileBytes)
+			if err == nil && (current.SourceBytes != entry.SourceBytes || current.SourceSHA256 != entry.SourceSHA256) {
+				err = errors.New("source changed during snapshot")
 			}
 		} else if product == RRSI && isRRSITrialMetadataPath(entry.Path) {
 			if entry.SourceBytes > maxRRSITrialFileBytes || entry.SourceBytes > maxRRSITrialReadBytes-rrsiTrialReadBytes {
@@ -488,8 +501,13 @@ func CreateSnapshotWithOptions(product Product, sourceRoot, dataRoot string, opt
 		if digest(data) != entry.SourceSHA256 {
 			return Manifest{}, fmt.Errorf("source changed during snapshot: %s; re-run inspect", entry.Path)
 		}
-		parsed, _, err := scanFileWithMancodeGitRef(product, manifest.SourceRoot, entry.Path, fullPath, data,
-			maxTotalBytes, maxRRSITrialReadBytes-rrsiTrialReadBytes, manifest.MancodeGitRef, gitRefWorkspaceID)
+		var parsed scannedFile
+		if boundWorkflowDocument {
+			parsed = scanMancodeLegacyReferencedWorkflowDocument(entry.Path, data)
+		} else {
+			parsed, _, err = scanFileWithMancodeGitRef(product, manifest.SourceRoot, entry.Path, fullPath, data,
+				maxTotalBytes, maxRRSITrialReadBytes-rrsiTrialReadBytes, manifest.MancodeGitRef, gitRefWorkspaceID)
+		}
 		if err != nil {
 			return Manifest{}, fmt.Errorf("re-read migration source %s: %w", entry.Path, err)
 		}
@@ -697,7 +715,7 @@ func ReadSnapshotRecords(manifestPath string, manifest Manifest) ([]Record, erro
 			if err := json.Unmarshal(line, &record); err != nil {
 				return nil, fmt.Errorf("decode snapshot record: %w", err)
 			}
-			if err := validateSnapshotRecord(record, file, manifest.Product, manifest.SourceRoot); err != nil {
+			if err := validateSnapshotRecord(record, file, manifest.Product, manifest.SourceRoot, manifest.MancodeLegacyWorkflowChecks); err != nil {
 				return nil, fmt.Errorf("snapshot record failed integrity/privacy validation: %s", record.Key)
 			}
 			if manifest.Product == Mancode && record.Type == "mancode_workflow_aggregate" {
@@ -737,7 +755,8 @@ func ReadSnapshotRecords(manifestPath string, manifest Manifest) ([]Record, erro
 	return records, nil
 }
 
-func validateSnapshotRecord(record Record, file FileEntry, product Product, sourceRoot string) error {
+func validateSnapshotRecord(record Record, file FileEntry, product Product, sourceRoot string,
+	workflowChecks ...[]migrationcoverage.MancodeLegacyWorkflowCheck) error {
 	aliasedRRSIRecord := product == RRSI && (record.Type == "rrsi_trial_artifact" || record.Type == "rrsi_trajectory_summary")
 	aliasedMancodeCoordinationRecord := product == Mancode && isMancodeCoordinationRecordType(record.Type)
 	aliasedMancodeLegacyWorkflowRecord := product == Mancode && record.Type == "mancode_legacy_workflow_summary"
@@ -769,6 +788,11 @@ func validateSnapshotRecord(record Record, file FileEntry, product Product, sour
 	if aliasedMancodeLegacyPlanRecord {
 		wantLegacyPlanAlias = mancodeLegacyPlanSourceAlias(file.Path)
 	}
+	referencedWorkflowDocument := false
+	if product == Mancode && record.Type == "workflow_document" && len(workflowChecks) > 0 {
+		found, imported := isMancodeLegacyWorkflowArtifactTarget(file.Path, sourceRoot, workflowChecks[0])
+		referencedWorkflowDocument = found && imported
+	}
 	if !safeRelative(record.SourcePath) ||
 		(!aliasedRRSIRecord && !aliasedMancodeCoordinationRecord && !aliasedMancodeLegacyWorkflowRecord && !aliasedMancodeLegacyRequirementsRecord && !aliasedMancodeLegacyReviewRecord && !aliasedMancodeLegacyVerificationRecord && !aliasedMancodeLegacyPlanRecord && record.SourcePath != file.Path) ||
 		(aliasedMancodeCoordinationRecord && record.SourcePath != wantMancodeAlias) ||
@@ -778,7 +802,8 @@ func validateSnapshotRecord(record Record, file FileEntry, product Product, sour
 		(aliasedMancodeLegacyVerificationRecord && record.SourcePath != wantLegacyVerificationAlias) ||
 		(aliasedMancodeLegacyPlanRecord && record.SourcePath != wantLegacyPlanAlias) ||
 		!json.Valid(record.Payload) || digest(record.Payload) != record.ContentSHA256 || privacy.ContainsCredential(record.Payload) ||
-		record.Scope != "local_pending_review" || !knownRecordType(record.Type) || !recordTypeMatchesSource(product, file.Path, record.Type, sourceRoot) {
+		record.Scope != "local_pending_review" || !knownRecordType(record.Type) ||
+		(!recordTypeMatchesSource(product, file.Path, record.Type, sourceRoot) && !referencedWorkflowDocument) {
 		return errors.New("record fields are not valid for this migration")
 	}
 	prefix := file.Path + "#"

@@ -1,16 +1,21 @@
 package migrate
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/threadforge-ai/threadforge/pkg/migrationcoverage"
+	"github.com/threadforge-ai/threadforge/pkg/privacy"
 )
 
 const maxMancodeLegacyArtifactReferences = 100000
@@ -121,6 +126,19 @@ func reconcileMancodeLegacyArtifactReferencesWithHasher(sourceRoot string, refer
 			issues["referenced_artifact_ambiguous"] = true
 			continue
 		}
+		if len(indexes) == 1 {
+			before := (*scanned)[indexes[0]]
+			if before.entry.RecordCount == 0 && before.entry.ImportedCount == 0 && before.entry.ExcludedCount == 0 &&
+				before.entry.RejectedCount == 0 && before.entry.Status != "credential_path_excluded" &&
+				before.entry.SourceBytes <= maxFileBytes {
+				document, err := readMancodeLegacyReferencedWorkflowDocument(sourceRoot, before.entry)
+				if err != nil {
+					return nil, nil, err
+				}
+				replaceScannedFileSummary(summary, before, document)
+				(*scanned)[indexes[0]] = document
+			}
+		}
 		if len(indexes) == 0 {
 			if isMancodeLegacyArtifactIgnoredPath(target, sourceRoot) {
 				issues["referenced_artifact_unavailable"] = true
@@ -128,6 +146,7 @@ func reconcileMancodeLegacyArtifactReferencesWithHasher(sourceRoot string, refer
 			}
 			sensitive := sensitivePath(target)
 			var entry FileEntry
+			var discovered scannedFile
 			var err error
 			if sensitive {
 				entry, err = statSafeMancodeWorkflowSourceFile(sourceRoot, target, maxTotalBytes)
@@ -152,11 +171,35 @@ func reconcileMancodeLegacyArtifactReferencesWithHasher(sourceRoot string, refer
 				entry.Issue = "credential-bearing path excluded"
 				summary.FilesCredentialBlocked++
 			} else {
-				entry.Status = "unsupported"
-				entry.Issue = "referenced artifact requires a source-specific converter"
-				summary.FilesUnsupported++
+				if entry.SourceBytes <= maxFileBytes {
+					discovered, err = readMancodeLegacyReferencedWorkflowDocument(sourceRoot, entry)
+					if err != nil {
+						return nil, nil, err
+					}
+				} else {
+					discovered.entry = entry
+					discovered.entry.Status = "unsupported"
+					discovered.entry.Issue = "referenced text artifact exceeds the 32 MiB limit"
+				}
+				if discovered.entry.ImportedCount > 0 {
+					summary.FilesReady++
+				}
+				if discovered.entry.Status == "unsupported" {
+					summary.FilesUnsupported++
+				}
+				summary.RecordsFound += discovered.entry.RecordCount
+				summary.RecordsImported += discovered.entry.ImportedCount
+				summary.RecordsCredentialBlocked += discovered.entry.ExcludedCount
+				summary.RecordsRejected += discovered.entry.RejectedCount
+				if summary.RecordsFound > maxRecords {
+					return nil, nil, errors.New("Mancode migration source exceeds 100000-record limit")
+				}
 			}
-			*scanned = append(*scanned, scannedFile{entry: entry})
+			if sensitive {
+				*scanned = append(*scanned, scannedFile{entry: entry})
+			} else {
+				*scanned = append(*scanned, discovered)
+			}
 			indexes = []int{len(*scanned) - 1}
 			indexesByPath[key] = indexes
 		}
@@ -186,6 +229,150 @@ func reconcileMancodeLegacyArtifactReferencesWithHasher(sourceRoot string, refer
 func mancodeLegacyArtifactPathHash(relative, sourceRoot string) string {
 	canonical := strings.ToLower(strings.Trim(mancodePath(relative, sourceRoot), "/"))
 	return digest([]byte("threadforge/mancode/legacy-workflow-artifact-path/v1\x00" + canonical))
+}
+
+func isMancodeLegacyWorkflowArtifactTarget(relative, sourceRoot string,
+	checks []migrationcoverage.MancodeLegacyWorkflowCheck) (found, imported bool) {
+	standard := filepath.ToSlash(strings.TrimPrefix(relative, "./"))
+	if strings.EqualFold(filepath.Base(filepath.Clean(sourceRoot)), ".mancode") &&
+		!strings.HasPrefix(strings.ToLower(standard), ".mancode/") {
+		standard = filepath.ToSlash(filepath.Join(".mancode", standard))
+	}
+	parts := strings.Split(strings.Trim(standard, "/"), "/")
+	if len(parts) < 4 || !strings.EqualFold(parts[0], ".mancode") ||
+		!strings.EqualFold(parts[1], "workflows") || !mancodeLegacyWorkflowTaskID.MatchString(parts[2]) {
+		return false, false
+	}
+	directory := strings.ToLower(strings.Join(parts[:3], "/"))
+	workflowID := mancodeLegacyWorkflowPairID(directory)
+	pathHash := mancodeLegacyArtifactPathHash(relative, sourceRoot)
+	for _, check := range checks {
+		if check.WorkflowIDSHA256 != workflowID || check.ArtifactReferences == nil {
+			continue
+		}
+		for _, target := range check.ArtifactReferences.Targets {
+			if target.PathSHA256 == pathHash {
+				return true, target.Imported
+			}
+		}
+	}
+	return false, false
+}
+
+func isMancodeLegacyReferencedText(relative string, data []byte) bool {
+	switch strings.ToLower(filepath.Ext(relative)) {
+	case ".7z", ".avi", ".bin", ".bmp", ".class", ".dll", ".doc", ".docx", ".dylib", ".exe",
+		".gif", ".gz", ".ico", ".jar", ".jpeg", ".jpg", ".mov", ".mp3", ".mp4", ".o", ".pdf",
+		".png", ".ppt", ".pptx", ".rar", ".so", ".sqlite", ".sqlite3", ".tar", ".wav", ".webp",
+		".xls", ".xlsx", ".zip":
+		return false
+	}
+	if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
+		return false
+	}
+	for _, value := range string(data) {
+		if unicode.IsControl(value) && value != '\n' && value != '\r' && value != '\t' && value != '\f' {
+			return false
+		}
+	}
+	return true
+}
+
+func scanMancodeLegacyReferencedWorkflowDocument(relative string, data []byte) scannedFile {
+	file := scannedFile{entry: FileEntry{
+		Path: relative, SourceSHA256: digest(data), SourceBytes: int64(len(data)), Status: "ready",
+	}}
+	if !isMancodeLegacyReferencedText(relative, data) {
+		file.entry.Status = "unsupported"
+		file.entry.Issue = "referenced artifact is not supported UTF-8 text"
+		return file
+	}
+	payload, _ := json.Marshal(map[string]string{"content": string(data)})
+	file.entry.RecordCount = 1
+	if privacy.ContainsCredential(payload) {
+		file.entry.ExcludedCount = 1
+	} else {
+		file.records = append(file.records, Record{
+			Key: relative + "#000001", Type: "workflow_document", SourcePath: relative,
+			ContentSHA256: digest(payload), Scope: "local_pending_review", Payload: payload,
+		})
+	}
+	finalizeScannedFile(&file)
+	return file
+}
+
+func readMancodeLegacyReferencedWorkflowDocument(sourceRoot string, expected FileEntry) (scannedFile, error) {
+	data, observed, err := readSafeMancodeReferencedText(sourceRoot, expected.Path, maxFileBytes)
+	if err != nil || observed.SourceBytes != expected.SourceBytes || observed.SourceSHA256 != expected.SourceSHA256 {
+		return scannedFile{}, errors.New("Mancode referenced artifact changed during bounded text read")
+	}
+	return scanMancodeLegacyReferencedWorkflowDocument(expected.Path, data), nil
+}
+
+func replaceScannedFileSummary(summary *Summary, before, after scannedFile) {
+	if before.entry.ImportedCount > 0 {
+		summary.FilesReady--
+	}
+	if before.entry.Status == "unsupported" {
+		summary.FilesUnsupported--
+	}
+	summary.RecordsFound += after.entry.RecordCount - before.entry.RecordCount
+	summary.RecordsImported += after.entry.ImportedCount - before.entry.ImportedCount
+	summary.RecordsCredentialBlocked += after.entry.ExcludedCount - before.entry.ExcludedCount
+	summary.RecordsRejected += after.entry.RejectedCount - before.entry.RejectedCount
+	if after.entry.ImportedCount > 0 {
+		summary.FilesReady++
+	}
+	if after.entry.Status == "unsupported" {
+		summary.FilesUnsupported++
+	}
+}
+
+func readSafeMancodeReferencedText(sourceRoot, relative string, maxBytes int64) ([]byte, FileEntry, error) {
+	if !safeRelative(relative) || maxBytes < 0 {
+		return nil, FileEntry{}, errors.New("unsafe Mancode referenced text path")
+	}
+	root, err := filepath.Abs(sourceRoot)
+	if err != nil {
+		return nil, FileEntry{}, err
+	}
+	current := root
+	parts := strings.Split(filepath.FromSlash(relative), string(filepath.Separator))
+	var before os.FileInfo
+	for index, part := range parts {
+		current = filepath.Join(current, part)
+		before, err = os.Lstat(current)
+		if err != nil {
+			return nil, FileEntry{}, err
+		}
+		if before.Mode()&os.ModeSymlink != 0 || index < len(parts)-1 && !before.IsDir() {
+			return nil, FileEntry{}, errors.New("Mancode referenced text path has an unsafe parent")
+		}
+	}
+	if before == nil || !before.Mode().IsRegular() || before.Size() < 0 || before.Size() > maxBytes {
+		return nil, FileEntry{}, errors.New("Mancode referenced text is not a bounded regular file")
+	}
+	file, err := os.Open(current)
+	if err != nil {
+		return nil, FileEntry{}, err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(before, opened) || opened.Size() != before.Size() {
+		return nil, FileEntry{}, errors.New("Mancode referenced text changed while opening")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil || int64(len(data)) != opened.Size() || int64(len(data)) > maxBytes {
+		return nil, FileEntry{}, errors.New("Mancode referenced text changed while reading")
+	}
+	after, err := os.Lstat(current)
+	final, statErr := file.Stat()
+	if err != nil || statErr != nil || after.Mode()&os.ModeSymlink != 0 || !os.SameFile(opened, after) ||
+		!os.SameFile(opened, final) || after.Size() != opened.Size() || final.Size() != opened.Size() ||
+		!after.ModTime().Equal(opened.ModTime()) || !final.ModTime().Equal(opened.ModTime()) {
+		return nil, FileEntry{}, errors.New("Mancode referenced text changed after reading")
+	}
+	return data, FileEntry{Path: relative, SourceSHA256: digest(data), SourceBytes: int64(len(data))}, nil
 }
 
 func credentialPathCommitment(relative string) string {

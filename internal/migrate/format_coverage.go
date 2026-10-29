@@ -30,6 +30,10 @@ func BuildFormatCoverage(manifest Manifest) (migrationcoverage.Report, error) {
 	if err := VerifyManifest(manifest); err != nil {
 		return migrationcoverage.Report{}, fmt.Errorf("verify migration manifest: %w", err)
 	}
+	legacyWorkflowChecks := manifest.MancodeLegacyWorkflowChecks
+	if manifest.Product == Mancode && len(legacyWorkflowChecks) == 0 {
+		legacyWorkflowChecks = legacyMancodeWorkflowBindingChecks(manifest.Files, manifest.SourceRoot)
+	}
 	formats := make(map[string]*migrationcoverage.Format)
 	for _, id := range migrationcoverage.RequiredFormats(string(manifest.Product)) {
 		formats[id] = &migrationcoverage.Format{ID: id}
@@ -57,6 +61,11 @@ func BuildFormatCoverage(manifest Manifest) (migrationcoverage.Report, error) {
 		}
 		allCommitments = append(allCommitments, commitment)
 		id := migrationFormatID(manifest.Product, manifest.SourceRoot, file.Path)
+		if manifest.Product == Mancode {
+			if referenced, _ := isMancodeLegacyWorkflowArtifactTarget(file.Path, manifest.SourceRoot, legacyWorkflowChecks); referenced {
+				id = "mancode.workflow-document"
+			}
+		}
 		if id == "" {
 			id = migrationcoverage.UnclassifiedFormat
 			if formats[id] == nil {
@@ -112,10 +121,6 @@ func BuildFormatCoverage(manifest Manifest) (migrationcoverage.Report, error) {
 		crossFileChecks = legacyMancodePrivacyBindingChecks(manifest.Files)
 	}
 	report.CrossFileChecks = append([]migrationcoverage.CrossFileCheck(nil), crossFileChecks...)
-	legacyWorkflowChecks := manifest.MancodeLegacyWorkflowChecks
-	if manifest.Product == Mancode && len(legacyWorkflowChecks) == 0 {
-		legacyWorkflowChecks = legacyMancodeWorkflowBindingChecks(manifest.Files, manifest.SourceRoot)
-	}
 	report.MancodeLegacyWorkflowChecks = append([]migrationcoverage.MancodeLegacyWorkflowCheck(nil), legacyWorkflowChecks...)
 	teamPolicyChecks := manifest.MancodeTeamPolicyChecks
 	if manifest.Product == Mancode && len(teamPolicyChecks) == 0 {

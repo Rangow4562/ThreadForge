@@ -3,7 +3,6 @@
 package migrationreview
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -17,6 +16,8 @@ import (
 	"regexp"
 	"sort"
 	"time"
+
+	"github.com/threadforge-ai/threadforge/pkg/strictjson"
 )
 
 const (
@@ -160,14 +161,8 @@ func ReadTrustStore(filename string) (TrustStore, string, error) {
 		finalInfo.Size() != info.Size() || !finalInfo.ModTime().Equal(info.ModTime()) {
 		return trust, "", errors.New("Mancode plan-review trust file changed or could not be read consistently")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(content))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&trust); err != nil {
+	if err := strictjson.Decode(content, &trust); err != nil {
 		return trust, "", fmt.Errorf("decode Mancode plan-review trust file: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return trust, "", errors.New("Mancode plan-review trust file contains trailing data")
 	}
 	if err := ValidateTrustStore(trust); err != nil {
 		return trust, "", err

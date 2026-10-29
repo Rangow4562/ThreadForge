@@ -4,10 +4,27 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestReadTrustStoreRejectsDuplicateJSONKeys(t *testing.T) {
+	for _, input := range []string{
+		`{"schema_version":"one","schema_version":"two"}`,
+		`{"schema_version":"one","keys":[{"key_id":"first","key_id":"second"}]}`,
+	} {
+		path := filepath.Join(t.TempDir(), "reviewers.json")
+		if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := ReadTrustStore(path); err == nil || !strings.Contains(err.Error(), "duplicate object key") {
+			t.Fatalf("duplicate reviewer trust key was not rejected for %s: %v", input, err)
+		}
+	}
+}
 
 func TestPlanReviewAttestationBindsSnapshotWorkflowMetadataPlanAndVersion(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)

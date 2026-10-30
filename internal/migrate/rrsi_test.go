@@ -377,6 +377,11 @@ func TestRRSITrialImportSanitizesThreeDomainsAndJoinsEngineeringPair(t *testing.
 				if payload["step_count"] != float64(2) || payload["tool_call_count"] != float64(1) || payload["observation_result_count"] != float64(1) {
 					t.Fatalf("coding trajectory structure counts changed: %#v", payload)
 				}
+				hashes, ok := rrsiArray(payload["tool_call_name_hashes"])
+				wantHash, hashErr := rrsiTrajectoryToolNameHash(map[string]any{"name": "private-tool"})
+				if !ok || len(hashes) != 1 || hashErr != nil || hashes[0] != wantHash || payload["tool_sequence_truncated"] != false {
+					t.Fatalf("coding trajectory tool sequence was not hashed and retained: %#v", payload)
+				}
 			case "workspace", "eng":
 				if payload["message_count"] != float64(4) || payload["system_message_count"] != float64(1) ||
 					payload["user_message_count"] != float64(1) || payload["assistant_message_count"] != float64(1) ||
@@ -495,15 +500,102 @@ func TestRRSITrajectoryToolSequenceIsOrderedHashedAndBounded(t *testing.T) {
 	}
 }
 
+func TestRRSICodingTrajectoryUsesProducerFunctionNameAndPreservesOptionalCompatibility(t *testing.T) {
+	source := rrsiTrialSource{
+		domain: "coding", kind: "coding_trajectory",
+		tail: []string{"jobs", "base", "task__trial-1", "agent", "trajectory.json"},
+	}
+	sourcePath := "runs/coding/jobs/base/task__trial-1/agent/trajectory.json"
+	sourceDigest := digest([]byte("coding-trajectory-source"))
+	calls := []any{
+		map[string]any{"tool_call_id": "call-1", "function_name": "bash_command", "arguments": map[string]any{"keystrokes": "private-command"}},
+		map[string]any{"tool_call_id": "call-2", "function_name": "mark_task_complete", "arguments": map[string]any{}},
+	}
+	payloadBytes, err := normalizeRRSITrajectory(source, map[string]any{
+		"steps": []any{map[string]any{
+			"source": "agent", "tool_calls": calls,
+			"observation": map[string]any{"results": []any{map[string]any{"content": "private-terminal-output"}}},
+		}},
+	}, sourceDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		t.Fatal(err)
+	}
+	hashes, ok := rrsiArray(payload["tool_call_name_hashes"])
+	wantCommand, _ := rrsiTrajectoryToolNameHash(map[string]any{"function_name": "bash_command"})
+	wantComplete, _ := rrsiTrajectoryToolNameHash(map[string]any{"function_name": "mark_task_complete"})
+	if !ok || len(hashes) != 2 || hashes[0] != wantCommand || hashes[1] != wantComplete ||
+		payload["tool_call_count"] != float64(2) || payload["tool_sequence_truncated"] != false {
+		t.Fatalf("coding tool sequence was not ordered, hashed, and reconciled: %#v", payload)
+	}
+	for _, forbidden := range []string{"bash_command", "mark_task_complete", "private-command", "private-terminal-output", "call-1"} {
+		if strings.Contains(string(payloadBytes), forbidden) {
+			t.Fatalf("coding trajectory retained raw tool or trace content %q: %s", forbidden, payloadBytes)
+		}
+	}
+	jobHash, taskHash, trialHash := rrsiTrialHashes(source, "task")
+	entry := FileEntry{Path: sourcePath, SourceSHA256: sourceDigest}
+	record := Record{
+		Type: "rrsi_trajectory_summary", Scope: "local_pending_review",
+		SourcePath: rrsiTrajectorySourceAlias("coding", jobHash, taskHash, trialHash), Payload: payloadBytes,
+	}
+	if err := validateRRSITrajectoryPayload(record, entry); err != nil {
+		t.Fatalf("valid coding tool sequence did not pass readback validation: %v", err)
+	}
+
+	legacyPayload := make(map[string]any, len(payload))
+	for key, value := range payload {
+		legacyPayload[key] = value
+	}
+	delete(legacyPayload, "tool_call_name_hashes")
+	delete(legacyPayload, "tool_sequence_truncated")
+	legacyBytes, err := json.Marshal(legacyPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Payload = legacyBytes
+	if err := validateRRSITrajectoryPayload(record, entry); err != nil {
+		t.Fatalf("older v1 coding trajectory without optional sequence was rejected: %v", err)
+	}
+
+	tooManyCalls := make([]any, maxRRSIToolSequenceHashes+1)
+	for index := range tooManyCalls {
+		tooManyCalls[index] = map[string]any{"function_name": "bash_command"}
+	}
+	truncatedBytes, err := normalizeRRSITrajectory(source, map[string]any{
+		"steps": []any{map[string]any{"source": "agent", "tool_calls": tooManyCalls}},
+	}, sourceDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var truncated map[string]any
+	if err := json.Unmarshal(truncatedBytes, &truncated); err != nil {
+		t.Fatal(err)
+	}
+	truncatedHashes, ok := rrsiArray(truncated["tool_call_name_hashes"])
+	if !ok || len(truncatedHashes) != maxRRSIToolSequenceHashes ||
+		truncated["tool_call_count"] != float64(maxRRSIToolSequenceHashes+1) || truncated["tool_sequence_truncated"] != true {
+		t.Fatalf("coding tool sequence truncation was not explicit and bounded: %#v", truncated)
+	}
+	record.Payload = truncatedBytes
+	if err := validateRRSITrajectoryPayload(record, entry); err != nil {
+		t.Fatalf("valid truncated coding tool sequence failed readback validation: %v", err)
+	}
+}
+
 func TestRRSITrajectoryRejectsCredentialLikeOrAmbiguousToolNames(t *testing.T) {
 	source := rrsiTrialSource{
 		domain: "workspace", kind: "workspace_trajectory",
 		tail: []string{"jobs", "job", "s0", "task", "trajectory.json"},
 	}
 	for name, call := range map[string]any{
-		"credential-like": map[string]any{"name": "token=private-value"},
-		"ambiguous":       map[string]any{"name": "read_file", "function": map[string]any{"name": "write_file"}},
-		"missing":         map[string]any{"type": "function", "function": map[string]any{"arguments": "{}"}},
+		"credential-like":                 map[string]any{"name": "token=private-value"},
+		"coding producer credential-like": map[string]any{"function_name": "token=private-value"},
+		"ambiguous":                       map[string]any{"name": "read_file", "function": map[string]any{"name": "write_file"}},
+		"missing":                         map[string]any{"type": "function", "function": map[string]any{"arguments": "{}"}},
 	} {
 		_, err := normalizeRRSITrajectory(source, map[string]any{
 			"messages": []any{map[string]any{"role": "assistant", "tool_calls": []any{call}}},

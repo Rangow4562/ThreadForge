@@ -414,22 +414,32 @@ func normalizeRRSITrajectory(source rrsiTrialSource, value any, sourceSHA string
 			return nil, errors.New("RRSI coding trajectory steps are invalid or exceed the limit")
 		}
 		toolCalls, observations := 0, 0
+		toolNameHashes := make([]string, 0, maxRRSIToolSequenceHashes)
 		for _, rawStep := range steps {
 			step, ok := rrsiObject(rawStep)
 			if !ok {
 				return nil, errors.New("RRSI coding trajectory step structure is invalid")
 			}
-			count, err := rrsiTrajectoryArrayCount(step, "tool_calls")
-			if err != nil || count > maxRecords-toolCalls {
+			calls, err := rrsiTrajectoryToolCalls(step)
+			if err != nil || len(calls) > maxRecords-toolCalls {
 				return nil, errors.New("RRSI coding trajectory tool-call count is invalid")
 			}
-			toolCalls += count
+			toolCalls += len(calls)
+			for _, rawCall := range calls {
+				nameHash, err := rrsiTrajectoryToolNameHash(rawCall)
+				if err != nil {
+					return nil, errors.New("RRSI coding trajectory tool-call identity is invalid")
+				}
+				if len(toolNameHashes) < maxRRSIToolSequenceHashes {
+					toolNameHashes = append(toolNameHashes, nameHash)
+				}
+			}
 			if rawObservation, exists := step["observation"]; exists && rawObservation != nil {
 				observation, ok := rrsiObject(rawObservation)
 				if !ok {
 					return nil, errors.New("RRSI coding trajectory observation structure is invalid")
 				}
-				count, err = rrsiTrajectoryArrayCount(observation, "results")
+				count, err := rrsiTrajectoryArrayCount(observation, "results")
 				if err != nil || count > maxRecords-observations {
 					return nil, errors.New("RRSI coding trajectory observation count is invalid")
 				}
@@ -439,6 +449,8 @@ func normalizeRRSITrajectory(source rrsiTrialSource, value any, sourceSHA string
 		payload["step_count"] = len(steps)
 		payload["tool_call_count"] = toolCalls
 		payload["observation_result_count"] = observations
+		payload["tool_call_name_hashes"] = toolNameHashes
+		payload["tool_sequence_truncated"] = toolCalls > len(toolNameHashes)
 	case "workspace_trajectory", "engineering_trajectory":
 		messages, ok := rrsiArray(root["messages"])
 		if !ok || len(messages) > maxRecords {
@@ -547,12 +559,14 @@ func rrsiTrajectoryToolNameHash(value any) (string, error) {
 	if !ok {
 		return "", errors.New("tool call must be an object")
 	}
-	var directName, functionName string
-	hasDirectName, hasFunctionName := false, false
-	if raw, exists := call["name"]; exists {
-		directName, hasDirectName = raw.(string)
-		if !hasDirectName {
-			return "", errors.New("direct tool name is not text")
+	names := make([]string, 0, 3)
+	for _, key := range []string{"name", "function_name"} {
+		if raw, exists := call[key]; exists {
+			name, ok := raw.(string)
+			if !ok {
+				return "", errors.New("tool name is not text")
+			}
+			names = append(names, name)
 		}
 	}
 	if rawFunction, exists := call["function"]; exists {
@@ -564,17 +578,20 @@ func rrsiTrajectoryToolNameHash(value any) (string, error) {
 		if !exists {
 			return "", errors.New("tool function name is missing")
 		}
-		functionName, hasFunctionName = rawName.(string)
-		if !hasFunctionName {
+		functionName, ok := rawName.(string)
+		if !ok {
 			return "", errors.New("tool function name is not text")
 		}
+		names = append(names, functionName)
 	}
-	if !hasDirectName && !hasFunctionName || hasDirectName && hasFunctionName && directName != functionName {
+	if len(names) == 0 {
 		return "", errors.New("tool call name is missing or ambiguous")
 	}
-	name := directName
-	if hasFunctionName {
-		name = functionName
+	name := names[0]
+	for _, candidate := range names[1:] {
+		if candidate != name {
+			return "", errors.New("tool call name is missing or ambiguous")
+		}
 	}
 	if name == "" || name != strings.TrimSpace(name) || len(name) > 256 || privacy.ContainsCredentialText(name) {
 		return "", errors.New("tool call name is empty, unsafe, or oversized")
@@ -762,6 +779,33 @@ func validateRRSITrialPayload(record Record, source FileEntry, entries map[strin
 	return nil
 }
 
+func validateRRSIToolSequence(payload map[string]any, toolCallCount int) (bool, error) {
+	toolHashes, hashesPresent := payload["tool_call_name_hashes"]
+	truncatedValue, truncatedPresent := payload["tool_sequence_truncated"]
+	if hashesPresent != truncatedPresent {
+		return false, errors.New("RRSI trajectory tool-sequence fields are incomplete")
+	}
+	if !hashesPresent {
+		return false, nil
+	}
+	hashes, ok := rrsiArray(toolHashes)
+	truncated, boolOK := truncatedValue.(bool)
+	if !ok || len(hashes) > maxRRSIToolSequenceHashes || !boolOK {
+		return false, errors.New("RRSI trajectory tool sequence is invalid or oversized")
+	}
+	for _, rawHash := range hashes {
+		nameHash, ok := rawHash.(string)
+		if !ok || !validDigest(nameHash) {
+			return false, errors.New("RRSI trajectory tool-name hash is invalid")
+		}
+	}
+	if !truncated && len(hashes) != toolCallCount ||
+		truncated && (len(hashes) != maxRRSIToolSequenceHashes || toolCallCount <= len(hashes)) {
+		return false, errors.New("RRSI trajectory tool sequence does not reconcile with its call count")
+	}
+	return true, nil
+}
+
 func validateRRSITrajectoryPayload(record Record, source FileEntry) error {
 	value, err := decodeStrictRRSIProposalJSON(record.Payload)
 	if err != nil {
@@ -805,11 +849,18 @@ func validateRRSITrajectoryPayload(record Record, source FileEntry) error {
 	case "coding_trajectory":
 		allow("step_count", "tool_call_count", "observation_result_count")
 		_, stepsOK := validCount("step_count")
-		_, toolsOK := validCount("tool_call_count")
+		toolCallCount, toolsOK := validCount("tool_call_count")
 		_, observationsOK := validCount("observation_result_count")
 		if !hasRRSIFields(payload, "step_count", "tool_call_count", "observation_result_count") ||
 			!stepsOK || !toolsOK || !observationsOK {
 			return errors.New("RRSI coding trajectory summary counts are invalid")
+		}
+		sequencePresent, err := validateRRSIToolSequence(payload, toolCallCount)
+		if err != nil {
+			return err
+		}
+		if sequencePresent {
+			allow("tool_call_name_hashes", "tool_sequence_truncated")
 		}
 	case "workspace_trajectory", "engineering_trajectory":
 		allow("message_count", "system_message_count", "user_message_count", "assistant_message_count",
@@ -827,28 +878,12 @@ func validateRRSITrajectoryPayload(record Record, source FileEntry) error {
 			systemCount+userCount+assistantCount+toolMessageCount+otherCount != messageCount {
 			return errors.New("RRSI trajectory summary message counts are invalid")
 		}
-		toolHashes, hashesPresent := payload["tool_call_name_hashes"]
-		truncatedValue, truncatedPresent := payload["tool_sequence_truncated"]
-		if hashesPresent != truncatedPresent {
-			return errors.New("RRSI trajectory tool-sequence fields are incomplete")
+		sequencePresent, err := validateRRSIToolSequence(payload, toolCallCount)
+		if err != nil {
+			return err
 		}
-		if hashesPresent {
+		if sequencePresent {
 			allow("tool_call_name_hashes", "tool_sequence_truncated")
-			hashes, ok := rrsiArray(toolHashes)
-			truncated, boolOK := truncatedValue.(bool)
-			if !ok || len(hashes) > maxRRSIToolSequenceHashes || !boolOK {
-				return errors.New("RRSI trajectory tool sequence is invalid or oversized")
-			}
-			for _, rawHash := range hashes {
-				nameHash, ok := rawHash.(string)
-				if !ok || !validDigest(nameHash) {
-					return errors.New("RRSI trajectory tool-name hash is invalid")
-				}
-			}
-			if !truncated && len(hashes) != toolCallCount ||
-				truncated && (len(hashes) != maxRRSIToolSequenceHashes || toolCallCount <= len(hashes)) {
-				return errors.New("RRSI trajectory tool sequence does not reconcile with its call count")
-			}
 		}
 	default:
 		return errors.New("RRSI trajectory summary kind is unsupported")

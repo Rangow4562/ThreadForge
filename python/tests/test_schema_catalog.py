@@ -1245,6 +1245,16 @@ def test_rrsi_trajectory_summary_schema_is_bounded_and_content_free():
         "tool_call_count": 1,
         "observation_result_count": 2,
     })
+    validator.validate({
+        **common,
+        "domain": "coding",
+        "record_kind": "coding_trajectory",
+        "step_count": 3,
+        "tool_call_count": 2,
+        "observation_result_count": 2,
+        "tool_call_name_hashes": ["e" * 64, "f" * 64],
+        "tool_sequence_truncated": False,
+    })
     for domain, record_kind in (("workspace", "workspace_trajectory"), ("eng", "engineering_trajectory")):
         validator.validate({
             **common,
@@ -1267,6 +1277,27 @@ def test_rrsi_trajectory_summary_schema_is_bounded_and_content_free():
             "tool_call_count": 1,
             "observation_result_count": 2,
             "message": "raw prompt must not be retained",
+        })
+    with pytest.raises(ValidationError):
+        validator.validate({
+            **common,
+            "domain": "coding",
+            "record_kind": "coding_trajectory",
+            "step_count": 3,
+            "tool_call_count": 1,
+            "observation_result_count": 2,
+            "tool_call_name_hashes": ["e" * 64],
+        })
+    with pytest.raises(ValidationError):
+        validator.validate({
+            **common,
+            "domain": "coding",
+            "record_kind": "coding_trajectory",
+            "step_count": 3,
+            "tool_call_count": 1,
+            "observation_result_count": 2,
+            "tool_call_name_hashes": ["not-a-digest"],
+            "tool_sequence_truncated": False,
         })
     with pytest.raises(ValidationError):
         validator.validate({

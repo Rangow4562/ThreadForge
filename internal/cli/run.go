@@ -42,7 +42,7 @@ import (
 	"github.com/threadforge-ai/threadforge/pkg/teamauth"
 )
 
-const version = "0.4.5"
+const version = "0.4.6"
 const maxGraphBytes = 2 << 20
 
 func Run(args []string, stdout, stderr io.Writer) int {

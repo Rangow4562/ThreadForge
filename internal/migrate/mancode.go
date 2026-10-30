@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const mancodeOperationAuditSchema = "threadforge.mancode-operation-audit.v1"
@@ -258,6 +259,21 @@ func classifyMancodeRecord(relative string) string {
 }
 
 func normalizeMancodeItems(sourceRoot, relative string, value any) ([]normalizedItem, bool, error) {
+	if isMancodeWorkflowArchivePath(relative, sourceRoot) && !isMancodeWorkflowArchiveDocumentPath(relative, sourceRoot) {
+		return nil, true, errors.New("Mancode workflow archive path is outside the supported immutable document set")
+	}
+	if isMancodeWorkflowArchiveDocumentPath(relative, sourceRoot) {
+		object, ok := value.(map[string]any)
+		content, contentOK := object["content"].(string)
+		if !ok || !contentOK || len(content) == 0 || len(content) > maxFileBytes || !utf8.ValidString(content) || strings.ContainsRune(content, 0) {
+			return nil, true, errors.New("Mancode workflow archive document does not match the supported text contract")
+		}
+		payload, err := json.Marshal(map[string]any{"content": content})
+		if err != nil {
+			return nil, true, errors.New("Mancode workflow archive document could not be normalized")
+		}
+		return []normalizedItem{{Type: "workflow_document", Payload: payload}}, true, nil
+	}
 	if items, handled, err := normalizeMancodeLegacyWorkflow(relative, sourceRoot, value); handled || err != nil {
 		return items, handled, err
 	}

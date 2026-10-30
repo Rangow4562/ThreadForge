@@ -467,6 +467,11 @@ func validateMigrationFormatCoverage(assessment *Assessment, verifier *artifactV
 			assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" has an incomplete or conflicting team-policy workspace binding")
 		}
 	}
+	for _, check := range coverage.MancodeWorkflowArchiveChecks {
+		if check.Status != "verified" {
+			assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" has an incomplete or conflicting Mancode workflow archive binding")
+		}
+	}
 }
 
 func verifyEvidence(assessment *Assessment, verifier *artifactVerifier, label string, evidence []Evidence) {

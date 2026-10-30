@@ -385,7 +385,7 @@ func TestMancodeV3ReviewDeliveryImportIsReconciledAndAggregateStaysDigestOnly(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := decodeMancodeSourceItems("review-ledger.json", data)
+	items, err := decodeMancodeSourceItems("review-ledger.json", "", data)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("decode review fixture: items=%d err=%v", len(items), err)
 	}
@@ -886,7 +886,7 @@ func readMancodeJSONFixture(t *testing.T, root, relative string) map[string]any 
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := decodeMancodeSourceItems(relative, data)
+	items, err := decodeMancodeSourceItems(relative, "", data)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("decode Mancode fixture %s: items=%d err=%v", relative, len(items), err)
 	}

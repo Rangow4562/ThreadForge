@@ -68,9 +68,15 @@ type mancodeWorkflowLocation struct {
 	taskID    string
 }
 
-func decodeMancodeSourceItems(relative string, data []byte) ([]any, error) {
+func decodeMancodeSourceItems(relative, sourceRoot string, data []byte) ([]any, error) {
 	switch {
 	case strings.EqualFold(filepath.Ext(relative), ".json"):
+		if isMancodeWorkflowArchiveDocumentPath(relative, sourceRoot) {
+			if !utf8.Valid(data) || bytes.ContainsRune(data, 0) {
+				return nil, errors.New("invalid UTF-8 Mancode workflow archive document")
+			}
+			return []any{map[string]any{"content": string(data)}}, nil
+		}
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.UseNumber()
 		var value any

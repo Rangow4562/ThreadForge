@@ -4317,3 +4317,73 @@ def test_memory_retrieval_receipt_is_content_free_and_does_not_claim_model_expos
     ):
         with pytest.raises(ValidationError):
             validator.validate(invalid)
+
+
+def test_mancode_workflow_archive_coverage_is_review_only_and_digest_bound():
+    schema = json.loads((SCHEMA_DIRECTORY / "migration-format-coverage-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    check = {
+        "schema_version": "threadforge.mancode-workflow-archive-binding.v1",
+        "relationship": "mancode_workflow_archive_artifacts",
+        "workflow_id_sha256": "a" * 64,
+        "archive_id_sha256": "b" * 64,
+        "archive_file_count": 2,
+        "archive_source_set_sha256": "c" * 64,
+        "manifest_file_count": 1,
+        "manifest_valid": True,
+        "manifest_source_set_sha256": "d" * 64,
+        "requirements_file_count": 1,
+        "requirements_valid": True,
+        "requirements_source_set_sha256": "e" * 64,
+        "plan_file_count": 0,
+        "plan_valid": False,
+        "other_file_count": 0,
+        "archive_digest_binding_verified": True,
+        "requirements_digest_binding_verified": True,
+        "plan_digest_binding_verified": True,
+        "status": "verified",
+        "issues": [],
+        "authority": "local_pending_review",
+        "human_review_required": True,
+        "execution_authorized": False,
+    }
+    document = {
+        "schema_version": "threadforge.migration-format-coverage.v1",
+        "product": "mancode",
+        "source_fingerprint": "f" * 64,
+        "snapshot_sha256": "1" * 64,
+        "files_scanned": 2,
+        "source_bytes": 8,
+        "records_found": 2,
+        "records_imported": 2,
+        "credential_excluded_records": 0,
+        "rejected_records": 0,
+        "snapshot_files": 2,
+        "joined_files": 0,
+        "unsupported_files": 0,
+        "unconverted_files": 0,
+        "unclassified_files": 0,
+        "formats": [{
+            "id": "mancode.workflow-archive",
+            "files": 2,
+            "source_bytes": 8,
+            "records_found": 2,
+            "records_imported": 2,
+            "credential_excluded_records": 0,
+            "rejected_records": 0,
+            "snapshot_files": 2,
+            "joined_files": 0,
+            "unsupported_files": 0,
+            "unconverted_files": 0,
+            "file_set_sha256": "2" * 64,
+        }],
+        "mancode_workflow_archive_checks": [check],
+    }
+    validator.validate(document)
+    for invalid_check in (
+        {**check, "execution_authorized": True},
+        {**check, "archive_digest_binding_verified": False},
+        {**check, "archive_source_set_sha256": "not-a-digest"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate({**document, "mancode_workflow_archive_checks": [invalid_check]})

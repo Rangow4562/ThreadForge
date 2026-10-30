@@ -34,6 +34,10 @@ func BuildFormatCoverage(manifest Manifest) (migrationcoverage.Report, error) {
 	if manifest.Product == Mancode && len(legacyWorkflowChecks) == 0 {
 		legacyWorkflowChecks = legacyMancodeWorkflowBindingChecks(manifest.Files, manifest.SourceRoot)
 	}
+	workflowArchiveChecks := manifest.MancodeWorkflowArchiveChecks
+	if manifest.Product == Mancode && len(workflowArchiveChecks) == 0 {
+		workflowArchiveChecks = legacyMancodeWorkflowArchiveChecks(manifest.Files, manifest.SourceRoot)
+	}
 	formats := make(map[string]*migrationcoverage.Format)
 	for _, id := range migrationcoverage.RequiredFormats(string(manifest.Product)) {
 		formats[id] = &migrationcoverage.Format{ID: id}
@@ -127,6 +131,7 @@ func BuildFormatCoverage(manifest Manifest) (migrationcoverage.Report, error) {
 		teamPolicyChecks = legacyMancodeTeamPolicyChecks(manifest.Files, manifest.SourceRoot)
 	}
 	report.MancodeTeamPolicyChecks = append([]migrationcoverage.MancodeTeamPolicyCheck(nil), teamPolicyChecks...)
+	report.MancodeWorkflowArchiveChecks = append([]migrationcoverage.MancodeWorkflowArchiveCheck(nil), workflowArchiveChecks...)
 	for _, file := range manifest.Files {
 		if file.SnapshotPath != "" {
 			report.SnapshotFiles++
@@ -201,6 +206,9 @@ func migrationFormatID(product Product, sourceRoot, relative string) string {
 			return "beacon.endpoint-generic"
 		}
 	case Mancode:
+		if isMancodeWorkflowArchivePath(relative, sourceRoot) {
+			return "mancode.workflow-archive"
+		}
 		for _, workflow := range []struct {
 			name string
 			path func(string, string) (string, bool)

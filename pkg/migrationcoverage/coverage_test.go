@@ -250,6 +250,61 @@ func TestValidateMancodeTeamPolicyWorkspaceBindingsReconcileAndSurfaceConflicts(
 	}
 }
 
+func TestValidateMancodeWorkflowArchiveBindingsReconcileAndSurfaceConflicts(t *testing.T) {
+	report := validCoverageFixture("mancode")
+	setMancodePrivacyFileCounts(&report, 0, 0)
+	report.Formats = append(report.Formats, Format{
+		ID: "mancode.workflow-archive", Files: 2, RecordsFound: 2, RecordsImported: 2, SnapshotFiles: 2,
+		FileSetSHA256: strings.Repeat("c", 64),
+	})
+	sort.Slice(report.Formats, func(i, j int) bool { return report.Formats[i].ID < report.Formats[j].ID })
+	report.FilesScanned, report.RecordsFound, report.RecordsImported, report.SnapshotFiles = 2, 2, 2, 2
+	check := MancodeWorkflowArchiveCheck{
+		SchemaVersion: MancodeWorkflowArchiveBindingSchemaVersion, Relationship: "mancode_workflow_archive_artifacts",
+		WorkflowIDSHA256: strings.Repeat("d", 64), ArchiveIDSHA256: strings.Repeat("e", 64),
+		ArchiveFileCount: 2, ArchiveSourceSetSHA256: strings.Repeat("a", 64),
+		ManifestFileCount: 1, ManifestValid: true, ManifestSourceSetSHA256: strings.Repeat("b", 64),
+		RequirementsFileCount: 1, RequirementsValid: true, RequirementsSourceSetSHA256: strings.Repeat("f", 64),
+		PlanFileCount: 0, PlanValid: false, OtherFileCount: 0,
+		ArchiveDigestBindingVerified: true, RequirementsDigestBindingVerified: true, PlanDigestBindingVerified: true,
+		Status: "verified", Issues: []string{}, Authority: "local_pending_review",
+		HumanReviewRequired: true, ExecutionAuthorized: false,
+	}
+	report.MancodeWorkflowArchiveChecks = []MancodeWorkflowArchiveCheck{check}
+	if err := Validate(report); err != nil {
+		t.Fatalf("verified archive binding rejected: %v", err)
+	}
+
+	conflict := report
+	conflict.MancodeWorkflowArchiveChecks = append([]MancodeWorkflowArchiveCheck(nil), report.MancodeWorkflowArchiveChecks...)
+	conflict.MancodeWorkflowArchiveChecks[0].ArchiveDigestBindingVerified = false
+	conflict.MancodeWorkflowArchiveChecks[0].Status = "conflicting"
+	conflict.MancodeWorkflowArchiveChecks[0].Issues = []string{"archive_digest_mismatch"}
+	if err := Validate(conflict); err != nil {
+		t.Fatalf("explicit archive digest conflict should remain reportable: %v", err)
+	}
+
+	contradictory := conflict
+	contradictory.MancodeWorkflowArchiveChecks = append([]MancodeWorkflowArchiveCheck(nil), conflict.MancodeWorkflowArchiveChecks...)
+	contradictory.MancodeWorkflowArchiveChecks[0].ArchiveDigestBindingVerified = true
+	if err := Validate(contradictory); err == nil {
+		t.Fatal("archive digest conflict with a verified flag was accepted")
+	}
+
+	uncovered := report
+	uncovered.MancodeWorkflowArchiveChecks = nil
+	if err := Validate(uncovered); err == nil {
+		t.Fatal("coverage omitted a check for classified workflow archive files")
+	}
+
+	unsafe := report
+	unsafe.MancodeWorkflowArchiveChecks = append([]MancodeWorkflowArchiveCheck(nil), report.MancodeWorkflowArchiveChecks...)
+	unsafe.MancodeWorkflowArchiveChecks[0].ExecutionAuthorized = true
+	if err := Validate(unsafe); err == nil {
+		t.Fatal("workflow archive migration check granted execution authority")
+	}
+}
+
 func setMancodeTeamPolicyFileCounts(report *Report, teamPolicy, projectConfig int) {
 	for index := range report.Formats {
 		row := &report.Formats[index]

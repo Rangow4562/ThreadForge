@@ -530,6 +530,65 @@ func TestAssessBlocksIncompleteMancodeTeamPolicyWorkspaceBinding(t *testing.T) {
 	}
 }
 
+func TestAssessBlocksIncompleteMancodeWorkflowArchiveBinding(t *testing.T) {
+	root := t.TempDir()
+	report, _, trust := completeFixture(t, root)
+	var mancodeMigration *MigrationEvidence
+	for index := range report.Migrations {
+		if report.Migrations[index].Product == "mancode" {
+			mancodeMigration = &report.Migrations[index]
+			break
+		}
+	}
+	if mancodeMigration == nil {
+		t.Fatal("Mancode migration fixture is missing")
+	}
+	coveragePath := filepath.Join(root, mancodeMigration.FormatCoverage.Path)
+	content, err := os.ReadFile(coveragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var coverage migrationcoverage.Report
+	if err := json.Unmarshal(content, &coverage); err != nil {
+		t.Fatal(err)
+	}
+	coverage.Formats = append(coverage.Formats, migrationcoverage.Format{
+		ID: "mancode.workflow-archive", Files: 1, SourceBytes: 1, RecordsFound: 1, RecordsImported: 1,
+		SnapshotFiles: 1, FileSetSHA256: testDigest("mancode-workflow-archive"),
+	})
+	sort.Slice(coverage.Formats, func(i, j int) bool { return coverage.Formats[i].ID < coverage.Formats[j].ID })
+	coverage.FilesScanned++
+	coverage.SourceBytes++
+	coverage.RecordsFound++
+	coverage.RecordsImported++
+	coverage.SnapshotFiles++
+	coverage.MancodeWorkflowArchiveChecks = []migrationcoverage.MancodeWorkflowArchiveCheck{{
+		SchemaVersion: migrationcoverage.MancodeWorkflowArchiveBindingSchemaVersion,
+		Relationship:  "mancode_workflow_archive_artifacts", WorkflowIDSHA256: testDigest("workflow"),
+		ArchiveIDSHA256: testDigest("archive"), ArchiveFileCount: 1,
+		ArchiveSourceSetSHA256: testDigest("archive-source"), ManifestFileCount: 1,
+		ManifestSourceSetSHA256: testDigest("manifest-source"), RequirementsFileCount: 0,
+		PlanFileCount: 0, OtherFileCount: 0, Status: "incomplete", Issues: []string{"requirements_missing"},
+		Authority: "local_pending_review", HumanReviewRequired: true, ExecutionAuthorized: false,
+	}}
+	if err := migrationcoverage.Validate(coverage); err != nil {
+		t.Fatalf("incomplete archive binding fixture is invalid: %v", err)
+	}
+	updated, err := json.Marshal(coverage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(coveragePath, updated, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(updated)
+	mancodeMigration.FormatCoverage.SHA256 = hex.EncodeToString(digest[:])
+	assessment, err := AssessWithTrust(report, root, trust)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "workflow archive binding") {
+		t.Fatalf("incomplete Mancode workflow archive binding was not blocked: %#v, %v", assessment, err)
+	}
+}
+
 func TestAssessBlocksUnclassifiedMigrationSourceFiles(t *testing.T) {
 	root := t.TempDir()
 	report, _, trust := completeFixture(t, root)

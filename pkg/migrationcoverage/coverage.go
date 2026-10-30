@@ -16,6 +16,7 @@ const UnclassifiedFormat = "unclassified"
 const MancodePrivacyBindingSchemaVersion = "threadforge.mancode-privacy-binding-check.v1"
 const MancodeLegacyWorkflowBindingSchemaVersion = "threadforge.mancode-legacy-workflow-binding.v1"
 const MancodeTeamPolicyBindingSchemaVersion = "threadforge.mancode-team-policy-binding-check.v1"
+const MancodeWorkflowArchiveBindingSchemaVersion = "threadforge.mancode-workflow-archive-binding.v1"
 
 const (
 	maxCoverageFiles   = 10000
@@ -26,25 +27,26 @@ const (
 var digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 type Report struct {
-	SchemaVersion               string                       `json:"schema_version"`
-	Product                     string                       `json:"product"`
-	SourceFingerprint           string                       `json:"source_fingerprint"`
-	SnapshotSHA256              string                       `json:"snapshot_sha256"`
-	FilesScanned                int                          `json:"files_scanned"`
-	SourceBytes                 int64                        `json:"source_bytes"`
-	RecordsFound                int                          `json:"records_found"`
-	RecordsImported             int                          `json:"records_imported"`
-	CredentialExcludedRecords   int                          `json:"credential_excluded_records"`
-	RejectedRecords             int                          `json:"rejected_records"`
-	SnapshotFiles               int                          `json:"snapshot_files"`
-	JoinedFiles                 int                          `json:"joined_files"`
-	UnsupportedFiles            int                          `json:"unsupported_files"`
-	UnconvertedFiles            int                          `json:"unconverted_files"`
-	UnclassifiedFiles           int                          `json:"unclassified_files"`
-	CrossFileChecks             []CrossFileCheck             `json:"cross_file_checks,omitempty"`
-	MancodeLegacyWorkflowChecks []MancodeLegacyWorkflowCheck `json:"mancode_legacy_workflow_checks,omitempty"`
-	MancodeTeamPolicyChecks     []MancodeTeamPolicyCheck     `json:"mancode_team_policy_checks,omitempty"`
-	Formats                     []Format                     `json:"formats"`
+	SchemaVersion                string                        `json:"schema_version"`
+	Product                      string                        `json:"product"`
+	SourceFingerprint            string                        `json:"source_fingerprint"`
+	SnapshotSHA256               string                        `json:"snapshot_sha256"`
+	FilesScanned                 int                           `json:"files_scanned"`
+	SourceBytes                  int64                         `json:"source_bytes"`
+	RecordsFound                 int                           `json:"records_found"`
+	RecordsImported              int                           `json:"records_imported"`
+	CredentialExcludedRecords    int                           `json:"credential_excluded_records"`
+	RejectedRecords              int                           `json:"rejected_records"`
+	SnapshotFiles                int                           `json:"snapshot_files"`
+	JoinedFiles                  int                           `json:"joined_files"`
+	UnsupportedFiles             int                           `json:"unsupported_files"`
+	UnconvertedFiles             int                           `json:"unconverted_files"`
+	UnclassifiedFiles            int                           `json:"unclassified_files"`
+	CrossFileChecks              []CrossFileCheck              `json:"cross_file_checks,omitempty"`
+	MancodeLegacyWorkflowChecks  []MancodeLegacyWorkflowCheck  `json:"mancode_legacy_workflow_checks,omitempty"`
+	MancodeTeamPolicyChecks      []MancodeTeamPolicyCheck      `json:"mancode_team_policy_checks,omitempty"`
+	MancodeWorkflowArchiveChecks []MancodeWorkflowArchiveCheck `json:"mancode_workflow_archive_checks,omitempty"`
+	Formats                      []Format                      `json:"formats"`
 }
 
 // MancodeLegacyWorkflowCheck records path-redacted binding evidence for the
@@ -156,6 +158,37 @@ type MancodeTeamPolicyCheck struct {
 	ExecutionAuthorized          bool     `json:"execution_authorized"`
 }
 
+// MancodeWorkflowArchiveCheck binds the immutable files produced by a V3
+// workflow reframe. It proves file/digest reconciliation only, never approval
+// or execution authority.
+type MancodeWorkflowArchiveCheck struct {
+	SchemaVersion                     string   `json:"schema_version"`
+	Relationship                      string   `json:"relationship"`
+	WorkflowIDSHA256                  string   `json:"workflow_id_sha256"`
+	ArchiveIDSHA256                   string   `json:"archive_id_sha256"`
+	ArchiveFileCount                  int      `json:"archive_file_count"`
+	ArchiveSourceSetSHA256            string   `json:"archive_source_set_sha256,omitempty"`
+	ManifestFileCount                 int      `json:"manifest_file_count"`
+	ManifestValid                     bool     `json:"manifest_valid"`
+	ManifestSourceSetSHA256           string   `json:"manifest_source_set_sha256,omitempty"`
+	RequirementsFileCount             int      `json:"requirements_file_count"`
+	RequirementsValid                 bool     `json:"requirements_valid"`
+	RequirementsSourceSetSHA256       string   `json:"requirements_source_set_sha256,omitempty"`
+	PlanFileCount                     int      `json:"plan_file_count"`
+	PlanValid                         bool     `json:"plan_valid"`
+	PlanSourceSetSHA256               string   `json:"plan_source_set_sha256,omitempty"`
+	OtherFileCount                    int      `json:"other_file_count"`
+	OtherSourceSetSHA256              string   `json:"other_source_set_sha256,omitempty"`
+	ArchiveDigestBindingVerified      bool     `json:"archive_digest_binding_verified"`
+	RequirementsDigestBindingVerified bool     `json:"requirements_digest_binding_verified"`
+	PlanDigestBindingVerified         bool     `json:"plan_digest_binding_verified"`
+	Status                            string   `json:"status"`
+	Issues                            []string `json:"issues"`
+	Authority                         string   `json:"authority"`
+	HumanReviewRequired               bool     `json:"human_review_required"`
+	ExecutionAuthorized               bool     `json:"execution_authorized"`
+}
+
 type Format struct {
 	ID                        string `json:"id"`
 	Files                     int    `json:"files"`
@@ -259,6 +292,9 @@ func Validate(report Report) error {
 	if err := ValidateMancodeTeamPolicyChecks(report.Product, report.MancodeTeamPolicyChecks); err != nil {
 		return err
 	}
+	if err := ValidateMancodeWorkflowArchiveChecks(report.Product, report.MancodeWorkflowArchiveChecks); err != nil {
+		return err
+	}
 	for name, value := range map[string]int{
 		"files_scanned": report.FilesScanned, "records_found": report.RecordsFound,
 		"records_imported": report.RecordsImported, "credential_excluded_records": report.CredentialExcludedRecords,
@@ -284,6 +320,9 @@ func Validate(report Report) error {
 		"mancode.legacy-workflow-review": true, "mancode.legacy-workflow-verification": true,
 		"mancode.legacy-workflow-plan": true,
 	}
+	optionalMancodeWorkflowArchiveFormats := map[string]bool{
+		"mancode.workflow-archive": true,
+	}
 	for _, id := range requiredFormats[report.Product] {
 		expected[id] = true
 	}
@@ -297,6 +336,9 @@ func Validate(report Report) error {
 	previous := ""
 	for _, format := range report.Formats {
 		if !expected[format.ID] && report.Product == "mancode" && optionalMancodeLegacyWorkflowFormats[format.ID] && format.Files > 0 {
+			expected[format.ID] = true
+		}
+		if !expected[format.ID] && report.Product == "mancode" && optionalMancodeWorkflowArchiveFormats[format.ID] && format.Files > 0 {
 			expected[format.ID] = true
 		}
 		if format.ID == "" || (previous != "" && format.ID <= previous) || seen[format.ID] || !expected[format.ID] {
@@ -385,6 +427,13 @@ func Validate(report Report) error {
 		if teamPolicyFiles != formatFiles(report.Formats, "mancode.team-policy") ||
 			boundProjectConfigFiles > formatFiles(report.Formats, "mancode.project-config") {
 			return errors.New("Mancode team-policy checks do not reconcile with team-policy and project-config source files")
+		}
+		var archiveFiles int
+		for _, check := range report.MancodeWorkflowArchiveChecks {
+			archiveFiles += check.ArchiveFileCount
+		}
+		if archiveFiles != formatFiles(report.Formats, "mancode.workflow-archive") {
+			return errors.New("Mancode workflow archive checks do not cover every archive source file")
 		}
 	}
 	return nil
@@ -774,6 +823,117 @@ func ValidateMancodeTeamPolicyChecks(product string, checks []MancodeTeamPolicyC
 			}
 		default:
 			return errors.New("Mancode team-policy binding status is invalid")
+		}
+	}
+	return nil
+}
+
+// ValidateMancodeWorkflowArchiveChecks validates path-redacted integrity
+// checks for immutable Mancode workflow archives.
+func ValidateMancodeWorkflowArchiveChecks(product string, checks []MancodeWorkflowArchiveCheck) error {
+	if len(checks) > maxCoverageFiles || len(checks) > 0 && product != "mancode" {
+		return errors.New("Mancode workflow archive checks are unsupported for this product or exceed bounds")
+	}
+	allowedIssues := map[string]bool{
+		"archive_manifest_missing": true, "archive_manifest_ambiguous": true, "archive_manifest_invalid": true,
+		"requirements_missing": true, "requirements_ambiguous": true, "requirements_invalid": true,
+		"plan_ambiguous": true, "plan_invalid": true, "unexpected_file": true, "invalid_path": true,
+		"credential_excluded": true, "task_ref_mismatch": true, "archive_id_mismatch": true,
+		"requirements_digest_mismatch": true, "plan_digest_mismatch": true, "archive_digest_mismatch": true,
+		"legacy_unverified": true,
+	}
+	conflictIssues := map[string]bool{
+		"task_ref_mismatch": true, "archive_id_mismatch": true,
+		"requirements_digest_mismatch": true, "plan_digest_mismatch": true, "archive_digest_mismatch": true,
+	}
+	previousID := ""
+	for _, check := range checks {
+		identity := check.WorkflowIDSHA256 + "/" + check.ArchiveIDSHA256
+		if check.SchemaVersion != MancodeWorkflowArchiveBindingSchemaVersion ||
+			check.Relationship != "mancode_workflow_archive_artifacts" ||
+			!digestPattern.MatchString(check.WorkflowIDSHA256) || !digestPattern.MatchString(check.ArchiveIDSHA256) ||
+			previousID != "" && identity <= previousID ||
+			check.Authority != "local_pending_review" || !check.HumanReviewRequired || check.ExecutionAuthorized {
+			return errors.New("Mancode workflow archive check identity or authority is invalid")
+		}
+		previousID = identity
+		counts := []int{
+			check.ArchiveFileCount, check.ManifestFileCount, check.RequirementsFileCount,
+			check.PlanFileCount, check.OtherFileCount,
+		}
+		for _, count := range counts {
+			if count < 0 || count > maxCoverageFiles {
+				return errors.New("Mancode workflow archive file count is outside bounds")
+			}
+		}
+		if check.ArchiveFileCount != check.ManifestFileCount+check.RequirementsFileCount+check.PlanFileCount+check.OtherFileCount ||
+			check.ArchiveFileCount == 0 ||
+			(check.ManifestFileCount == 0) != (check.ManifestSourceSetSHA256 == "") ||
+			(check.RequirementsFileCount == 0) != (check.RequirementsSourceSetSHA256 == "") ||
+			(check.PlanFileCount == 0) != (check.PlanSourceSetSHA256 == "") ||
+			(check.OtherFileCount == 0) != (check.OtherSourceSetSHA256 == "") ||
+			check.ManifestSourceSetSHA256 != "" && !digestPattern.MatchString(check.ManifestSourceSetSHA256) ||
+			check.RequirementsSourceSetSHA256 != "" && !digestPattern.MatchString(check.RequirementsSourceSetSHA256) ||
+			check.PlanSourceSetSHA256 != "" && !digestPattern.MatchString(check.PlanSourceSetSHA256) ||
+			check.OtherSourceSetSHA256 != "" && !digestPattern.MatchString(check.OtherSourceSetSHA256) ||
+			!digestPattern.MatchString(check.ArchiveSourceSetSHA256) {
+			return errors.New("Mancode workflow archive source commitments are invalid")
+		}
+		if check.ManifestValid && check.ManifestFileCount != 1 ||
+			check.RequirementsValid && check.RequirementsFileCount != 1 ||
+			check.PlanValid && check.PlanFileCount != 1 {
+			return errors.New("Mancode workflow archive component validity contradicts its count")
+		}
+		if check.RequirementsDigestBindingVerified && (!check.ManifestValid || !check.RequirementsValid) ||
+			check.PlanDigestBindingVerified && (!check.ManifestValid || check.PlanFileCount > 1 || check.PlanFileCount == 1 && !check.PlanValid) ||
+			check.ArchiveDigestBindingVerified && (!check.ManifestValid || !check.RequirementsDigestBindingVerified ||
+				!check.PlanDigestBindingVerified || check.OtherFileCount != 0) {
+			return errors.New("Mancode workflow archive digest flags contradict their source components")
+		}
+		if len(check.Issues) > 17 {
+			return errors.New("Mancode workflow archive issue list exceeds bounds")
+		}
+		previousIssue := ""
+		conflicting := false
+		for _, issue := range check.Issues {
+			if !allowedIssues[issue] || issue <= previousIssue {
+				return errors.New("Mancode workflow archive issue list is invalid")
+			}
+			previousIssue = issue
+			conflicting = conflicting || conflictIssues[issue]
+			switch issue {
+			case "requirements_digest_mismatch":
+				if check.RequirementsDigestBindingVerified {
+					return errors.New("Mancode archive requirements digest mismatch contradicts its binding flag")
+				}
+			case "plan_digest_mismatch":
+				if check.PlanDigestBindingVerified {
+					return errors.New("Mancode archive plan digest mismatch contradicts its binding flag")
+				}
+			case "archive_digest_mismatch":
+				if check.ArchiveDigestBindingVerified {
+					return errors.New("Mancode archive digest mismatch contradicts its binding flag")
+				}
+			}
+		}
+		switch check.Status {
+		case "verified":
+			if len(check.Issues) != 0 || check.ManifestFileCount != 1 || !check.ManifestValid ||
+				check.RequirementsFileCount != 1 || !check.RequirementsValid || check.PlanFileCount > 1 ||
+				check.PlanFileCount == 1 && !check.PlanValid || check.OtherFileCount != 0 ||
+				!check.ArchiveDigestBindingVerified || !check.RequirementsDigestBindingVerified || !check.PlanDigestBindingVerified {
+				return errors.New("verified Mancode workflow archive check is incomplete")
+			}
+		case "incomplete":
+			if len(check.Issues) == 0 || conflicting {
+				return errors.New("incomplete Mancode workflow archive check has inconsistent issues")
+			}
+		case "conflicting":
+			if len(check.Issues) == 0 || !conflicting {
+				return errors.New("conflicting Mancode workflow archive check has no binding mismatch")
+			}
+		default:
+			return errors.New("Mancode workflow archive check status is invalid")
 		}
 	}
 	return nil

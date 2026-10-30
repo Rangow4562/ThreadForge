@@ -309,7 +309,7 @@ func TestMancodeLegacyWorkflowReferencedTextFormatsImportAsReviewOnlyDocuments(t
 			if !eligibleMancodePath(relative, root) || classifyMancodeRecord(relative) != "workflow_document" {
 				t.Fatalf("referenced text extension was not classified as a workflow document: %s", relative)
 			}
-			items, err := decodeMancodeSourceItems(relative, []byte(format.content))
+			items, err := decodeMancodeSourceItems(relative, "", []byte(format.content))
 			if err != nil || len(items) != 1 || items[0].(map[string]any)["content"] != format.content {
 				t.Fatalf("referenced text content was not preserved: items=%#v err=%v", items, err)
 			}
@@ -350,7 +350,7 @@ func TestMancodeLegacyWorkflowReferencedTextFormatsImportAsReviewOnlyDocuments(t
 		{"evidence.ts", []byte{0xff, 0xfe}},
 		{"evidence.exe", []byte("not an allowed text suffix")},
 	} {
-		if _, err := decodeMancodeSourceItems(test.path, test.data); err == nil {
+		if _, err := decodeMancodeSourceItems(test.path, "", test.data); err == nil {
 			t.Fatalf("unsafe or unsupported Mancode workflow document was accepted: %s", test.path)
 		}
 	}

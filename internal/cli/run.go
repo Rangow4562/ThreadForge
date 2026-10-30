@@ -21,6 +21,7 @@ import (
 
 	beacon "github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/threadforge-ai/threadforge/internal/appdata"
+	"github.com/threadforge-ai/threadforge/internal/handoff"
 	"github.com/threadforge-ai/threadforge/internal/migrate"
 	"github.com/threadforge-ai/threadforge/internal/procedurefiles"
 	"github.com/threadforge-ai/threadforge/internal/projectfiles"
@@ -2333,6 +2334,9 @@ func learnMemoryWithRunner(args []string, stdout, stderr io.Writer, runPython me
 	fs := flag.NewFlagSet("memory learn", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	input := fs.String("input", "", "sanitized Beacon event JSON/JSONL input")
+	sessionID := fs.String("session-id", "", "learn from a captured local session ID or unique prefix")
+	harness := fs.String("harness", "", "disambiguate a captured session by harness")
+	tracePath := fs.String("trace-path", "", "local trace JSONL path (defaults to Threadforge's private trace store)")
 	projectID := fs.String("project-id", "", "target project identifier")
 	projectRoot := fs.String("project-root", "", "bind the proposal to applicable files under this project root")
 	modelPath := fs.String("model-path", os.Getenv("THREADFORGE_MODEL_PATH"), "local HF model directory (or THREADFORGE_MODEL_PATH)")
@@ -2344,8 +2348,11 @@ func learnMemoryWithRunner(args []string, stdout, stderr io.Writer, runPython me
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *input == "" || strings.TrimSpace(*projectID) == "" || fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory learn --input <events.jsonl> --project-id <id> [--project-root <root>] [--model-path <local-dir>] [--device cpu] [--dtype float32] [--python python] [--actor local-user] [--db <path>]")
+	fromSession := strings.TrimSpace(*sessionID) != ""
+	hasInput := strings.TrimSpace(*input) != ""
+	if hasInput == fromSession || strings.TrimSpace(*projectID) == "" || fs.NArg() != 0 ||
+		(!fromSession && (*harness != "" || *tracePath != "")) {
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory learn (--input <events.jsonl> | --session-id <id> [--harness <name>] [--trace-path <file>]) --project-id <id> [--project-root <root>] [--model-path <local-dir>] [--device cpu] [--dtype float32] [--python python] [--actor local-user] [--db <path>]")
 		return 2
 	}
 	if *projectRoot != "" {
@@ -2359,10 +2366,51 @@ func learnMemoryWithRunner(args []string, stdout, stderr io.Writer, runPython me
 	if strings.TrimSpace(*modelPath) == "" {
 		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "local_model_not_configured", "candidate": nil}, stderr)
 	}
-	events, observations, observationBytes, status, err := readSanitizedTraceInput(*input)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err)
-		return 1
+	var events []beacon.Event
+	var observations []map[string]string
+	var observationBytes []byte
+	var status string
+	var err error
+	var sourceSummary map[string]any
+	localTraceRef := ""
+	if fromSession {
+		paths, err := appdata.Resolve(*database, *tracePath)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "local trace store is unavailable")
+			return 1
+		}
+		session, captured, scan, err := handoff.ReadSession(paths.Traces, *sessionID, *harness)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "captured session could not be read; check the session ID and harness")
+			return 1
+		}
+		if scan.Changed || scan.Malformed > 0 || scan.TraceMissing {
+			_, _ = fmt.Fprintln(stderr, "captured trace is incomplete or changed; learning was stopped")
+			return 1
+		}
+		observedEvents := session.EventCount
+		omittedEvents := scan.Truncated || observedEvents > len(captured) || len(captured) > 32
+		if len(captured) > 32 {
+			captured = captured[len(captured)-32:]
+		}
+		events, observations, observationBytes, status, err = sanitizeTraceEvents(captured)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err)
+			return 1
+		}
+		sessionDigest := digestBytes([]byte(session.Harness + "\x00" + session.ID))
+		localTraceRef = "session-sha256:" + sessionDigest
+		sourceSummary = map[string]any{
+			"kind": "captured_session", "harness": session.Harness,
+			"session_sha256": sessionDigest, "events_observed": observedEvents,
+			"events_used": len(events), "older_events_omitted": omittedEvents,
+		}
+	} else {
+		events, observations, observationBytes, status, err = readSanitizedTraceInput(*input)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 	if status != "" {
 		return writeIndentedJSON(stdout, map[string]any{"status": status, "reason": "credential_material_in_observations", "candidate": nil}, stderr)
@@ -2416,6 +2464,9 @@ func learnMemoryWithRunner(args []string, stdout, stderr io.Writer, runPython me
 		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "invalid_model_candidate", "candidate": nil}, stderr)
 	}
 	graph := graphFromLearningCandidate(*projectID, candidate.Title, candidate.Applicability, candidate.Steps, observationBytes, events, nil)
+	if localTraceRef != "" && len(graph.Evidence) > 0 {
+		graph.Evidence[0].LocalTraceRef = localTraceRef
+	}
 	if err := proceduregraph.Validate(graph); err != nil {
 		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "candidate_failed_graph_validation", "candidate": nil}, stderr)
 	}
@@ -2425,6 +2476,9 @@ func learnMemoryWithRunner(args []string, stdout, stderr io.Writer, runPython me
 			return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "source_fingerprints_unavailable", "candidate": nil}, stderr)
 		}
 		graph = graphFromLearningCandidate(*projectID, candidate.Title, candidate.Applicability, candidate.Steps, observationBytes, events, sourceFiles)
+		if localTraceRef != "" && len(graph.Evidence) > 0 {
+			graph.Evidence[0].LocalTraceRef = localTraceRef
+		}
 	}
 	if err := proceduregraph.Validate(graph); err != nil {
 		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "candidate_failed_graph_validation", "candidate": nil}, stderr)
@@ -2444,10 +2498,14 @@ func learnMemoryWithRunner(args []string, stdout, stderr io.Writer, runPython me
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	return writeIndentedJSON(stdout, map[string]any{
+	result := map[string]any{
 		"status": "proposed", "graph": graph, "held_out_evaluation_required": true,
 		"human_approval_required": true, "action_ready": false,
-	}, stderr)
+	}
+	if sourceSummary != nil {
+		result["source"] = sourceSummary
+	}
+	return writeIndentedJSON(stdout, result, stderr)
 }
 
 func readSanitizedTraceInput(name string) ([]beacon.Event, []map[string]string, []byte, string, error) {
@@ -2485,9 +2543,15 @@ func readSanitizedTraceInput(name string) ([]beacon.Event, []map[string]string, 
 	if len(events) > 32 {
 		return nil, nil, nil, "", errors.New("trace input accepts at most 32 events")
 	}
+	return sanitizeTraceEvents(events)
+}
+
+func sanitizeTraceEvents(events []beacon.Event) ([]beacon.Event, []map[string]string, []byte, string, error) {
+	if len(events) > 32 {
+		return nil, nil, nil, "", errors.New("trace input accepts at most 32 events")
+	}
 	observations := make([]map[string]string, 0, len(events))
 	cleanEvents := make([]beacon.Event, 0, len(events))
-	harnesses := map[string]bool{}
 	for _, input := range events {
 		event := beacon.SanitizeEvent(input, beacon.DefaultMaxEventBytes)
 		if err := event.Validate(); err != nil {
@@ -2512,7 +2576,6 @@ func readSanitizedTraceInput(name string) ([]beacon.Event, []map[string]string, 
 			"severity": string(event.Severity), "summary": summary,
 		})
 		cleanEvents = append(cleanEvents, event)
-		harnesses[event.Harness.Name] = true
 	}
 	encoded, err := json.Marshal(observations)
 	if err != nil {
@@ -4432,7 +4495,7 @@ Commands:
   migrate status [--db <path>]
   migrate records --id <migration-id> [--limit 50] [--offset 0]
   migrate rollback --id <migration-id> --reason <reason> [--db <path>]
-  memory learn --input <events.jsonl> --project-id <id> [--project-root <root>] [--model-path <local-dir>] [--device cpu] [--dtype float32] [--python python] [--actor local-user] [--db <path>]
+  memory learn (--input <events.jsonl> | --session-id <id> [--harness <name>] [--trace-path <file>]) --project-id <id> [--project-root <root>] [--model-path <local-dir>] [--device cpu] [--dtype float32] [--python python] [--actor local-user] [--db <path>]
   memory feedback record --project-root <root> --project-id <id> --task-id <id> --target-kind <procedure|fact|decision|policy> --target-id <id> --target-revision <n> --exposure <used|shown_not_used> --utility <helpful|neutral|harmful|not_assessed> --task-result <passed|failed|inconclusive> --harness <id> [--db <path>]
   memory feedback list --project-id <id> [--task-id <id>] [--target-kind <kind>] [--target-id <id>] [--harness <id>] [--limit 50] [--offset 0]
   memory feedback receipts --project-id <id> --task-id <id> [--target-id <id>] [--limit 50] [--offset 0]

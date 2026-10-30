@@ -11,7 +11,7 @@
 
 `selected evidence -> explicit local-model draft -> structural validation -> held-out evaluation -> human review -> approved project record -> scoped retrieval -> explicit supersession`
 
-`threadforge memory learn` consumes at most 32 sanitized Beacon events, sends only bounded action/harness/severity/summary fields to the configured offline Hugging Face model over the Python stdio interface, and creates a draft in SQLite. Missing local inference or unsafe/invalid output yields no candidate. It does not approve or publish a procedure; evaluation and human review remain separate operations.
+`threadforge memory learn` consumes at most 32 sanitized Beacon events from either a bounded JSON/JSONL input or a captured local session read through the handoff scanner. Session mode reports hashed identity and omission metadata, never the raw session ID or trace path. It sends only bounded action/harness/severity/summary fields to the configured offline Hugging Face model over the Python stdio interface, and creates a draft in SQLite. Missing local inference or unsafe/invalid output yields no candidate. It does not approve or publish a procedure; evaluation and human review remain separate operations.
 
 Failed, stale, conflicting, incomplete, or privacy-blocked records are not presented as current guidance. Retrieval is advisory and is not execution authorization.
 

@@ -257,7 +257,7 @@ test('adapter CLI installs only the explicit GitHub Copilot CLI deny-only plan-g
     assert.equal(config.version, 1);
     assert.deepEqual(config.hooks.preToolUse, [{
       type: 'command', bash: bashCommand, powershell: powershellCommand,
-      matcher: '^(create|edit|apply_patch|str_replace_editor)$', timeoutSec: 10,
+      matcher: '^(create|edit|apply_patch|str_replace_editor|mcp.*|.*(bash|shell|terminal|powershell|cmd|exec|command|write|create|edit|patch|delete|remove|move|replace|save|apply).*)$', timeoutSec: 10,
     }]);
 
     result = await invoke(['copilot', 'plan-gate', 'update', '--project-root', root,

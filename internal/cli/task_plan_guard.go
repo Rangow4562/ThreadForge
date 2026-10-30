@@ -155,6 +155,17 @@ func runTaskPlanGuard(args []string, stdout, stderr io.Writer) int {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	}
+	if *host == "github-copilot" {
+		if taskPlanGateCopilotReadOnlyMCPTool(toolName) {
+			return writeTaskPlanGateResult(stdout, stderr, true, *host)
+		}
+		if taskPlanGateCopilotRequiresGovernedPlan(toolName) {
+			return guardCopilotUnscopedTool(*taskID, *projectID, *projectRoot, hookInput.CWD, *database, stdout, stderr)
+		}
+		if !taskPlanGateToolIsSupported(*host, toolName) && taskPlanGateCopilotUnsupportedMutationTool(toolName) {
+			return writeCopilotUnscopedPlanDecision(stdout, stderr, false)
+		}
+	}
 	if !taskPlanGateToolIsSupported(*host, toolName) {
 		return writeTaskPlanGateResult(stdout, stderr, false, *host)
 	}
@@ -205,6 +216,102 @@ func taskPlanGateCopilotReadOnlyOperation(toolName string, raw json.RawMessage) 
 	}
 	var input taskPlanGateToolInput
 	return json.Unmarshal(raw, &input) == nil && input.Command == "view"
+}
+
+// Shell and MCP calls do not expose a reliable filesystem target contract to
+// this hook. Require a finalized, confirmed governed task before deferring
+// those calls to Copilot's normal permission policy; this hook never grants
+// permission and cannot prove that their effects stay inside implementation scope.
+func taskPlanGateCopilotRequiresGovernedPlan(toolName string) bool {
+	name := strings.ToLower(strings.TrimSpace(toolName))
+	for _, marker := range []string{"bash", "shell", "terminal", "powershell", "cmd", "exec", "command"} {
+		if strings.Contains(name, marker) {
+			return true
+		}
+	}
+	return taskPlanGateCopilotIsMCPTool(name) && !taskPlanGateCopilotReadOnlyMCPTool(name)
+}
+
+func taskPlanGateCopilotIsMCPTool(toolName string) bool {
+	return toolName == "mcp" || strings.HasPrefix(toolName, "mcp_") || strings.HasPrefix(toolName, "mcp:")
+}
+
+// MCP names are host-controlled. Recognize read-only operations by their final
+// tool component and treat unknown names as potentially mutating.
+func taskPlanGateCopilotReadOnlyMCPTool(toolName string) bool {
+	name := strings.ToLower(strings.TrimSpace(toolName))
+	if !taskPlanGateCopilotIsMCPTool(name) {
+		return false
+	}
+	identity := strings.TrimPrefix(name, "mcp:")
+	identity = strings.TrimPrefix(identity, "mcp_")
+	if index := strings.LastIndex(identity, "__"); index >= 0 {
+		identity = identity[index+2:]
+	}
+	parts := strings.FieldsFunc(identity, func(value rune) bool {
+		return value == '_' || value == '-' || value == ':' || value == '.'
+	})
+	mutations := map[string]bool{
+		"approve": true, "commit": true, "create": true, "delete": true, "edit": true,
+		"execute": true, "install": true, "move": true, "publish": true, "push": true,
+		"remove": true, "replace": true, "reset": true, "run": true, "send": true,
+		"submit": true, "update": true, "write": true,
+	}
+	for _, part := range parts {
+		if mutations[part] {
+			return false
+		}
+	}
+	reads := map[string]bool{
+		"describe": true, "fetch": true, "get": true, "guide": true, "inspect": true,
+		"list": true, "preview": true, "query": true, "read": true, "search": true,
+		"status": true, "view": true,
+	}
+	for _, part := range parts {
+		if reads[part] {
+			return true
+		}
+	}
+	return strings.HasSuffix(identity, "task_resume_context") || strings.HasSuffix(identity, "memory_context")
+}
+
+func taskPlanGateCopilotUnsupportedMutationTool(toolName string) bool {
+	name := strings.ToLower(strings.TrimSpace(toolName))
+	for _, marker := range []string{"write", "create", "edit", "patch", "delete", "remove", "move", "replace", "save", "apply"} {
+		if strings.Contains(name, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func guardCopilotUnscopedTool(taskID, projectID, projectRoot, cwd, database string, stdout, stderr io.Writer) int {
+	root, rootErr := taskPlanGateProjectRoot(projectRoot)
+	permittedByPlan := false
+	if rootErr == nil {
+		if _, cwdErr := taskPlanGateRepositoryPath(root, cwd, "__threadforge_plan_gate_cwd_check__"); cwdErr == nil {
+			procedures, closeStore, err := openContinuityStore(database)
+			if err == nil {
+				defer closeStore()
+				task, taskErr := procedures.GetTask(context.Background(), taskID)
+				permittedByPlan = taskErr == nil && task.ProjectID == projectID &&
+					task.Requirements != nil && task.Requirements.Status == continuity.RequirementsFinalized &&
+					(task.Status == continuity.TaskOpen || task.Status == continuity.TaskInProgress) &&
+					task.Plan != nil && task.Plan.Decision == continuity.PlanGovernedExecution &&
+					continuity.ValidateTaskPlan(*task.Plan) == nil && task.Plan.Scope != nil
+			}
+		}
+	}
+	return writeCopilotUnscopedPlanDecision(stdout, stderr, permittedByPlan)
+}
+
+func writeCopilotUnscopedPlanDecision(stdout, stderr io.Writer, permittedByPlan bool) int {
+	result := taskPlanGateCopilotHookResult{}
+	if !permittedByPlan {
+		result.PermissionDecision = "deny"
+		result.PermissionDecisionReason = "Threadforge withheld this Copilot command or unclassified tool call until requirements are finalized and governed execution is confirmed."
+	}
+	return writeIndentedJSON(stdout, result, stderr)
 }
 
 func taskPlanGateToolIsSupported(host, toolName string) bool {

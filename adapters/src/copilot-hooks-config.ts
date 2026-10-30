@@ -11,7 +11,7 @@ const memoryConfigName = 'threadforge-memory.json';
 const lockName = '.threadforge-plan-gate.lock';
 const memoryLockName = '.threadforge-memory.lock';
 const maxConfigBytes = 2 << 20;
-const planGateMatcher = '^(create|edit|apply_patch|str_replace_editor)$';
+const planGateMatcher = '^(create|edit|apply_patch|str_replace_editor|mcp.*|.*(bash|shell|terminal|powershell|cmd|exec|command|write|create|edit|patch|delete|remove|move|replace|save|apply).*)$';
 
 type JsonObject = Record<string, unknown>;
 export type CopilotPlanGateChange = 'installed' | 'updated' | 'unchanged' | 'removed' | 'absent';

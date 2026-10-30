@@ -580,6 +580,39 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 	if code != 0 || unconfirmedError != "" || !strings.Contains(unconfirmedOutput, "\"permissionDecision\": \"deny\"") {
 		t.Fatalf("unconfirmed plan was not denied: code=%d stdout=%s stderr=%s", code, unconfirmedOutput, unconfirmedError)
 	}
+	copilotShellInput := map[string]any{
+		"eventName": "preToolUse", "cwd": projectRoot, "toolName": "bash",
+		"toolArgs": map[string]any{"command": "node -e write-private-sentinel"},
+	}
+	code, copilotShellOutput, copilotShellError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "github-copilot", copilotShellInput)
+	if code != 0 || copilotShellError != "" || !strings.Contains(copilotShellOutput, `"permissionDecision": "deny"`) ||
+		strings.Contains(copilotShellOutput, "write-private-sentinel") {
+		t.Fatalf("unconfirmed Copilot shell call was not privately denied: code=%d stdout=%s stderr=%s",
+			code, copilotShellOutput, copilotShellError)
+	}
+	copilotMCPMutationInput := map[string]any{
+		"eventName": "preToolUse", "cwd": projectRoot, "toolName": "mcp__fixture__write_record",
+		"toolArgs": map[string]any{"record": "private-value"},
+	}
+	code, copilotMCPMutationOutput, copilotMCPMutationError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "github-copilot", copilotMCPMutationInput)
+	if code != 0 || copilotMCPMutationError != "" ||
+		!strings.Contains(copilotMCPMutationOutput, `"permissionDecision": "deny"`) ||
+		strings.Contains(copilotMCPMutationOutput, "private-value") {
+		t.Fatalf("unconfirmed Copilot MCP mutation was not privately denied: code=%d stdout=%s stderr=%s",
+			code, copilotMCPMutationOutput, copilotMCPMutationError)
+	}
+	copilotReadOnlyMCPInput := map[string]any{
+		"eventName": "preToolUse", "cwd": projectRoot, "toolName": "mcp__threadforge__threadforge_procedure_get",
+		"toolArgs": map[string]any{"procedure_id": "approved-procedure"},
+	}
+	code, copilotReadOnlyMCPOutput, copilotReadOnlyMCPError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "github-copilot", copilotReadOnlyMCPInput)
+	if code != 0 || copilotReadOnlyMCPError != "" || strings.Contains(copilotReadOnlyMCPOutput, "permissionDecision") {
+		t.Fatalf("read-only Copilot MCP retrieval should remain available during planning: code=%d stdout=%s stderr=%s",
+			code, copilotReadOnlyMCPOutput, copilotReadOnlyMCPError)
+	}
 	if code := Run([]string{"task", "plan", "confirm", "--id", "plan-gate-task", "--expected-revision", "3",
 		"--decision", "plan_only", "--actor", "owner", "--reason", "plan only; do not edit"}, &out, &stderr); code != 0 {
 		t.Fatalf("plan-only confirmation code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
@@ -597,6 +630,20 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 	if !ok || blockedHook["hookEventName"] != "PreToolUse" || blockedHook["permissionDecision"] != "deny" ||
 		strings.Contains(blockedOutput, projectRoot) || strings.Contains(blockedOutput, "private source") {
 		t.Fatalf("plan-only hook response did not deny privately: %s", blockedOutput)
+	}
+	code, copilotPlanOnlyShellOutput, copilotPlanOnlyShellError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "github-copilot", copilotShellInput)
+	if code != 0 || copilotPlanOnlyShellError != "" ||
+		!strings.Contains(copilotPlanOnlyShellOutput, `"permissionDecision": "deny"`) {
+		t.Fatalf("plan-only Copilot shell call was not denied: code=%d stdout=%s stderr=%s",
+			code, copilotPlanOnlyShellOutput, copilotPlanOnlyShellError)
+	}
+	code, copilotPlanOnlyMCPOutput, copilotPlanOnlyMCPError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "github-copilot", copilotMCPMutationInput)
+	if code != 0 || copilotPlanOnlyMCPError != "" ||
+		!strings.Contains(copilotPlanOnlyMCPOutput, `"permissionDecision": "deny"`) {
+		t.Fatalf("plan-only Copilot MCP mutation was not denied: code=%d stdout=%s stderr=%s",
+			code, copilotPlanOnlyMCPOutput, copilotPlanOnlyMCPError)
 	}
 	codexPlanOnlyInput := map[string]any{
 		"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": projectRoot,
@@ -846,6 +893,42 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 	if code != 0 || copilotInScopeError != "" || json.Unmarshal([]byte(copilotInScopeOutput), &copilotInScope) != nil ||
 		len(copilotInScope) != 0 {
 		t.Fatalf("in-scope Copilot hook must return an empty no-opinion object: code=%d stdout=%s stderr=%s", code, copilotInScopeOutput, copilotInScopeError)
+	}
+	code, copilotGovernedShellOutput, copilotGovernedShellError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "github-copilot", copilotShellInput)
+	if code != 0 || copilotGovernedShellError != "" || strings.Contains(copilotGovernedShellOutput, "permissionDecision") {
+		t.Fatalf("governed Copilot shell call must defer to host policy without allowing it: code=%d stdout=%s stderr=%s",
+			code, copilotGovernedShellOutput, copilotGovernedShellError)
+	}
+	copilotShellOutsideProject := map[string]any{
+		"eventName": "preToolUse", "cwd": t.TempDir(), "toolName": "bash",
+		"toolArgs": map[string]any{"command": "echo private marker"},
+	}
+	code, copilotShellOutsideOutput, copilotShellOutsideError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "github-copilot", copilotShellOutsideProject)
+	if code != 0 || copilotShellOutsideError != "" ||
+		!strings.Contains(copilotShellOutsideOutput, `"permissionDecision": "deny"`) ||
+		strings.Contains(copilotShellOutsideOutput, "echo private marker") {
+		t.Fatalf("Copilot shell call outside the configured project was not privately denied: code=%d stdout=%s stderr=%s",
+			code, copilotShellOutsideOutput, copilotShellOutsideError)
+	}
+	code, copilotGovernedMCPOutput, copilotGovernedMCPError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "github-copilot", copilotMCPMutationInput)
+	if code != 0 || copilotGovernedMCPError != "" || strings.Contains(copilotGovernedMCPOutput, "permissionDecision") {
+		t.Fatalf("governed Copilot MCP call must defer to host policy without allowing it: code=%d stdout=%s stderr=%s",
+			code, copilotGovernedMCPOutput, copilotGovernedMCPError)
+	}
+	copilotUnclassifiedWrite := map[string]any{
+		"eventName": "preToolUse", "cwd": projectRoot, "toolName": "write_file",
+		"toolArgs": map[string]any{"path": "src/main.go", "content": "private source"},
+	}
+	code, copilotUnclassifiedWriteOutput, copilotUnclassifiedWriteError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "github-copilot", copilotUnclassifiedWrite)
+	if code != 0 || copilotUnclassifiedWriteError != "" ||
+		!strings.Contains(copilotUnclassifiedWriteOutput, `"permissionDecision": "deny"`) ||
+		strings.Contains(copilotUnclassifiedWriteOutput, "private source") {
+		t.Fatalf("unclassified Copilot write was not denied: code=%d stdout=%s stderr=%s",
+			code, copilotUnclassifiedWriteOutput, copilotUnclassifiedWriteError)
 	}
 	copilotInScopePatch := map[string]any{
 		"cwd": projectRoot, "toolName": "apply_patch", "toolArgs": map[string]any{"patch": "*** Begin Patch\n*** Update File: src/main.go\n@@\n-old\n+new\n*** Add File: src/other.go\n+package main\n*** End Patch"},

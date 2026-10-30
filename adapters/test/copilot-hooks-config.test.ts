@@ -97,7 +97,14 @@ test('Copilot project plan gate preserves unrelated hooks and neighboring hook f
     const managed = saved.hooks.preToolUse.filter((hook: { bash?: string; powershell?: string }) =>
       hook.bash?.includes(copilotPlanGateManagedMarker) || hook.powershell?.includes(copilotPlanGateManagedMarker));
     assert.equal(managed.length, 1);
-    assert.equal(managed[0].matcher, '^(create|edit|apply_patch|str_replace_editor)$');
+    assert.equal(managed[0].matcher,
+      '^(create|edit|apply_patch|str_replace_editor|mcp.*|.*(bash|shell|terminal|powershell|cmd|exec|command|write|create|edit|patch|delete|remove|move|replace|save|apply).*)$');
+    const matcher = new RegExp(managed[0].matcher);
+    for (const tool of [
+      'bash', 'cmd', 'powershell', 'run_shell_command', 'execute_script', 'mcp__threadforge__threadforge_procedure_get',
+      'mcp__external__write_record', 'write_file', 'delete_file',
+    ]) assert.match(tool, matcher);
+    assert.doesNotMatch('read_file', matcher);
     assert.equal(managed[0].timeoutSec, 10);
     assert.equal(managed[0].bash, command);
     assert.equal(managed[0].powershell, command);

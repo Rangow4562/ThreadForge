@@ -1627,7 +1627,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       rejectUnexpected(options, ['project-root', 'command', 'bash-command', 'powershell-command']);
       const commands = copilotPlanGateCommands(options);
       result = await installCopilotProjectPlanGateHook({ ...commands, projectRoot });
-      warning = 'Copilot plan gate is deny-only for direct create/edit/apply_patch/str_replace_editor tools; it emits no allow decision, and GitHub documents command-hook timeouts as fail-open; it does not sandbox shell/MCP or close TOCTOU races, and leaves Copilot permissions and hook-disable settings unchanged.';
+      warning = 'Copilot plan gate is deny-only: it scopes supported direct file tools and denies recognized unclassified writes. Shell and unknown MCP calls are denied until requirements are finalized and governed_execution is confirmed; recognized read-only MCP calls remain no-opinion. Governed shell/MCP calls are not path-scoped and still rely on Copilot permissions. The hook never allows, command-hook timeouts fail open, and it does not close TOCTOU races or change Copilot permissions, trust, or hook-disable settings.';
     } else if (family === 'copilot' && copilotSubsystem === 'plan-gate' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
       result = await removeCopilotProjectPlanGateHook(projectRoot);

@@ -1,5 +1,7 @@
 import json
 import importlib
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -70,16 +72,21 @@ def _install_fake_runtime(monkeypatch):
             return [SimpleNamespace(probs=vector.copy()) for _ in states]
 
     class FakeBackend:
+        api_keys = []
+
         def __init__(self, url, model, **kwargs):
             assert url == "http://127.0.0.1:9000"
             assert model == serving.SERVED_MODEL_NAME
             assert kwargs["tokenizer_name"]
+            type(self).api_keys.append(kwargs["api_key"])
 
     class FakeServer:
         opened = 0
+        instances = []
 
         def __init__(self, **kwargs):
             self.kwargs = kwargs
+            type(self).instances.append(self)
             self.url = "http://127.0.0.1:9000"
 
         def __enter__(self):
@@ -108,6 +115,7 @@ def _install_fake_runtime(monkeypatch):
         }
 
     monkeypatch.setattr(truncate_module, "truncate", fake_truncate)
+    FakeServer.backend_api_keys = FakeBackend.api_keys
     return FakeServer
 
 
@@ -130,8 +138,13 @@ def test_local_serving_pipeline_measures_depths_and_emits_non_cutover_receipt(tm
     assert result["independent_holdout_verified"] is False
     assert result["execution_verified"] is False
     assert result["cutover_evidence_eligible"] is False
+    assert len(fake_server.instances) == 2
+    api_keys = [instance.kwargs["api_key"] for instance in fake_server.instances]
+    assert all(isinstance(key, str) and len(key) >= 32 for key in api_keys)
+    assert api_keys == fake_server.backend_api_keys
+    assert len(set(api_keys)) == 2
     encoded = json.dumps(result)
-    for secret in (str(tmp_path), "fixture.question", "heldout-a", "train-0"):
+    for secret in (*api_keys, str(tmp_path), "fixture.question", "heldout-a", "train-0"):
         assert secret not in encoded
 
     schema_path = Path(__file__).resolve().parents[2] / "schema" / "anyjev-serving-pipeline-result-v1.schema.json"
@@ -172,9 +185,96 @@ def test_pipeline_rejects_overlapping_train_and_test_states(tmp_path, monkeypatc
 def test_offline_child_environment_does_not_forward_credentials(monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "private-token-value")
     monkeypatch.setenv("THREADFORGE_VLLM_API_KEY", "private-api-key")
+    monkeypatch.setenv("VLLM_API_KEY", "parent-vllm-api-key")
     environment = serving._offline_environment()
     assert environment["HF_HUB_OFFLINE"] == "1"
     assert environment["TRANSFORMERS_OFFLINE"] == "1"
     assert environment["VLLM_NO_USAGE_STATS"] == "1"
     assert "HF_TOKEN" not in environment
     assert "THREADFORGE_VLLM_API_KEY" not in environment
+    assert "VLLM_API_KEY" not in environment
+
+
+def test_local_server_readiness_requires_the_ephemeral_api_key(tmp_path):
+    api_key = "fixture-ephemeral-api-key-that-is-long-enough"
+    seen_authorization = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen_authorization.append(self.headers.get("Authorization"))
+            if self.headers.get("Authorization") != f"Bearer {api_key}":
+                self.send_response(401)
+                self.end_headers()
+                return
+            payload = json.dumps({"data": [{"id": serving.SERVED_MODEL_NAME}]}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *_args):
+            return
+
+    server = serving.LocalVLLMServer(
+        model_path=tmp_path,
+        api_key=api_key,
+        port=0,
+        gpu_memory_utilization=0.85,
+        prefix_caching=False,
+        quantization=None,
+        startup_timeout_seconds=10,
+        work_directory=tmp_path,
+        log_path=tmp_path / "unused.log",
+    )
+    command = server._command()
+    assert command[command.index("--api-key") + 1] == api_key
+    assert command[command.index("--host") + 1] == "127.0.0.1"
+    httpd = ThreadingHTTPServer(("127.0.0.1", server.port), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    server.process = SimpleNamespace(poll=lambda: None)
+    try:
+        server._wait_until_ready()
+        assert seen_authorization == [None, f"Bearer {api_key}"]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=2)
+
+
+def test_local_server_rejects_readiness_endpoint_without_api_key_auth(tmp_path):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            payload = json.dumps({"data": [{"id": serving.SERVED_MODEL_NAME}]}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *_args):
+            return
+
+    server = serving.LocalVLLMServer(
+        model_path=tmp_path,
+        api_key="fixture-ephemeral-api-key-that-is-long-enough",
+        port=0,
+        gpu_memory_utilization=0.85,
+        prefix_caching=False,
+        quantization=None,
+        startup_timeout_seconds=10,
+        work_directory=tmp_path,
+        log_path=tmp_path / "unused.log",
+    )
+    httpd = ThreadingHTTPServer(("127.0.0.1", server.port), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    server.process = SimpleNamespace(poll=lambda: None)
+    try:
+        with pytest.raises(serving.ServingPipelineError, match="does not enforce"):
+            server._wait_until_ready()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=2)

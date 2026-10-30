@@ -13,6 +13,7 @@ import http.client
 import json
 import math
 import os
+import secrets
 import signal
 import socket
 import subprocess
@@ -79,6 +80,7 @@ def run_serving_pipeline(params: dict[str, Any]) -> dict[str, Any]:
         if os.name != "nt":
             os.chmod(work, 0o700)
         for blocks in depths:
+            api_key = secrets.token_urlsafe(32)
             served_model = model_path
             checkpoint_sha256 = source_fingerprint["sha256"]
             if blocks < total_blocks:
@@ -103,6 +105,7 @@ def run_serving_pipeline(params: dict[str, Any]) -> dict[str, Any]:
 
             server = LocalVLLMServer(
                 model_path=served_model,
+                api_key=api_key,
                 port=request["port"],
                 gpu_memory_utilization=request["gpu_memory_utilization"],
                 prefix_caching=request["prefix_caching"],
@@ -114,7 +117,7 @@ def run_serving_pipeline(params: dict[str, Any]) -> dict[str, Any]:
             with server as running:
                 row = _measure_depth(
                     running.url, model_path, blocks, total_blocks, checkpoint_sha256,
-                    questions, request, np,
+                    questions, request, api_key, np,
                 )
             rows.append(row)
 
@@ -359,13 +362,14 @@ def _case_examples(examples, class_count, np):
     return states, np.asarray(labels, dtype=np.int64), digests
 
 
-def _measure_depth(url, tokenizer_path, blocks, total_blocks, checkpoint_sha256, questions, request, np):
+def _measure_depth(url, tokenizer_path, blocks, total_blocks, checkpoint_sha256, questions, request, api_key, np):
     try:
         from anyjev import Decider
         from anyjev.backends.vllm import VLLMBackend
 
         backend = VLLMBackend(
-            url, SERVED_MODEL_NAME, tokenizer_name=str(tokenizer_path), workers=16, timeout=120.0,
+            url, SERVED_MODEL_NAME, tokenizer_name=str(tokenizer_path), api_key=api_key,
+            workers=16, timeout=120.0,
         )
         decider = Decider(backend, level="L2")
         question_results = []
@@ -468,9 +472,12 @@ def _expected_calibration_error(probabilities, labels, bins, np) -> float:
 class LocalVLLMServer:
     """Starts one offline vLLM embedding server bound to IPv4 loopback only."""
 
-    def __init__(self, *, model_path, port, gpu_memory_utilization, prefix_caching,
+    def __init__(self, *, model_path, api_key, port, gpu_memory_utilization, prefix_caching,
                  quantization, startup_timeout_seconds, work_directory, log_path):
         self.model_path = Path(model_path)
+        if not isinstance(api_key, str) or len(api_key) < 32:
+            raise ServingPipelineError("local vLLM API key is invalid")
+        self.api_key = api_key
         self.port = _available_loopback_port(port)
         self.gpu_memory_utilization = gpu_memory_utilization
         self.prefix_caching = prefix_caching
@@ -485,22 +492,12 @@ class LocalVLLMServer:
     def __enter__(self):
         if os.name != "posix":
             raise ServingPipelineError("managed vLLM serving requires POSIX process-group cleanup; use Linux or WSL")
-        command = [
-            sys.executable, "-m", "vllm.entrypoints.openai.api_server",
-            "--model", str(self.model_path), "--served-model-name", SERVED_MODEL_NAME,
-            "--host", "127.0.0.1", "--port", str(self.port), "--task", "embed",
-            "--gpu-memory-utilization", str(self.gpu_memory_utilization),
-            "--override-pooler-config", POOLER_CONFIG,
-        ]
-        command += ["--enable-prefix-caching"] if self.prefix_caching else ["--no-enable-prefix-caching"]
-        if self.quantization:
-            command += ["--quantization", self.quantization]
         self._log_stream = self.log_path.open("xb")
         if os.name != "nt":
             os.chmod(self.log_path, 0o600)
         try:
             self.process = subprocess.Popen(
-                command,
+                self._command(),
                 cwd=str(self.work_directory),
                 env=_offline_environment(),
                 stdin=subprocess.DEVNULL,
@@ -515,6 +512,20 @@ class LocalVLLMServer:
             self._stop()
             raise ServingPipelineError("local vLLM server failed to start safely") from None
 
+    def _command(self):
+        command = [
+            sys.executable, "-m", "vllm.entrypoints.openai.api_server",
+            "--model", str(self.model_path), "--served-model-name", SERVED_MODEL_NAME,
+            "--host", "127.0.0.1", "--port", str(self.port), "--task", "embed",
+            "--api-key", self.api_key,
+            "--gpu-memory-utilization", str(self.gpu_memory_utilization),
+            "--override-pooler-config", POOLER_CONFIG,
+        ]
+        command += ["--enable-prefix-caching"] if self.prefix_caching else ["--no-enable-prefix-caching"]
+        if self.quantization:
+            command += ["--quantization", self.quantization]
+        return command
+
     def __exit__(self, _exc_type, _exc, _traceback):
         self._stop()
 
@@ -523,25 +534,50 @@ class LocalVLLMServer:
         while time.monotonic() < deadline:
             if self.process.poll() is not None:
                 raise ServingPipelineError("local vLLM server exited before becoming ready")
-            connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=3.0)
             try:
-                connection.request("GET", "/v1/models")
-                response = connection.getresponse()
-                payload = response.read(MAX_POLL_RESPONSE_BYTES + 1)
-                if len(payload) > MAX_POLL_RESPONSE_BYTES or response.status != 200:
-                    raise OSError("invalid local vLLM readiness response")
+                unauthenticated_status, _ = self._models_response()
+                if unauthenticated_status not in (401, 403):
+                    if 200 <= unauthenticated_status < 300:
+                        raise ServingPipelineError("local vLLM server does not enforce its ephemeral API key")
+                    if unauthenticated_status < 500:
+                        raise ServingPipelineError("local vLLM server returned an unexpected unauthenticated status")
+                    time.sleep(min(1.0, max(0.05, deadline - time.monotonic())))
+                    continue
+
+                status, payload = self._models_response(self.api_key)
+                if status in (401, 403):
+                    raise ServingPipelineError("local vLLM server rejected its ephemeral API key")
+                if status != 200:
+                    if status < 500:
+                        raise ServingPipelineError("local vLLM server returned an invalid authenticated readiness response")
+                    time.sleep(min(1.0, max(0.05, deadline - time.monotonic())))
+                    continue
                 document = json.loads(payload)
                 models = document.get("data") if isinstance(document, dict) else None
                 if isinstance(models, list) and any(
                     isinstance(item, dict) and item.get("id") == SERVED_MODEL_NAME for item in models
                 ):
                     return
+            except ServingPipelineError:
+                raise
             except (OSError, ValueError, http.client.HTTPException):
-                pass
-            finally:
-                connection.close()
+                time.sleep(min(1.0, max(0.05, deadline - time.monotonic())))
+                continue
             time.sleep(min(1.0, max(0.05, deadline - time.monotonic())))
         raise ServingPipelineError("local vLLM server did not become ready before the configured timeout")
+
+    def _models_response(self, api_key=None):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=3.0)
+        try:
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+            connection.request("GET", "/v1/models", headers=headers)
+            response = connection.getresponse()
+            payload = response.read(MAX_POLL_RESPONSE_BYTES + 1)
+            if len(payload) > MAX_POLL_RESPONSE_BYTES:
+                raise ServingPipelineError("local vLLM readiness response exceeds the size limit")
+            return response.status, payload
+        finally:
+            connection.close()
 
     def _stop(self):
         process = self.process

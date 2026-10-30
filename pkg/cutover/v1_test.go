@@ -18,6 +18,7 @@ import (
 	"github.com/threadforge-ai/threadforge/pkg/migrationbackup"
 	"github.com/threadforge-ai/threadforge/pkg/migrationcoverage"
 	"github.com/threadforge-ai/threadforge/pkg/migrationreview"
+	"github.com/threadforge-ai/threadforge/pkg/migrationsources"
 )
 
 func TestAssessRequiresAllParityMigrationAdaptersAndEvaluations(t *testing.T) {
@@ -409,6 +410,7 @@ func TestAssessBlocksMancodeLegacyPlanWithoutSourceVersionBinding(t *testing.T) 
 	mancodeMigration.FormatCoverage.SHA256 = hex.EncodeToString(digest[:])
 	mancodeMigration.SourceRecords += len(workflowFormats)
 	mancodeMigration.ImportedRecords += len(workflowFormats)
+	refreshMancodeProjectSourceSetCounts(t, root, mancodeMigration, coverage)
 
 	assessment, err := AssessWithTrust(report, root, trust)
 	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "legacy workflow plans without source-bound content/version binding") {
@@ -446,6 +448,7 @@ func TestAssessBlocksMancodeLegacyPlanWithoutSourceVersionBinding(t *testing.T) 
 	}
 	digest = sha256.Sum256(updated)
 	mancodeMigration.FormatCoverage.SHA256 = hex.EncodeToString(digest[:])
+	refreshMancodeProjectSourceSetCounts(t, root, mancodeMigration, coverage)
 	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, trust, migrationreview.TrustStore{})
 	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "no separately trusted reviewer policy") {
 		t.Fatalf("signed plan review bypassed the separate reviewer trust root: %#v, %v", assessment, err)
@@ -934,6 +937,118 @@ func TestRequiredSourceInventoryMatchesDocumentedMatrix(t *testing.T) {
 	}
 }
 
+func TestAssessReconcilesEveryMancodeSourceSetComponent(t *testing.T) {
+	root := t.TempDir()
+	report, _, trust := completeFixture(t, root)
+	var migration *MigrationEvidence
+	for i := range report.Migrations {
+		if report.Migrations[i].Product == "mancode" {
+			migration = &report.Migrations[i]
+			break
+		}
+	}
+	if migration == nil {
+		t.Fatal("Mancode migration fixture is missing")
+	}
+
+	coordination := MigrationEvidence{
+		Product: "mancode", SourceFingerprint: testDigest("mancode-coordination-source"),
+		SnapshotSHA256: testDigest("mancode-coordination-snapshot"),
+		SourceRecords:  4, ImportedRecords: 3, ExcludedRecords: 1,
+	}
+	coordination.FormatCoverage = writeMigrationCoverageFixtureNamed(t, root, coordination, "mancode-coordination")
+	coordination.SourceBackupVerification = writeMigrationBackupFixtureNamed(t, root, coordination, "mancode-coordination")
+	coordinationID := "git_coordination-" + testDigest("mancode-coordination-root")
+	migration.Sources = []MigrationSourceEvidence{{
+		SourceID: coordinationID, Role: "git_coordination",
+		SourceFingerprint: coordination.SourceFingerprint, SnapshotSHA256: coordination.SnapshotSHA256,
+		FormatCoverage: coordination.FormatCoverage, SourceBackupVerification: coordination.SourceBackupVerification,
+		InterruptionRecoveryTested: true, RollbackRehearsed: true, Evidence: []Evidence{migration.Evidence[0]},
+	}}
+	migration.SourceRecords += coordination.SourceRecords
+	migration.ImportedRecords += coordination.ImportedRecords
+	migration.ExcludedRecords += coordination.ExcludedRecords
+
+	data, err := os.ReadFile(filepath.Join(root, migration.MancodeSourceSet.Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sourceSet migrationsources.MancodeReport
+	if err := json.Unmarshal(data, &sourceSet); err != nil {
+		t.Fatal(err)
+	}
+	sourceSet.Components = append(sourceSet.Components, migrationsources.MancodeComponent{
+		SourceID: coordinationID, Role: "git_coordination",
+		SourceFingerprint: coordination.SourceFingerprint, SnapshotSHA256: coordination.SnapshotSHA256,
+		FilesScanned: 1, SnapshotFiles: 1, SourceRecords: 4, ImportedRecords: 3, CredentialExclusions: 1,
+	})
+	migration.MancodeSourceSet = writeMancodeSourceSetReportFixture(t, root, "mancode-source-set-complete.json", sourceSet)
+
+	assessment, err := AssessWithTrust(report, root, trust)
+	if err != nil || !assessment.Ready {
+		t.Fatalf("fully reconciled multi-root Mancode evidence was rejected: %#v, %v", assessment, err)
+	}
+
+	withoutComponent := cloneCutoverReport(t, report)
+	for i := range withoutComponent.Migrations {
+		if withoutComponent.Migrations[i].Product == "mancode" {
+			withoutComponent.Migrations[i].Sources = nil
+		}
+	}
+	assessment, err = AssessWithTrust(withoutComponent, root, trust)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "missing evidence for component") {
+		t.Fatalf("cutover did not block omitted coordination-component evidence: %#v, %v", assessment, err)
+	}
+
+	withDuplicateKeys := cloneCutoverReport(t, report)
+	for i := range withDuplicateKeys.Migrations {
+		if withDuplicateKeys.Migrations[i].Product != "mancode" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(root, withDuplicateKeys.Migrations[i].MancodeSourceSet.Path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var duplicateSet migrationsources.MancodeReport
+		if err := json.Unmarshal(data, &duplicateSet); err != nil {
+			t.Fatal(err)
+		}
+		duplicateSet.DuplicateRecordKeys = 1
+		duplicateSet.DuplicateRecordKeysSHA256 = testDigest("duplicate-record-keys")
+		withDuplicateKeys.Migrations[i].MancodeSourceSet = writeMancodeSourceSetReportFixture(t, root,
+			"mancode-source-set-duplicates.json", duplicateSet)
+	}
+	assessment, err = AssessWithTrust(withDuplicateKeys, root, trust)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "duplicate record keys across roots") {
+		t.Fatalf("cutover did not block cross-root duplicate records: %#v, %v", assessment, err)
+	}
+
+	wrongTotals := cloneCutoverReport(t, report)
+	for i := range wrongTotals.Migrations {
+		if wrongTotals.Migrations[i].Product == "mancode" {
+			wrongTotals.Migrations[i].SourceRecords++
+			wrongTotals.Migrations[i].ExcludedRecords++
+		}
+	}
+	assessment, err = AssessWithTrust(wrongTotals, root, trust)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "aggregate counts do not reconcile across source roots") {
+		t.Fatalf("cutover did not block aggregate root-count mismatch: %#v, %v", assessment, err)
+	}
+}
+
+func cloneCutoverReport(t *testing.T, source Report) Report {
+	t.Helper()
+	encoded, err := json.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var clone Report
+	if err := json.Unmarshal(encoded, &clone); err != nil {
+		t.Fatal(err)
+	}
+	return clone
+}
+
 func completeFixture(t *testing.T, root string) (Report, Evidence, EvaluatorTrustStore) {
 	t.Helper()
 	content := []byte("{\"test_suite\":\"acceptance\",\"passed\":true}\n")
@@ -946,6 +1061,9 @@ func completeFixture(t *testing.T, root string) (Report, Evidence, EvaluatorTrus
 	for i := range report.Migrations {
 		report.Migrations[i].FormatCoverage = writeMigrationCoverageFixture(t, root, report.Migrations[i])
 		report.Migrations[i].SourceBackupVerification = writeMigrationBackupFixture(t, root, report.Migrations[i])
+		if report.Migrations[i].Product == "mancode" {
+			report.Migrations[i].MancodeSourceSet = writeMancodeSourceSetFixture(t, root, report.Migrations[i])
+		}
 	}
 	trust := fixtureTrustStore()
 	for i := range report.Evaluations {
@@ -958,9 +1076,71 @@ func completeFixture(t *testing.T, root string) (Report, Evidence, EvaluatorTrus
 	return report, evidence, trust
 }
 
-func writeMigrationBackupFixture(t *testing.T, root string, migration MigrationEvidence) Evidence {
+func writeMancodeSourceSetFixture(t *testing.T, root string, migration MigrationEvidence) Evidence {
 	t.Helper()
-	treeDigest := testDigest(migration.Product + "/independent-source-tree")
+	report := migrationsources.MancodeReport{
+		ProjectSourceFingerprint: migration.SourceFingerprint,
+		ProjectSnapshotSHA256:    migration.SnapshotSHA256,
+		Components: []migrationsources.MancodeComponent{{
+			SourceID: "project", Role: "project", SourceFingerprint: migration.SourceFingerprint,
+			SnapshotSHA256: migration.SnapshotSHA256, FilesScanned: 1, SnapshotFiles: 1,
+			SourceRecords: migration.SourceRecords, ImportedRecords: migration.ImportedRecords,
+			CredentialExclusions: migration.ExcludedRecords, RejectedRecords: 0,
+		}},
+	}
+	return writeMancodeSourceSetReportFixture(t, root, "mancode-source-set.json", report)
+}
+
+func writeMancodeSourceSetReportFixture(t *testing.T, root, path string, report migrationsources.MancodeReport) Evidence {
+	t.Helper()
+	if err := migrationsources.SealMancode(&report); err != nil {
+		t.Fatalf("invalid Mancode source-set fixture: %v", err)
+	}
+	content, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, path), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(content)
+	return Evidence{Path: path, SHA256: hex.EncodeToString(digest[:])}
+}
+
+func refreshMancodeProjectSourceSetCounts(t *testing.T, root string, migration *MigrationEvidence, coverage migrationcoverage.Report) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, migration.MancodeSourceSet.Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sourceSet migrationsources.MancodeReport
+	if err := json.Unmarshal(data, &sourceSet); err != nil {
+		t.Fatal(err)
+	}
+	for index := range sourceSet.Components {
+		component := &sourceSet.Components[index]
+		if component.Role != "project" {
+			continue
+		}
+		component.FilesScanned = coverage.FilesScanned
+		component.SnapshotFiles = coverage.SnapshotFiles
+		component.SourceRecords = coverage.RecordsFound
+		component.ImportedRecords = coverage.RecordsImported
+		component.CredentialExclusions = coverage.CredentialExcludedRecords
+		component.RejectedRecords = coverage.RejectedRecords
+		migration.MancodeSourceSet = writeMancodeSourceSetReportFixture(t, root, "mancode-source-set-updated.json", sourceSet)
+		return
+	}
+	t.Fatal("source-set project component was missing")
+}
+
+func writeMigrationBackupFixture(t *testing.T, root string, migration MigrationEvidence) Evidence {
+	return writeMigrationBackupFixtureNamed(t, root, migration, migration.Product)
+}
+
+func writeMigrationBackupFixtureNamed(t *testing.T, root string, migration MigrationEvidence, name string) Evidence {
+	t.Helper()
+	treeDigest := testDigest(migration.Product + "/" + migration.SourceFingerprint + "/independent-source-tree")
 	backup := migrationbackup.Report{
 		SchemaVersion:     migrationbackup.SchemaVersion,
 		Product:           migration.Product,
@@ -978,7 +1158,7 @@ func writeMigrationBackupFixture(t *testing.T, root string, migration MigrationE
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := "migration-source-backup-" + migration.Product + ".json"
+	path := "migration-source-backup-" + name + ".json"
 	if err := os.WriteFile(filepath.Join(root, path), content, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -987,6 +1167,10 @@ func writeMigrationBackupFixture(t *testing.T, root string, migration MigrationE
 }
 
 func writeMigrationCoverageFixture(t *testing.T, root string, migration MigrationEvidence) Evidence {
+	return writeMigrationCoverageFixtureNamed(t, root, migration, migration.Product)
+}
+
+func writeMigrationCoverageFixtureNamed(t *testing.T, root string, migration MigrationEvidence, name string) Evidence {
 	t.Helper()
 	coverage := migrationcoverage.Report{
 		SchemaVersion: migrationcoverage.SchemaVersion, Product: migration.Product,
@@ -1009,7 +1193,7 @@ func writeMigrationCoverageFixture(t *testing.T, root string, migration Migratio
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := "migration-format-coverage-" + migration.Product + ".json"
+	path := "migration-format-coverage-" + name + ".json"
 	if err := os.WriteFile(filepath.Join(root, path), content, 0o600); err != nil {
 		t.Fatal(err)
 	}

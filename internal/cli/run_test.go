@@ -3749,7 +3749,7 @@ func TestCutoverAssessmentFailsClosedAndDoesNotMutateSources(t *testing.T) {
 	}
 	var out, stderr bytes.Buffer
 	duplicateReportPath := filepath.Join(root, "duplicate-cutover-report.json")
-	duplicateReport := strings.Replace(report, `"candidate_commit"`, `"schema_version":"threadforge.cutover-evidence.v5","candidate_commit"`, 1)
+	duplicateReport := strings.Replace(report, `"candidate_commit"`, `"schema_version":"threadforge.cutover-evidence.v6","candidate_commit"`, 1)
 	if err := os.WriteFile(duplicateReportPath, []byte(duplicateReport), 0o600); err != nil {
 		t.Fatal(err)
 	}

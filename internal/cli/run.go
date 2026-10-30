@@ -2824,7 +2824,7 @@ func historyProjectMemory(args []string, stdout, stderr io.Writer) int {
 
 func runMigrate(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "migration action required: inspect, snapshot, backup-verify, coverage, review-plan, apply, verify, rollback, status, or records")
+		_, _ = fmt.Fprintln(stderr, "migration action required: inspect, snapshot, sources, source-set, backup-verify, coverage, review-plan, apply, verify, rollback, status, or records")
 		return 2
 	}
 	switch args[0] {
@@ -2832,6 +2832,10 @@ func runMigrate(args []string, stdout, stderr io.Writer) int {
 		return inspectMigration(args[1:], stdout, stderr)
 	case "snapshot":
 		return snapshotMigration(args[1:], stdout, stderr)
+	case "sources":
+		return listMancodeMigrationSources(args[1:], stdout, stderr)
+	case "source-set":
+		return mancodeMigrationSourceSet(args[1:], stdout, stderr)
 	case "coverage":
 		return migrationFormatCoverage(args[1:], stdout, stderr)
 	case "review-plan":
@@ -4418,6 +4422,8 @@ Commands:
   mcp print-config --project-root <root> [--command threadforge] [--format json|toml]
   migrate inspect --product <beacon|mancode|anyjev|rrsi> --root <path>
   migrate snapshot --product <beacon|mancode|anyjev|rrsi> --root <path>
+  migrate sources --root <mancode-project-root>
+  migrate source-set --root <mancode-project-root> --manifest <snapshot\\manifest.json> [--manifest <snapshot\\manifest.json> ...]
   migrate coverage --manifest <snapshot\\manifest.json>
   migrate review-plan --manifest <snapshot\\manifest.json> --backup-root <independent-copy> [--previous-coverage <reviewed-coverage.json>] --output <new-coverage.json> --workflow-id-sha256 <digest> --identity-key <private-key.json> --trusted-reviewers <trust.json> --confirm-reviewed-pairing
   migrate backup-verify --manifest <snapshot\\manifest.json> --backup-root <independent-copy>

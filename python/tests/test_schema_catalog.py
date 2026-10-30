@@ -4387,3 +4387,97 @@ def test_mancode_workflow_archive_coverage_is_review_only_and_digest_bound():
     ):
         with pytest.raises(ValidationError):
             validator.validate({**document, "mancode_workflow_archive_checks": [invalid_check]})
+
+
+def test_mancode_source_set_and_cutover_v6_require_per_root_evidence():
+    source_schema = json.loads((SCHEMA_DIRECTORY / "mancode-source-set-v1.schema.json").read_text(encoding="utf-8"))
+    source_validator = validator_for(source_schema)(source_schema)
+    source_set = {
+        "schema_version": "threadforge.mancode-source-set.v1",
+        "product": "mancode",
+        "project_source_fingerprint": "a" * 64,
+        "project_snapshot_sha256": "b" * 64,
+        "components": [
+            {
+                "source_id": "git_coordination-" + "c" * 64,
+                "role": "git_coordination",
+                "source_fingerprint": "d" * 64,
+                "snapshot_sha256": "e" * 64,
+                "files_scanned": 1,
+                "snapshot_files": 1,
+                "source_records": 1,
+                "imported_records": 1,
+                "credential_exclusions": 0,
+                "rejected_records": 0,
+            },
+            {
+                "source_id": "project",
+                "role": "project",
+                "source_fingerprint": "a" * 64,
+                "snapshot_sha256": "b" * 64,
+                "files_scanned": 0,
+                "snapshot_files": 0,
+                "source_records": 0,
+                "imported_records": 0,
+                "credential_exclusions": 0,
+                "rejected_records": 0,
+            },
+        ],
+        "duplicate_record_keys": 0,
+        "inventory_sha256": "f" * 64,
+    }
+    source_validator.validate(source_set)
+    with pytest.raises(ValidationError):
+        source_validator.validate({**source_set, "components": source_set["components"][:1]})
+
+    v6_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v6.schema.json").read_text(encoding="utf-8"))
+    v3_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v3.schema.json").read_text(encoding="utf-8"))
+    v2_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v2.schema.json").read_text(encoding="utf-8"))
+    registry = Registry().with_resources([
+        (v6_schema["$id"], Resource.from_contents(v6_schema)),
+        (v3_schema["$id"], Resource.from_contents(v3_schema)),
+        (v2_schema["$id"], Resource.from_contents(v2_schema)),
+    ])
+    validator = validator_for(v6_schema)(v6_schema, registry=registry)
+    migration = {
+        "product": "mancode",
+        "source_fingerprint": "a" * 64,
+        "snapshot_sha256": "b" * 64,
+        "format_coverage": {"path": "project-coverage.json", "sha256": "3" * 64},
+        "source_backup_verification": {"path": "project-backup.json", "sha256": "4" * 64},
+        "mancode_source_set": {"path": "source-set.json", "sha256": "5" * 64},
+        "sources": [{
+            "source_id": "git_coordination-" + "c" * 64,
+            "role": "git_coordination",
+            "source_fingerprint": "d" * 64,
+            "snapshot_sha256": "e" * 64,
+            "format_coverage": {"path": "coordination-coverage.json", "sha256": "6" * 64},
+            "source_backup_verification": {"path": "coordination-backup.json", "sha256": "7" * 64},
+            "interruption_recovery_tested": True,
+            "rollback_rehearsed": True,
+            "evidence": [{"path": "coordination-recovery.json", "sha256": "8" * 64}],
+        }],
+        "source_records": 1,
+        "imported_records": 1,
+        "excluded_records": 0,
+        "unresolved_conflicts": 0,
+        "credential_records_migrated": 0,
+        "interruption_recovery_tested": True,
+        "rollback_rehearsed": True,
+        "evidence": [{"path": "migration.json", "sha256": "9" * 64}],
+    }
+    report = {
+        "schema_version": "threadforge.cutover-evidence.v6",
+        "candidate_commit": "1" * 40,
+        "features": [], "adapters": [], "migrations": [migration],
+        "cross_harness_tests": [], "evaluations": [], "approvals": [],
+    }
+    validator.validate(report)
+    missing_source_set = json.loads(json.dumps(report))
+    missing_source_set["migrations"][0].pop("mancode_source_set")
+    with pytest.raises(ValidationError):
+        validator.validate(missing_source_set)
+    invalid_non_mancode = json.loads(json.dumps(report))
+    invalid_non_mancode["migrations"][0]["product"] = "beacon"
+    with pytest.raises(ValidationError):
+        validator.validate(invalid_non_mancode)

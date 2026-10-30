@@ -17,10 +17,11 @@ import (
 	"github.com/threadforge-ai/threadforge/pkg/migrationbackup"
 	"github.com/threadforge-ai/threadforge/pkg/migrationcoverage"
 	"github.com/threadforge-ai/threadforge/pkg/migrationreview"
+	"github.com/threadforge-ai/threadforge/pkg/migrationsources"
 	"github.com/threadforge-ai/threadforge/pkg/privacy"
 )
 
-const SchemaVersion = "threadforge.cutover-evidence.v5"
+const SchemaVersion = "threadforge.cutover-evidence.v6"
 
 const (
 	maxArtifactBytes = 128 << 20
@@ -61,16 +62,30 @@ type AdapterEvidence struct {
 }
 
 type MigrationEvidence struct {
-	Product                    string     `json:"product"`
+	Product                    string                    `json:"product"`
+	SourceFingerprint          string                    `json:"source_fingerprint"`
+	SnapshotSHA256             string                    `json:"snapshot_sha256"`
+	FormatCoverage             Evidence                  `json:"format_coverage"`
+	SourceBackupVerification   Evidence                  `json:"source_backup_verification"`
+	MancodeSourceSet           Evidence                  `json:"mancode_source_set,omitempty"`
+	Sources                    []MigrationSourceEvidence `json:"sources,omitempty"`
+	SourceRecords              int                       `json:"source_records"`
+	ImportedRecords            int                       `json:"imported_records"`
+	ExcludedRecords            int                       `json:"excluded_records"`
+	UnresolvedConflicts        int                       `json:"unresolved_conflicts"`
+	CredentialRecordsMigrated  int                       `json:"credential_records_migrated"`
+	InterruptionRecoveryTested bool                      `json:"interruption_recovery_tested"`
+	RollbackRehearsed          bool                      `json:"rollback_rehearsed"`
+	Evidence                   []Evidence                `json:"evidence"`
+}
+
+type MigrationSourceEvidence struct {
+	SourceID                   string     `json:"source_id"`
+	Role                       string     `json:"role"`
 	SourceFingerprint          string     `json:"source_fingerprint"`
 	SnapshotSHA256             string     `json:"snapshot_sha256"`
 	FormatCoverage             Evidence   `json:"format_coverage"`
 	SourceBackupVerification   Evidence   `json:"source_backup_verification"`
-	SourceRecords              int        `json:"source_records"`
-	ImportedRecords            int        `json:"imported_records"`
-	ExcludedRecords            int        `json:"excluded_records"`
-	UnresolvedConflicts        int        `json:"unresolved_conflicts"`
-	CredentialRecordsMigrated  int        `json:"credential_records_migrated"`
 	InterruptionRecoveryTested bool       `json:"interruption_recovery_tested"`
 	RollbackRehearsed          bool       `json:"rollback_rehearsed"`
 	Evidence                   []Evidence `json:"evidence"`
@@ -248,10 +263,17 @@ func AssessWithTrustAndMigrationReviewers(report Report, evidenceRoot string, tr
 		if !migration.InterruptionRecoveryTested || !migration.RollbackRehearsed {
 			assessment.Blockers = append(assessment.Blockers, "migration "+product+" lacks interruption-recovery or rollback evidence")
 		}
-		verifyEvidence(&assessment, verifier, "migration "+product+" format coverage", []Evidence{migration.FormatCoverage})
-		validateMigrationFormatCoverage(&assessment, verifier, migration, trustedMigrationReviewers)
-		verifyEvidence(&assessment, verifier, "migration "+product+" source backup verification", []Evidence{migration.SourceBackupVerification})
-		validateMigrationSourceBackup(&assessment, verifier, migration)
+		if product == "mancode" {
+			validateMancodeSourceSetMigration(&assessment, verifier, migration, trustedMigrationReviewers)
+		} else {
+			if migration.MancodeSourceSet.Path != "" || migration.Sources != nil {
+				assessment.Blockers = append(assessment.Blockers, "migration "+product+" contains Mancode-only source-set evidence")
+			}
+			verifyEvidence(&assessment, verifier, "migration "+product+" format coverage", []Evidence{migration.FormatCoverage})
+			validateMigrationFormatCoverage(&assessment, verifier, migration, trustedMigrationReviewers)
+			verifyEvidence(&assessment, verifier, "migration "+product+" source backup verification", []Evidence{migration.SourceBackupVerification})
+			validateMigrationSourceBackup(&assessment, verifier, migration)
+		}
 		verifyEvidence(&assessment, verifier, "migration "+product, migration.Evidence)
 	}
 
@@ -398,7 +420,107 @@ func validateMigrationSourceBackup(assessment *Assessment, verifier *artifactVer
 	}
 }
 
-func validateMigrationFormatCoverage(assessment *Assessment, verifier *artifactVerifier, migration MigrationEvidence, trustedMigrationReviewers migrationreview.TrustStore) {
+func validateMancodeSourceSetMigration(assessment *Assessment, verifier *artifactVerifier, migration MigrationEvidence,
+	trustedMigrationReviewers migrationreview.TrustStore) {
+	if migration.MancodeSourceSet.Path == "" {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode is missing discovered source-set evidence")
+		return
+	}
+	verifyEvidence(assessment, verifier, "migration mancode source-set inventory", []Evidence{migration.MancodeSourceSet})
+	content, actual, err := verifier.readEvidence(migration.MancodeSourceSet)
+	if err != nil {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source-set inventory: "+err.Error())
+		return
+	}
+	if actual != migration.MancodeSourceSet.SHA256 {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source-set inventory digest mismatch")
+		return
+	}
+	var sourceSet migrationsources.MancodeReport
+	if err := decodeUniqueJSON(content, &sourceSet); err != nil {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source-set inventory is invalid JSON")
+		return
+	}
+	if err := migrationsources.ValidateMancode(sourceSet); err != nil {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source-set inventory is invalid")
+		return
+	}
+	if sourceSet.DuplicateRecordKeys != 0 {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source set contains duplicate record keys across roots")
+	}
+	if sourceSet.ProjectSourceFingerprint != migration.SourceFingerprint || sourceSet.ProjectSnapshotSHA256 != migration.SnapshotSHA256 {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source-set inventory does not bind the project snapshot")
+	}
+
+	sourceEvidenceByID := make(map[string]MigrationSourceEvidence, len(migration.Sources))
+	for _, source := range migration.Sources {
+		if source.SourceID == "" || source.Role == "project" || sourceEvidenceByID[source.SourceID].SourceID != "" {
+			assessment.Blockers = append(assessment.Blockers, fmt.Sprintf("duplicate, empty, or project-scoped Mancode component evidence %q", source.SourceID))
+			continue
+		}
+		sourceEvidenceByID[source.SourceID] = source
+	}
+	componentCount, totalRecords, totalImported, totalExcluded, totalFiles := 0, 0, 0, 0, 0
+	projectFound := false
+	for _, component := range sourceSet.Components {
+		totalFiles += component.FilesScanned
+	}
+	for _, component := range sourceSet.Components {
+		componentCount++
+		totalRecords += component.SourceRecords
+		totalImported += component.ImportedRecords
+		totalExcluded += component.CredentialExclusions + component.RejectedRecords
+		componentMigration := migration
+		componentMigration.SourceFingerprint = component.SourceFingerprint
+		componentMigration.SnapshotSHA256 = component.SnapshotSHA256
+		componentMigration.SourceRecords = component.SourceRecords
+		componentMigration.ImportedRecords = component.ImportedRecords
+		componentMigration.ExcludedRecords = component.CredentialExclusions + component.RejectedRecords
+		if component.Role == "project" {
+			projectFound = true
+			if component.SourceID != "project" {
+				assessment.Blockers = append(assessment.Blockers, "migration mancode source-set project component has an invalid ID")
+			}
+			componentMigration.FormatCoverage = migration.FormatCoverage
+			componentMigration.SourceBackupVerification = migration.SourceBackupVerification
+		} else {
+			source, ok := sourceEvidenceByID[component.SourceID]
+			if !ok {
+				assessment.Blockers = append(assessment.Blockers, "migration mancode source set is missing evidence for component "+component.SourceID)
+				continue
+			}
+			delete(sourceEvidenceByID, component.SourceID)
+			if source.Role != component.Role || source.SourceFingerprint != component.SourceFingerprint || source.SnapshotSHA256 != component.SnapshotSHA256 {
+				assessment.Blockers = append(assessment.Blockers, "migration mancode component evidence does not match source-set inventory for "+component.SourceID)
+			}
+			if !source.InterruptionRecoveryTested || !source.RollbackRehearsed {
+				assessment.Blockers = append(assessment.Blockers, "migration mancode component "+component.SourceID+" lacks interruption-recovery or rollback evidence")
+			}
+			componentMigration.FormatCoverage = source.FormatCoverage
+			componentMigration.SourceBackupVerification = source.SourceBackupVerification
+			verifyEvidence(assessment, verifier, "migration mancode component "+component.SourceID, source.Evidence)
+		}
+		verifyEvidence(assessment, verifier, "migration mancode component "+component.SourceID+" format coverage", []Evidence{componentMigration.FormatCoverage})
+		validateMigrationFormatCoverage(assessment, verifier, componentMigration, trustedMigrationReviewers, totalFiles > 0)
+		verifyEvidence(assessment, verifier, "migration mancode component "+component.SourceID+" source backup verification", []Evidence{componentMigration.SourceBackupVerification})
+		validateMigrationSourceBackup(assessment, verifier, componentMigration)
+	}
+	if len(sourceEvidenceByID) > 0 {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode contains component evidence absent from source-set inventory")
+	}
+	if !projectFound || componentCount != len(migration.Sources)+1 {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode component evidence does not cover the complete source set")
+	}
+	if totalRecords != migration.SourceRecords || totalImported != migration.ImportedRecords || totalExcluded != migration.ExcludedRecords {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode aggregate counts do not reconcile across source roots")
+	}
+	if totalFiles == 0 {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source set contains no scanned source files")
+	}
+}
+
+func validateMigrationFormatCoverage(assessment *Assessment, verifier *artifactVerifier, migration MigrationEvidence,
+	trustedMigrationReviewers migrationreview.TrustStore, allowEmptyComponent ...bool) {
 	content, actual, err := verifier.readEvidence(migration.FormatCoverage)
 	if err != nil {
 		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" format coverage: "+err.Error())
@@ -423,7 +545,7 @@ func validateMigrationFormatCoverage(assessment *Assessment, verifier *artifactV
 		coverage.CredentialExcludedRecords+coverage.RejectedRecords != migration.ExcludedRecords {
 		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" format coverage does not match migration fingerprints or aggregate counts")
 	}
-	if coverage.FilesScanned == 0 {
+	if coverage.FilesScanned == 0 && (len(allowEmptyComponent) == 0 || !allowEmptyComponent[0]) {
 		assessment.Blockers = append(assessment.Blockers, "migration "+migration.Product+" has no scanned source files")
 	}
 	if coverage.UnclassifiedFiles != 0 || coverage.UnsupportedFiles != 0 {

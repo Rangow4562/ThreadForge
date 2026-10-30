@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-source-set-v1.schema.json",
+  "title": "Threadforge Mancode source-set inventory v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "product", "project_source_fingerprint", "project_snapshot_sha256",
+    "components", "duplicate_record_keys", "inventory_sha256"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-source-set.v1" },
+    "product": { "const": "mancode" },
+    "project_source_fingerprint": { "$ref": "#/$defs/sha256" },
+    "project_snapshot_sha256": { "$ref": "#/$defs/sha256" },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1024,
+      "contains": {
+        "type": "object",
+        "properties": {
+          "source_id": { "const": "project" },
+          "role": { "const": "project" }
+        },
+        "required": ["source_id", "role"]
+      },
+      "minContains": 1,
+      "maxContains": 1,
+      "items": { "$ref": "#/$defs/component" }
+    },
+    "duplicate_record_keys": { "type": "integer", "minimum": 0, "maximum": 100000 },
+    "duplicate_record_keys_sha256": { "$ref": "#/$defs/sha256" },
+    "inventory_sha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id", "role", "source_fingerprint", "snapshot_sha256", "files_scanned",
+        "snapshot_files", "source_records", "imported_records", "credential_exclusions", "rejected_records"
+      ],
+      "properties": {
+        "source_id": { "type": "string", "pattern": "^(?:project|git_coordination-[a-f0-9]{64}|non_git_coordination-[a-f0-9]{64})$" },
+        "role": { "enum": ["project", "git_coordination", "non_git_coordination"] },
+        "source_fingerprint": { "$ref": "#/$defs/sha256" },
+        "snapshot_sha256": { "$ref": "#/$defs/sha256" },
+        "files_scanned": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "snapshot_files": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "source_records": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "imported_records": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "credential_exclusions": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "rejected_records": { "type": "integer", "minimum": 0, "maximum": 100000 }
+      }
+    }
+  }
+}

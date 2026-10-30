@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -388,8 +389,8 @@ func inspectWithOptions(product Product, sourceRoot string, scannedSink *[]scann
 	for i := range scanned {
 		manifest.Files[i] = scanned[i].entry
 	}
-	manifest.SourceFingerprint = sourceFingerprintWithWorkflowArchiveChecks(
-		manifest.Files, manifest.CrossFileChecks, manifest.MancodeLegacyWorkflowChecks,
+	manifest.SourceFingerprint = sourceFingerprintForRoot(
+		product, root, manifest.Files, manifest.CrossFileChecks, manifest.MancodeLegacyWorkflowChecks,
 		manifest.MancodeTeamPolicyChecks, manifest.MancodeWorkflowArchiveChecks, manifest.MancodeGitRef,
 	)
 	manifest.ID = string(product) + "-" + manifest.SourceFingerprint[:20]
@@ -420,6 +421,9 @@ func CreateSnapshotWithOptions(product Product, sourceRoot, dataRoot string, opt
 	root := filepath.Join(dataRoot, "migrations", "snapshots", string(product), manifest.SourceFingerprint)
 	manifestPath := filepath.Join(root, "manifest.json")
 	if existing, err := loadSnapshot(manifestPath, false); err == nil {
+		if !sameMigrationSourceRoot(existing.SourceRoot, manifest.SourceRoot) {
+			return Manifest{}, errors.New("existing migration snapshot is bound to a different source root")
+		}
 		if err := ensurePrivateArtifactSnapshot(root, manifest.SourceRoot, existing); err != nil {
 			return Manifest{}, err
 		}
@@ -618,6 +622,9 @@ func CreateSnapshotWithOptions(product Product, sourceRoot, dataRoot string, opt
 	}
 	if err := os.Rename(temp, root); err != nil {
 		if existing, loadErr := LoadSnapshot(filepath.Join(root, "manifest.json")); loadErr == nil && existing.SourceFingerprint == manifest.SourceFingerprint {
+			if !sameMigrationSourceRoot(existing.SourceRoot, manifest.SourceRoot) {
+				return Manifest{}, errors.New("existing migration snapshot is bound to a different source root")
+			}
 			return existing, nil
 		}
 		return Manifest{}, fmt.Errorf("commit migration snapshot: %w", err)
@@ -1007,9 +1014,10 @@ func VerifyManifest(manifest Manifest) error {
 		validateMancodeTeamPolicyManifestChecks(manifest) != nil ||
 		validateMancodeLegacyWorkflowManifestChecks(manifest) != nil ||
 		validateMancodeWorkflowArchiveManifestChecks(manifest) != nil ||
-		manifest.SourceFingerprint != sourceFingerprintWithWorkflowArchiveChecks(
-			manifest.Files, manifest.CrossFileChecks, manifest.MancodeLegacyWorkflowChecks,
-			manifest.MancodeTeamPolicyChecks, manifest.MancodeWorkflowArchiveChecks, manifest.MancodeGitRef,
+		manifest.SourceFingerprint != sourceFingerprintForRoot(
+			manifest.Product, manifest.SourceRoot, manifest.Files, manifest.CrossFileChecks,
+			manifest.MancodeLegacyWorkflowChecks, manifest.MancodeTeamPolicyChecks,
+			manifest.MancodeWorkflowArchiveChecks, manifest.MancodeGitRef,
 		) {
 		return errors.New("migration source fingerprint is invalid")
 	}
@@ -1741,6 +1749,45 @@ func writePrivateFile(name string, data []byte) error {
 		return err
 	}
 	return file.Close()
+}
+
+func sourceFingerprintForRoot(product Product, sourceRoot string, files []FileEntry, checks []migrationcoverage.CrossFileCheck,
+	legacyWorkflowChecks []migrationcoverage.MancodeLegacyWorkflowCheck,
+	teamPolicyChecks []migrationcoverage.MancodeTeamPolicyCheck,
+	workflowArchiveChecks []migrationcoverage.MancodeWorkflowArchiveCheck,
+	gitRef *MancodeGitRefSource) string {
+	fingerprint := sourceFingerprintWithWorkflowArchiveChecks(
+		files, checks, legacyWorkflowChecks, teamPolicyChecks, workflowArchiveChecks, gitRef)
+	if product != Mancode || !isMancodeCoordinationRoot(sourceRoot) {
+		return fingerprint
+	}
+	clean := strings.ToLower(filepath.ToSlash(filepath.Clean(sourceRoot)))
+	parts := strings.Split(strings.Trim(clean, "/"), "/")
+	role := ""
+	if len(parts) >= 3 && parts[len(parts)-3] == "mancode" && parts[len(parts)-2] == "workspaces" {
+		role = "git_coordination"
+	} else if len(parts) >= 4 && parts[len(parts)-4] == ".mancode" &&
+		parts[len(parts)-3] == "runtime" && parts[len(parts)-2] == "non-git" {
+		role = "non_git_coordination"
+	}
+	if role == "" {
+		return fingerprint
+	}
+	rootIdentity := digest([]byte("threadforge.mancode-coordination-root.v1\x00" + role + "\x00" + strings.ToUpper(parts[len(parts)-1])))
+	return digest([]byte("threadforge.mancode-coordination-fingerprint.v1\x00" + fingerprint + "\x00" + rootIdentity))
+}
+
+func sameMigrationSourceRoot(left, right string) bool {
+	leftCanonical, leftErr := filepath.EvalSymlinks(left)
+	rightCanonical, rightErr := filepath.EvalSymlinks(right)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	leftCanonical, rightCanonical = filepath.Clean(leftCanonical), filepath.Clean(rightCanonical)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(leftCanonical, rightCanonical)
+	}
+	return leftCanonical == rightCanonical
 }
 
 func sourceFingerprint(files []FileEntry, checks []migrationcoverage.CrossFileCheck,

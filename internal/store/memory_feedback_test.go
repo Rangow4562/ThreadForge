@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,6 +73,67 @@ func TestMemoryFeedbackIsTaskScopedAppendOnlyAndSummarizedAsSelfReported(t *test
 	}
 	if _, err := database.db.ExecContext(ctx, `DELETE FROM memory_retrieval_receipts WHERE id = ?`, receipt.ID); err == nil {
 		t.Fatal("memory retrieval receipt deletion was allowed")
+	}
+}
+
+func TestMemoryFeedbackSummarySeparatesReportsFromDistinctTasks(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "threadforge.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	projectID := "repo-feedback-distinct"
+	taskIDs := []string{"task-feedback-retry-a", "task-feedback-retry-b"}
+	for _, taskID := range taskIDs {
+		task := continuity.Task{
+			SchemaVersion: continuity.SchemaVersion, ID: taskID, ProjectID: projectID, Owner: "local-user",
+			Title: "Retry one task", Objective: "Keep report counts distinct from task counts",
+			AcceptanceCriteria: []string{"The summary does not expose task identifiers"}, Status: continuity.TaskOpen,
+			Revision: 1, CreatedAt: stamp, UpdatedAt: stamp,
+		}
+		if err := database.CreateTask(ctx, task, "local-user", "create task for feedback summary test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	feedbackIDs := []string{
+		"memory-feedback-0123456789abcdef0123456789abcdef",
+		"memory-feedback-1123456789abcdef0123456789abcdef",
+		"memory-feedback-2123456789abcdef0123456789abcdef",
+	}
+	feedbackTaskIDs := []string{taskIDs[0], taskIDs[0], taskIDs[1]}
+	for i, feedbackID := range feedbackIDs {
+		feedback := memoryfeedback.Feedback{
+			SchemaVersion: memoryfeedback.SchemaVersion, ID: feedbackID, ProjectID: projectID, TaskID: feedbackTaskIDs[i],
+			TargetKind: memoryfeedback.TargetProcedure, TargetID: "retry-guidance", TargetRevision: 2,
+			Exposure: memoryfeedback.ExposureUsed, Utility: memoryfeedback.UtilityHelpful, TaskResult: "failed",
+			Harness: "codex-cli", Actor: "local-user", EvidenceClass: memoryfeedback.EvidenceSelfReported, CreatedAt: stamp,
+		}
+		if _, err := database.RecordMemoryFeedback(ctx, feedback); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	summary, err := database.SummarizeMemoryFeedback(ctx, projectID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.SchemaVersion != memoryfeedback.SummaryResultVersion || summary.Records != 3 || len(summary.Groups) != 1 {
+		t.Fatalf("summary=%+v", summary)
+	}
+	group := summary.Groups[0]
+	if group.Count != 3 || group.DistinctTaskCount != 2 {
+		t.Fatalf("group=%+v; want three reports across two tasks", group)
+	}
+	payload, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, taskID := range taskIDs {
+		if strings.Contains(string(payload), taskID) {
+			t.Fatalf("summary exposed task id %q: %s", taskID, payload)
+		}
 	}
 }
 

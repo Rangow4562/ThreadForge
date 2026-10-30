@@ -15,7 +15,7 @@ const (
 	SchemaVersion               = "threadforge.memory-feedback.v1"
 	RecordResultVersion         = "threadforge.memory-feedback-result.v1"
 	ListResultVersion           = "threadforge.memory-feedback-list.v1"
-	SummaryResultVersion        = "threadforge.memory-feedback-summary.v1"
+	SummaryResultVersion        = "threadforge.memory-feedback-summary.v2"
 	RetrievalReceiptVersion     = "threadforge.memory-retrieval-receipt.v1"
 	RetrievalReceiptVersionV2   = "threadforge.memory-retrieval-receipt.v2"
 	RetrievalReceiptVersionV3   = "threadforge.memory-retrieval-receipt.v3"
@@ -145,14 +145,15 @@ type ListResult struct {
 }
 
 type SummaryGroup struct {
-	TargetKind     TargetKind `json:"target_kind"`
-	TargetID       string     `json:"target_id"`
-	TargetRevision int        `json:"target_revision"`
-	Harness        string     `json:"harness"`
-	Exposure       Exposure   `json:"exposure"`
-	Utility        Utility    `json:"utility"`
-	TaskResult     string     `json:"task_result"`
-	Count          int        `json:"count"`
+	TargetKind        TargetKind `json:"target_kind"`
+	TargetID          string     `json:"target_id"`
+	TargetRevision    int        `json:"target_revision"`
+	Harness           string     `json:"harness"`
+	Exposure          Exposure   `json:"exposure"`
+	Utility           Utility    `json:"utility"`
+	TaskResult        string     `json:"task_result"`
+	Count             int        `json:"count"`
+	DistinctTaskCount int        `json:"distinct_task_count"`
 }
 
 type SummaryResult struct {

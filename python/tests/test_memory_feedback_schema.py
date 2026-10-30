@@ -87,30 +87,38 @@ def test_memory_feedback_result_list_and_summary_schemas_validate():
             "execution_authorized": False,
         }
     )
-    _validator("memory-feedback-summary-v1.schema.json").validate(
-        {
-            "schema_version": "threadforge.memory-feedback-summary.v1",
-            "status": "complete",
-            "project_id": "repo:example",
-            "records": 1,
-            "retrieval_receipt_linked": 0,
-            "groups": [
-                {
-                    "target_kind": "procedure",
-                    "target_id": "build-recovery",
-                    "target_revision": 2,
-                    "harness": "codex-cli",
-                    "exposure": "used",
-                    "utility": "helpful",
-                    "task_result": "passed",
-                    "count": 1,
-                }
-            ],
-            "evidence_class": "self_reported",
-            "cutover_evidence_eligible": False,
-            "execution_authorized": False,
-        }
-    )
+    legacy_summary = {
+        "schema_version": "threadforge.memory-feedback-summary.v1",
+        "status": "complete",
+        "project_id": "repo:example",
+        "records": 1,
+        "retrieval_receipt_linked": 0,
+        "groups": [
+            {
+                "target_kind": "procedure",
+                "target_id": "build-recovery",
+                "target_revision": 2,
+                "harness": "codex-cli",
+                "exposure": "used",
+                "utility": "helpful",
+                "task_result": "passed",
+                "count": 1,
+            }
+        ],
+        "evidence_class": "self_reported",
+        "cutover_evidence_eligible": False,
+        "execution_authorized": False,
+    }
+    _validator("memory-feedback-summary-v1.schema.json").validate(legacy_summary)
+
+    current_summary = {
+        **legacy_summary,
+        "schema_version": "threadforge.memory-feedback-summary.v2",
+        "groups": [{**legacy_summary["groups"][0], "distinct_task_count": 1}],
+    }
+    _validator("memory-feedback-summary-v2.schema.json").validate(current_summary)
+    with pytest.raises(ValidationError):
+        _validator("memory-feedback-summary-v2.schema.json").validate(legacy_summary)
 
 
 def test_memory_retrieval_receipt_schema_is_scoped_and_does_not_claim_delivery():

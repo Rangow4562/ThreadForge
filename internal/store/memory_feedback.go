@@ -350,6 +350,7 @@ func (s *Store) SummarizeMemoryFeedback(ctx context.Context, projectID string, m
 		revision                                         int
 	}
 	groups := make(map[groupKey]int)
+	distinctTasks := make(map[groupKey]map[string]struct{})
 	var scanned int
 	var receiptLinked int
 	truncated := false
@@ -380,9 +381,14 @@ func (s *Store) SummarizeMemoryFeedback(ctx context.Context, projectID string, m
 			_ = rows.Close()
 			return memoryfeedback.SummaryResult{}, fmt.Errorf("validate linked memory retrieval receipt: %w", err)
 		}
-		groups[groupKey{kind: string(feedback.TargetKind), id: feedback.TargetID, revision: feedback.TargetRevision,
+		key := groupKey{kind: string(feedback.TargetKind), id: feedback.TargetID, revision: feedback.TargetRevision,
 			harness: feedback.Harness, exposure: string(feedback.Exposure), utility: string(feedback.Utility),
-			taskResult: feedback.TaskResult}]++
+			taskResult: feedback.TaskResult}
+		groups[key]++
+		if distinctTasks[key] == nil {
+			distinctTasks[key] = make(map[string]struct{})
+		}
+		distinctTasks[key][feedback.TaskID] = struct{}{}
 		if feedback.RetrievalReceiptID != "" {
 			receiptLinked++
 		}
@@ -437,6 +443,7 @@ func (s *Store) SummarizeMemoryFeedback(ctx context.Context, projectID string, m
 			TargetKind: memoryfeedback.TargetKind(key.kind), TargetID: key.id, TargetRevision: key.revision,
 			Harness: key.harness, Exposure: memoryfeedback.Exposure(key.exposure),
 			Utility: memoryfeedback.Utility(key.utility), TaskResult: key.taskResult, Count: groups[key],
+			DistinctTaskCount: len(distinctTasks[key]),
 		})
 	}
 	return result, nil

@@ -220,7 +220,7 @@ function tryCopilotProjectMcpDiscovery(cwd) {
 
 async function runCopilotPlanGateHostSmoke(version) {
   const resultBase = {
-    schema_version: 'threadforge.copilot-cli-plan-gate-smoke.v1',
+    schema_version: 'threadforge.copilot-cli-plan-gate-smoke.v2',
     host_cli_version: version ?? null,
     hook_event: 'preToolUse',
     guard_fixture: 'missing-task',
@@ -233,6 +233,10 @@ async function runCopilotPlanGateHostSmoke(version) {
       status: 'not-installed',
       provider: null,
       tool_attempts: [],
+      unscoped_shell_attempt: {
+        status: 'not-installed', tool_available: false, availability_reason: 'not-installed',
+        attempt_count: 0, denial_feedback_observed: false, target_state_unchanged: true,
+      },
       hook_denial_count: 0,
       write_effects_observed: 0,
       provider_requests: 0,
@@ -260,7 +264,7 @@ async function runCopilotPlanGateHostSmoke(version) {
   }), 'installed');
 
   const toolNames = ['create', 'edit', 'apply_patch', 'str_replace_editor'];
-  const attempts = toolNames.map((tool) => {
+  const directAttempts = toolNames.map((tool) => {
     const safeName = tool.replaceAll(/[^a-z0-9]+/gi, '-').toLowerCase();
     const initialContent = tool === 'edit' || tool === 'str_replace_editor'
       ? `THREADFORGE-${safeName}-original-content`
@@ -281,6 +285,18 @@ async function runCopilotPlanGateHostSmoke(version) {
       targetStateUnchanged: false,
     };
   });
+  const shellAttempt = {
+    tool: 'shell',
+    targetPath: 'threadforge-plan-gate-shell-must-deny.txt',
+    initialContent: null,
+    replacementContent: null,
+    callID: 'call_copilot_shell_plan_gate_smoke',
+    toolAvailable: null,
+    availabilityReason: null,
+    denialFeedbackObserved: false,
+    targetStateUnchanged: false,
+  };
+  const attempts = [...directAttempts, shellAttempt];
   let completionRequests = 0;
   let nextAttemptIndex = 0;
   let completedAttemptCount = 0;
@@ -317,7 +333,7 @@ async function runCopilotPlanGateHostSmoke(version) {
         const toolResultText = latestToolResult ? toolMessageText(latestToolResult.content) : '';
         const denialSignals = {
           pre_tool_use: /Denied by preToolUse hook/i.test(toolResultText),
-          threadforge: /Threadforge withheld this Copilot file operation/i.test(toolResultText),
+          threadforge: /Threadforge withheld this Copilot (?:file operation|command or unclassified tool call)/i.test(toolResultText),
           permission: /permission.*denied|denied.*permission/i.test(toolResultText),
           hook: /hook.*denied|denied.*hook/i.test(toolResultText),
         };
@@ -352,7 +368,7 @@ async function runCopilotPlanGateHostSmoke(version) {
         }
 
         if (fixtureError) {
-          sendFixtureCompletion(request, response, body, { content: 'A Copilot direct-file operation did not satisfy the denial fixture.' });
+          sendFixtureCompletion(request, response, body, { content: 'A Copilot task-plan gate denial fixture did not pass.' });
           return;
         }
 
@@ -362,6 +378,10 @@ async function runCopilotPlanGateHostSmoke(version) {
           const tools = Array.isArray(body.tools) ? body.tools : [];
           const selectedTool = tools.find((candidate) => {
             const name = candidate?.function?.name ?? candidate?.name;
+            if (attempt.tool === 'shell') {
+              return typeof name === 'string' && !/^mcp(?:[_:]|$)/i.test(name) &&
+                /(bash|shell|terminal|powershell|pwsh|cmd|exec|command)/i.test(name);
+            }
             return name === attempt.tool;
           });
           nextAttemptIndex++;
@@ -375,9 +395,11 @@ async function runCopilotPlanGateHostSmoke(version) {
             continue;
           }
           const parameters = selectedTool.function?.parameters ?? selectedTool.parameters ?? {};
-          const argumentsValue = buildCopilotPlanGateArguments(
-            attempt.tool, parameters, attempt.targetPath, attempt.initialContent, attempt.replacementContent,
-          );
+          const argumentsValue = attempt.tool === 'shell'
+            ? buildCopilotShellGateArguments(parameters, attempt.targetPath)
+            : buildCopilotPlanGateArguments(
+              attempt.tool, parameters, attempt.targetPath, attempt.initialContent, attempt.replacementContent,
+            );
           if (argumentsValue === null) {
             attempt.toolAvailable = false;
             attempt.availabilityReason = 'unsupported-arguments';
@@ -400,13 +422,13 @@ async function runCopilotPlanGateHostSmoke(version) {
           return;
         }
         if (completedAttemptCount !== attempts.filter((attempt) => attempt.toolAvailable).length || pendingAttempt) {
-          throw new Error('Copilot did not complete every exposed direct-file tool attempt');
+          throw new Error('Copilot did not complete every exposed plan-gate tool attempt');
         }
         const availableCount = attempts.filter((attempt) => attempt.toolAvailable).length;
         sendFixtureCompletion(request, response, body, {
           content: availableCount > 0
-            ? `All ${availableCount} exposed direct-file operations were denied by the Threadforge task-plan gate.`
-            : 'Copilot exposed none of the selected direct-file tools in this fixture.',
+            ? `All ${availableCount} exposed Copilot operations were denied by the Threadforge task-plan gate.`
+            : 'Copilot exposed none of the selected plan-gate tools in this fixture.',
         });
       } catch (error) {
         fixtureError ??= String(error?.message ?? 'Copilot local hook fixture failed').slice(0, 256);
@@ -448,28 +470,39 @@ async function runCopilotPlanGateHostSmoke(version) {
 
   try {
     const output = await runCopilotAgent(['--prompt',
-      'Perform the four requested direct file operations exactly once each. Do not use any other tool.',
+      'Perform the four requested direct file operations and the requested shell operation exactly once each. Do not use any other tool.',
       '--allow-all-tools', '--silent'], {
       cwd: project, env: copilotEnvironment, timeout: 90_000,
     });
     if (fixtureError) throw new Error(`Copilot plan-gate hook fixture failed: ${fixtureError}; routes=${requestPaths.join(',')}`);
-    assert.equal(nextAttemptIndex, attempts.length, 'expected a result for every selected Copilot direct file tool');
-    assert.equal(completedAttemptCount, attempts.filter((attempt) => attempt.toolAvailable).length, 'expected one result for every exposed Copilot direct file tool');
+    assert.equal(nextAttemptIndex, attempts.length, 'expected a result for every selected Copilot plan-gate tool');
+    assert.equal(completedAttemptCount, attempts.filter((attempt) => attempt.toolAvailable).length, 'expected one result for every exposed Copilot plan-gate tool');
     if (!attempts.every((attempt) => attempt.targetStateUnchanged
       && (attempt.toolAvailable === false || attempt.denialFeedbackObserved))) {
       throw new Error(`Copilot hook result mismatch: attempts=${JSON.stringify(attempts.map(({ tool, toolAvailable, denialFeedbackObserved, targetStateUnchanged }) => ({ tool, toolAvailable, denialFeedbackObserved, targetStateUnchanged })))}; request_diagnostics=${JSON.stringify(requestDiagnostics)}`);
     }
     const exposedToolCount = attempts.filter((attempt) => attempt.toolAvailable).length;
+    const exposedDirectToolCount = directAttempts.filter((attempt) => attempt.toolAvailable).length;
     if (exposedToolCount > 0) assert.ok(output.includes('denied'), 'Copilot final output did not reflect the synthetic denials');
     return {
       ...resultBase,
-      status: exposedToolCount === attempts.length ? 'verified' : 'partial',
+      status: exposedDirectToolCount === directAttempts.length && shellAttempt.toolAvailable &&
+        shellAttempt.denialFeedbackObserved && shellAttempt.targetStateUnchanged ? 'verified' : 'partial',
       provider: 'deterministic-loopback-fixture',
-      tool_attempts: attempts.map(({ tool, toolAvailable, availabilityReason, denialFeedbackObserved, targetStateUnchanged }) => ({
+      tool_attempts: directAttempts.map(({ tool, toolAvailable, availabilityReason, denialFeedbackObserved, targetStateUnchanged }) => ({
         tool, tool_available: toolAvailable, availability_reason: availabilityReason,
         attempt_count: toolAvailable ? 1 : 0,
         denial_feedback_observed: denialFeedbackObserved, target_state_unchanged: targetStateUnchanged,
       })),
+      unscoped_shell_attempt: {
+        status: shellAttempt.toolAvailable && shellAttempt.denialFeedbackObserved && shellAttempt.targetStateUnchanged
+          ? 'verified' : 'partial',
+        tool_available: shellAttempt.toolAvailable === true,
+        availability_reason: shellAttempt.availabilityReason,
+        attempt_count: shellAttempt.toolAvailable ? 1 : 0,
+        denial_feedback_observed: shellAttempt.denialFeedbackObserved,
+        target_state_unchanged: shellAttempt.targetStateUnchanged,
+      },
       hook_denial_count: attempts.filter((attempt) => attempt.denialFeedbackObserved).length,
       write_effects_observed: attempts.filter((attempt) => !attempt.targetStateUnchanged).length,
       provider_requests: completionRequests, provider_routes_loopback_only: true,
@@ -771,6 +804,25 @@ function buildCopilotPlanGateArguments(toolName, schema, targetPath, originalCon
       if (Array.isArray(property.enum) && !property.enum.includes('str_replace')) return null;
       result[key] = 'str_replace';
     }
+  }
+  return result;
+}
+
+function buildCopilotShellGateArguments(schema, targetPath) {
+  const properties = schema?.properties && typeof schema.properties === 'object' ? schema.properties : {};
+  const commandKey = Object.keys(properties).find((key) =>
+    /^(?:command|cmd|script|shell_command)$/i.test(key) && (!properties[key]?.type || properties[key].type === 'string'));
+  if (!commandKey) return null;
+  const result = { [commandKey]: `echo THREADFORGE-copilot-shell-gate-must-deny > "${targetPath}"` };
+  for (const required of Array.isArray(schema.required) ? schema.required : []) {
+    if (required === commandKey) continue;
+    const property = properties[required];
+    if (!property || property.type === 'string') result[required] = 'threadforge-plan-gate-smoke';
+    else if (property.type === 'boolean') result[required] = false;
+    else if (property.type === 'integer' || property.type === 'number') result[required] = 1;
+    else if (property.type === 'array') result[required] = [];
+    else if (property.type === 'object') result[required] = {};
+    else return null;
   }
   return result;
 }
@@ -1738,7 +1790,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v41',
+    schema_version: 'threadforge.installed-skill-smoke.v42',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,

@@ -19,7 +19,7 @@
     "schema_version": { "const": "threadforge.beacon-harness-config.v1" },
     "source_format": { "enum": ["json", "toml"] },
     "kind": { "const": "host_hook_configuration" },
-    "harness": { "enum": ["claude_code", "qwen_code", "factory", "cursor", "codex_cli", "antigravity", "openhands", "kiro", "kimi_code", "muse_code"] },
+    "harness": { "enum": ["claude_code", "qwen_code", "factory", "cursor", "codex_cli", "antigravity", "openhands", "kiro", "kimi_code", "muse_code", "devin_desktop"] },
     "beacon_hooks_configured": { "type": "boolean" },
     "hook_events": {
       "type": "array",
@@ -56,7 +56,12 @@
           "session_end",
           "PermissionResult",
           "PreCompact",
-          "PostCompact"
+          "PostCompact",
+          "pre_user_prompt",
+          "post_write_code",
+          "post_run_command",
+          "post_mcp_tool_use",
+          "post_read_code"
         ]
       }
     },
@@ -83,6 +88,29 @@
         "properties": {
           "hook_events": {
             "items": { "enum": ["SessionStart", "Stop"] }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "harness": { "const": "devin_desktop" } },
+        "required": ["harness"]
+      },
+      "then": {
+        "properties": {
+          "source_format": { "const": "json" },
+          "hook_events": {
+            "maxItems": 5,
+            "items": {
+              "enum": [
+                "pre_user_prompt",
+                "post_write_code",
+                "post_run_command",
+                "post_mcp_tool_use",
+                "post_read_code"
+              ]
+            }
           }
         }
       }

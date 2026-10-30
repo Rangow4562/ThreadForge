@@ -88,7 +88,7 @@ func TestAnyJevSyntheticStateSourceFilesNormalizeSemantically(t *testing.T) {
 				t.Fatalf("synthetic-state file failed strict conversion: %s status=%s imported=%d rejected=%d issue=%s",
 					file.Path, file.Status, file.ImportedCount, file.RejectedCount, file.Issue)
 			}
-			values, decodeErr := decodeSourceItems(file.Path, sourceBytes)
+			values, decodeErr := decodeSourceItems(AnyJev, file.Path, "", sourceBytes)
 			if decodeErr != nil || len(values) != 1 {
 				t.Fatalf("synthetic-state source decode failed: %s issue=%s", file.Path, file.Issue)
 			}

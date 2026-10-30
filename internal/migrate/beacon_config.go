@@ -23,6 +23,7 @@ var (
 	errBeaconCursorVersion  = errors.New("Beacon Cursor hooks version must be 1 or omitted")
 	errBeaconOpenHandsHooks = errors.New("Beacon OpenHands hooks must use the documented event-map shape")
 	errBeaconKiroHooks      = errors.New("Beacon Kiro hooks must use the documented v1 command-hook shape")
+	errBeaconDevinHooks     = errors.New("Beacon Devin Desktop hooks must use the pinned Cascade hook shape")
 	errBeaconOpenCodePlugin = errors.New("Beacon OpenCode plugin must start with its managed marker")
 	errBeaconClinePlugin    = errors.New("Beacon Cline plugin must start with its managed marker")
 	configLabelPattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
@@ -266,6 +267,26 @@ func isBeaconCodexOTelConfigPath(relative, sourceRoot string) bool {
 	return relative == filepath.Base(relative) && strings.EqualFold(filepath.Base(filepath.Clean(sourceRoot)), ".codex")
 }
 
+// isBeaconDevinDesktopHooksPath limits migration to Beacon's documented
+// Cascade/Windsurf user and project settings locations, including selected
+// config-directory roots.
+func isBeaconDevinDesktopHooksPath(relative, sourceRoot string) bool {
+	if !strings.EqualFold(filepath.Base(relative), "hooks.json") {
+		return false
+	}
+	rel := strings.ToLower(strings.Trim(filepath.ToSlash(filepath.Clean(relative)), "/"))
+	if strings.HasSuffix("/"+rel, "/.codeium/windsurf/hooks.json") ||
+		strings.HasSuffix("/"+rel, "/.windsurf/hooks.json") {
+		return true
+	}
+	rootBase := strings.ToLower(filepath.Base(filepath.Clean(sourceRoot)))
+	parentBase := strings.ToLower(filepath.Base(filepath.Dir(filepath.Clean(sourceRoot))))
+	if rel == "hooks.json" {
+		return rootBase == ".windsurf" || (rootBase == "windsurf" && parentBase == ".codeium")
+	}
+	return rel == "windsurf/hooks.json" && rootBase == ".codeium"
+}
+
 // isBeaconGeminiSettingsPath accepts only Gemini's documented user settings path,
 // or settings.json when the selected source root itself is .gemini.
 func isBeaconGeminiSettingsPath(relative, sourceRoot string) bool {
@@ -415,6 +436,9 @@ func normalizeBeaconEndpointConfig(relative, sourceRoot string, value any) (json
 	}
 	if isBeaconCodexOTelConfigPath(relative, sourceRoot) {
 		return normalizeBeaconCodexOTelConfig(root)
+	}
+	if isBeaconDevinDesktopHooksPath(relative, sourceRoot) {
+		return normalizeBeaconDevinDesktopHooks(root)
 	}
 	if isBeaconKimiCodeConfigPath(relative, sourceRoot) {
 		return normalizeBeaconKimiCodeConfig(root, isBeaconKimiCodeCustomRootPath(relative, sourceRoot))

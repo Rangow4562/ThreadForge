@@ -141,6 +141,29 @@ def test_beacon_antigravity_projection_limits_events_to_its_named_block():
         validator.validate({**result, "execution_authorized": True})
 
 
+def test_beacon_devin_desktop_projection_is_limited_to_pinned_cascade_events():
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    validator = Draft202012Validator(schema)
+    result = {
+        "schema_version": "threadforge.beacon-harness-config.v1",
+        "source_format": "json",
+        "kind": "host_hook_configuration",
+        "harness": "devin_desktop",
+        "beacon_hooks_configured": True,
+        "hook_events": ["pre_user_prompt", "post_write_code", "post_run_command", "post_mcp_tool_use", "post_read_code"],
+        "omitted_fields": [
+            "credentials", "environment", "hook_commands", "hook_matchers", "local_paths", "unrelated_settings",
+        ],
+        "human_review_required": True,
+        "execution_authorized": False,
+    }
+    validator.validate(result)
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "hook_events": ["SessionStart"]})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "execution_authorized": True})
+
+
 def test_beacon_openhands_projection_accepts_only_documented_event_spellings():
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     validator = Draft202012Validator(schema)

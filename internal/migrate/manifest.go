@@ -22,6 +22,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/threadforge-ai/threadforge/pkg/migrationcoverage"
 	"github.com/threadforge-ai/threadforge/pkg/privacy"
+	"github.com/threadforge-ai/threadforge/pkg/strictjson"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1249,9 +1250,9 @@ func scanFileWithMancodeGitRef(product Product, sourceRoot, relative, fullPath s
 		if strings.HasSuffix(strings.ToLower(relative), ".items.json.gz") {
 			decodePath = strings.TrimSuffix(relative, ".gz")
 		}
-		items, err = decodeSourceItems(decodePath, decoded)
+		items, err = decodeSourceItems(product, decodePath, sourceRoot, decoded)
 	} else {
-		items, err = decodeSourceItems(relative, decoded)
+		items, err = decodeSourceItems(product, relative, sourceRoot, decoded)
 	}
 	if err != nil {
 		return scannedFile{}, expandedBytes, err
@@ -1456,7 +1457,7 @@ func decodeBeaconGzipJSONL(relative string, data []byte, expandedBudget int64) (
 	return decoded, expandedBytes, nil
 }
 
-func decodeSourceItems(relative string, data []byte) ([]any, error) {
+func decodeSourceItems(product Product, relative, sourceRoot string, data []byte) ([]any, error) {
 	ext := strings.ToLower(filepath.Ext(relative))
 	base := strings.ToLower(filepath.Base(relative))
 	if strings.HasPrefix(base, "runtime.jsonl.") || strings.HasPrefix(base, "inventory_state.jsonl.") {
@@ -1478,6 +1479,16 @@ func decodeSourceItems(relative string, data []byte) ([]any, error) {
 		}
 		return items, nil
 	case ".json":
+		if product == Beacon && isBeaconDevinDesktopHooksPath(relative, sourceRoot) {
+			if len(data) > maxBeaconDevinDesktopHooksBytes {
+				return nil, errors.New("Beacon Devin Desktop hooks exceed the 1 MiB limit")
+			}
+			var value map[string]any
+			if err := strictjson.Decode(data, &value); err != nil || value == nil {
+				return nil, errors.New("invalid Beacon Devin Desktop hooks JSON")
+			}
+			return []any{value}, nil
+		}
 		var value any
 		if err := json.Unmarshal(data, &value); err != nil {
 			return nil, errors.New("invalid JSON file")
@@ -1628,7 +1639,8 @@ func eligiblePath(product Product, relative, sourceRoot string) bool {
 			isBeaconCodexOTelConfigPath(relative, sourceRoot) || isBeaconGeminiSettingsPath(relative, sourceRoot) ||
 			isBeaconKimiCodeConfigPath(relative, sourceRoot) ||
 			isBeaconMuseManagedHooksPath(relative, sourceRoot) || isBeaconMuseSettingsPath(relative, sourceRoot) ||
-			isBeaconAntigravityHooksPath(relative, sourceRoot) || isBeaconOpenHandsHooksPath(relative, sourceRoot) ||
+			isBeaconAntigravityHooksPath(relative, sourceRoot) || isBeaconDevinDesktopHooksPath(relative, sourceRoot) ||
+			isBeaconOpenHandsHooksPath(relative, sourceRoot) ||
 			isBeaconKiroHooksPath(relative, sourceRoot) ||
 			(isBeaconLearningDBPath(relative) && (strings.HasSuffix(lower, "/.beacon/endpoint/memory.db") ||
 				(relative == "memory.db" && strings.EqualFold(filepath.Base(sourceRoot), "endpoint") &&

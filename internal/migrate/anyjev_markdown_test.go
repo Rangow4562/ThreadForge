@@ -288,7 +288,7 @@ func TestAnyJevMarkdownSourceFilesNormalizeSemantically(t *testing.T) {
 			var detail error
 			if readErr != nil {
 				detail = readErr
-			} else if values, decodeErr := decodeSourceItems(file.Path, sourceBytes); decodeErr != nil {
+			} else if values, decodeErr := decodeSourceItems(AnyJev, file.Path, "", sourceBytes); decodeErr != nil {
 				detail = decodeErr
 			} else if len(values) != 1 {
 				detail = fmt.Errorf("decoded item count is %d", len(values))

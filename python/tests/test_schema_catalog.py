@@ -967,6 +967,30 @@ def test_mancode_legacy_plan_schema_keeps_markdown_untrusted_and_out_of_injectio
         with pytest.raises(ValidationError):
             validator.validate(invalid)
 
+    schema_v2 = json.loads((SCHEMA_DIRECTORY / "mancode-legacy-workflow-plan-v2.schema.json").read_text(encoding="utf-8"))
+    validator_v2 = validator_for(schema_v2)(schema_v2)
+    structured = {
+        **document,
+        "schema_version": "threadforge.mancode-legacy-workflow-plan.v2",
+        "structure": {
+            "marker_status": "well_formed",
+            "baseline_block_present": True,
+            "progress_task_present": False,
+            "delivery_record_present": True,
+            "domain_matrix_present": False,
+            "acceptance_marker_count": 2,
+            "coach_signal": "ready_for_plan",
+        },
+    }
+    validator_v2.validate(structured)
+    for invalid in (
+        {**structured, "execution_authorized": True},
+        {**structured, "structure": {**structured["structure"], "marker_status": "approved"}},
+        {**structured, "structure": {**structured["structure"], "progress_task_id": "export"}},
+    ):
+        with pytest.raises(ValidationError):
+            validator_v2.validate(invalid)
+
 
 def test_procedure_list_schema_is_versioned_metadata_only():
     schema = json.loads((SCHEMA_DIRECTORY / "procedure-list-v1.schema.json").read_text(encoding="utf-8"))

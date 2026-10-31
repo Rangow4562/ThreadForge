@@ -36,18 +36,25 @@ test('two concurrent tabs stay correlated to their own conversations', async ({
     expect(p2.locator('[data-testid="assistant-message"]')).toHaveAttribute('data-complete', '1'),
   ]);
 
-  // Wait until B's tool call (the last-arriving signal) has been delivered.
+  // Wait for asynchronous events from both tabs before taking a collector snapshot.
   await expect
     .poll(() => recordByAction(mockCollector.received, 'tool.invoked'), { timeout: 10_000 })
     .toBeTruthy();
 
+  const promptFor = (recs: Record<string, unknown>[], sid: string) =>
+    recs.find((attrs) => attrs['beacon.session.id'] === sid && attrs['beacon.event.action'] === 'prompt.submitted');
+  await expect
+    .poll(() => {
+      const recs = allRecords(mockCollector.received).map((r) => flatAttrs(r.attributes));
+      return Boolean(promptFor(recs, A) && promptFor(recs, B));
+    }, { timeout: 10_000 })
+    .toBe(true);
+
   const recs = allRecords(mockCollector.received).map((r) => flatAttrs(r.attributes));
-  const promptFor = (sid: string) =>
-    recs.find((a) => a['beacon.session.id'] === sid && a['beacon.event.action'] === 'prompt.submitted');
 
   // Prompts are attributed to the correct conversation (no cross-contamination).
-  expect(promptFor(A)?.['beacon.prompt.text']).toBe('capital of France?');
-  expect(promptFor(B)?.['beacon.prompt.text']).toBe('weather in NYC?');
+  expect(promptFor(recs, A)?.['beacon.prompt.text']).toBe('capital of France?');
+  expect(promptFor(recs, B)?.['beacon.prompt.text']).toBe('weather in NYC?');
 
   // The tool call belongs only to conversation B (its fixture had one); A had none.
   const toolSessions = recs

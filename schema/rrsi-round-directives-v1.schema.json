@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/rrsi-round-directives-v1.schema.json",
+  "title": "Threadforge content-free RRSI round directives summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "threadforge.rrsi-round-directives.v1" },
+    "domain": { "enum": ["coding", "workspace", "eng"] },
+    "round_index": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+    "round_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artifact_path_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "edit_budget": { "type": "integer", "minimum": 0, "maximum": 80 },
+    "stall_flag": { "type": "integer", "enum": [0, 1] },
+    "exploration_slots": { "type": "integer", "minimum": 0, "maximum": 8 },
+    "noise_band": { "type": "number", "minimum": 0, "maximum": 1 },
+    "incumbent_score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "tried_components": { "$ref": "#/$defs/componentFlags" },
+    "untried_components": { "$ref": "#/$defs/componentFlags" },
+    "pruned_components": { "$ref": "#/$defs/componentFlags" },
+    "accepted_edits_in_prune_set": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "measured_prune_components": { "type": "integer", "minimum": 0, "maximum": 9 },
+    "source_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "source_bytes": { "type": "integer", "minimum": 1, "maximum": 33554432 },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "cutover_evidence_eligible": { "const": false }
+  },
+  "$defs": {
+    "componentFlags": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prompt": { "type": "integer", "enum": [0, 1] },
+        "control_flow": { "type": "integer", "enum": [0, 1] },
+        "config": { "type": "integer", "enum": [0, 1] },
+        "output_plumbing": { "type": "integer", "enum": [0, 1] },
+        "context_mgmt": { "type": "integer", "enum": [0, 1] },
+        "client_tool": { "type": "integer", "enum": [0, 1] },
+        "skill": { "type": "integer", "enum": [0, 1] },
+        "memory": { "type": "integer", "enum": [0, 1] },
+        "subagent": { "type": "integer", "enum": [0, 1] }
+      },
+      "required": ["prompt", "control_flow", "config", "output_plumbing", "context_mgmt", "client_tool", "skill", "memory", "subagent"]
+    }
+  },
+  "required": [
+    "schema_version", "domain", "round_index", "round_sha256", "artifact_path_sha256",
+    "edit_budget", "stall_flag", "exploration_slots", "noise_band", "incumbent_score",
+    "tried_components", "untried_components", "pruned_components", "accepted_edits_in_prune_set",
+    "measured_prune_components", "source_sha256", "source_bytes", "human_review_required",
+    "execution_authorized", "cutover_evidence_eligible"
+  ]
+}

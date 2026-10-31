@@ -85,6 +85,7 @@ func TestMigrationFormatIDUsesDocumentedSourceSelectors(t *testing.T) {
 		{RRSI, "C:/RRSI", "runs/workspace/r2/B/smoke.json", "rrsi.smoke-outcome"},
 		{RRSI, "C:/RRSI", "runs/coding/r0/A/smoke.json", "rrsi.smoke-outcome"},
 		{RRSI, "C:/RRSI", "runs/coding/r0/A/prep.json", "rrsi.prep-state"},
+		{RRSI, "C:/RRSI", "runs/coding/r0/directives.json", "rrsi.round-directives"},
 	}
 	for _, test := range tests {
 		t.Run(string(test.product)+"/"+test.path, func(t *testing.T) {

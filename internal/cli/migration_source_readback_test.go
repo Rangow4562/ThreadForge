@@ -394,6 +394,58 @@ func TestRRSIPrepStateMigrationReadback(t *testing.T) {
 	}
 }
 
+func TestRRSIRoundDirectivesMigrationReadback(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "rrsi-directives")
+	path := filepath.Join(root, "runs", "coding", "r0", "directives.json")
+	contents := `{"t":0,"b_t":2,"sigma_t":1,"tried":["prompt","skill"],"explore":{"sigma":1,"untried":["control_flow","config","output_plumbing","context_mgmt","client_tool","memory","subagent"],"m_draft":1,"text":"private proposer instruction"},"prune_set":[{"component":"prompt","recent_best_gain":null,"accepted_edits_in_incumbent":[{"t":0,"edit_id":"private-edit-id","hypothesis":"private-hypothesis","delta_S":null}]}],"delta":0.02,"S_star":0.5}`
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("create synthetic RRSI directives directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write synthetic RRSI directives: %v", err)
+	}
+	readback := runConfiguredMigrationSourceReadback(t, migrate.RRSI, root)
+	if readback.Snapshot.Summary.FilesScanned != 1 || readback.Snapshot.Summary.FilesUnsupported != 0 ||
+		readback.Snapshot.Summary.RecordsImported != 1 || readback.Verification.Status != "reconciled" ||
+		readback.Verification.CutoverAuthorized || readback.Coverage.UnconvertedFiles != 0 {
+		t.Fatalf("RRSI round directives did not reconcile as review-only: %#v", readback)
+	}
+	familyFound := false
+	for _, format := range readback.Coverage.Formats {
+		if format.ID == "rrsi.round-directives" {
+			familyFound = format.Files == 1 && format.RecordsFound == 1 && format.RecordsImported == 1
+		}
+	}
+	if !familyFound {
+		t.Fatalf("RRSI round-directives coverage did not reconcile: %#v", readback.Coverage.Formats)
+	}
+	records, err := migrate.ReadSnapshotRecords(readback.ManifestPath, readback.Snapshot)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("read RRSI directives summary records: count=%d err=%v", len(records), err)
+	}
+	record := records[0]
+	if record.Type != "rrsi_round_directives" || record.Scope != "local_pending_review" ||
+		strings.Contains(record.SourcePath, "runs/") || strings.Contains(record.SourcePath, "directives.json") {
+		t.Fatalf("RRSI directives summary retained a raw identity or unsafe scope: %#v", record)
+	}
+	for _, private := range []string{"private proposer instruction", "private-edit-id", "private-hypothesis"} {
+		if strings.Contains(string(record.Payload), private) {
+			t.Fatalf("RRSI directives summary retained private content %q: %s", private, record.Payload)
+		}
+	}
+	var boundary struct {
+		HumanReviewRequired     bool `json:"human_review_required"`
+		ExecutionAuthorized     bool `json:"execution_authorized"`
+		CutoverEvidenceEligible bool `json:"cutover_evidence_eligible"`
+	}
+	if err := json.Unmarshal(record.Payload, &boundary); err != nil {
+		t.Fatal(err)
+	}
+	if !boundary.HumanReviewRequired || boundary.ExecutionAuthorized || boundary.CutoverEvidenceEligible {
+		t.Fatalf("RRSI directives summary crossed its review boundary: %#v", boundary)
+	}
+}
+
 func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "rrsi-evaluations")
 	fixtures := map[string]string{

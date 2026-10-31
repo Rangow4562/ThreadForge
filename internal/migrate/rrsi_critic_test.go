@@ -86,6 +86,8 @@ func TestRRSICriticReadbackRejectsTamperingAndStrictParserRejectsAmbiguity(t *te
 		"execution authority":    func(value map[string]any) { value["execution_authorized"] = true },
 		"cutover eligibility":    func(value map[string]any) { value["cutover_evidence_eligible"] = true },
 		"unexpected prose field": func(value map[string]any) { value["reason"] = "must-not-be-retained" },
+		"false flag type":        func(value map[string]any) { value["selection_accepted"] = nil },
+		"count type":             func(value map[string]any) { value["reason_count"] = nil },
 	} {
 		payload := make(map[string]any, len(original))
 		for key, value := range original {
@@ -106,6 +108,7 @@ func TestRRSICriticReadbackRejectsTamperingAndStrictParserRejectsAmbiguity(t *te
 		`{"verdict":"accept","reasons":[],"risk_notes":[],"extra":"unknown"}`,
 		`{"verdict":"maybe","reasons":[],"risk_notes":[]}`,
 		`{"verdict":"reject","reasons":null,"risk_notes":[]}`,
+		`{"verdict":"reject","reasons":[null],"risk_notes":[]}`,
 		`{"verdict":"reject","reasons":["` + strings.Repeat("x", maxRRSICriticTextBytes+1) + `"],"risk_notes":[]}`,
 	} {
 		if _, _, err := normalizeRRSICriticFile(path, []byte(invalid)); err == nil {

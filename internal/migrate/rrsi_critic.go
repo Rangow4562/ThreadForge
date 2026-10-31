@@ -29,9 +29,9 @@ type rrsiCriticSource struct {
 }
 
 type rrsiCriticDocument struct {
-	Verdict   string   `json:"verdict"`
-	Reasons   []string `json:"reasons"`
-	RiskNotes []string `json:"risk_notes"`
+	Verdict   string            `json:"verdict"`
+	Reasons   []json.RawMessage `json:"reasons"`
+	RiskNotes []json.RawMessage `json:"risk_notes"`
 }
 
 type rrsiCriticSummary struct {
@@ -116,15 +116,19 @@ func normalizeRRSICriticFile(relative string, data []byte) (normalizedItem, stri
 		return normalizedItem{}, "", errors.New("RRSI critic artifact is not valid UTF-8")
 	}
 	var document rrsiCriticDocument
-	if err := strictjson.Decode(data, &document); err != nil ||
+	var sourceFields map[string]json.RawMessage
+	if err := strictjson.Decode(data, &document); err != nil || strictjson.Decode(data, &sourceFields) != nil ||
+		len(sourceFields) != 3 ||
 		(document.Verdict != "accept" && document.Verdict != "reject") ||
 		document.Reasons == nil || document.RiskNotes == nil ||
 		len(document.Reasons) > maxRRSICriticNotes || len(document.RiskNotes) > maxRRSICriticNotes {
 		return normalizedItem{}, "", errors.New("RRSI critic artifact does not match the pinned producer contract")
 	}
-	for _, note := range append(append([]string(nil), document.Reasons...), document.RiskNotes...) {
-		if len(note) > maxRRSICriticTextBytes || strings.ContainsRune(note, '\x00') {
-			return normalizedItem{}, "", errors.New("RRSI critic note exceeds its bounded source contract")
+	for _, raw := range append(append([]json.RawMessage(nil), document.Reasons...), document.RiskNotes...) {
+		var note string
+		if !rrsiJSONStringValue(raw) || json.Unmarshal(raw, &note) != nil ||
+			len(note) > maxRRSICriticTextBytes || strings.ContainsRune(note, '\x00') {
+			return normalizedItem{}, "", errors.New("RRSI critic note is invalid or exceeds its bounded source contract")
 		}
 	}
 	pathHash := rrsiCriticIdentityHash("path", filepath.ToSlash(relative))
@@ -177,7 +181,16 @@ func validateRRSICriticSummary(record Record, source FileEntry) error {
 	var payload rrsiCriticSummary
 	var fields map[string]json.RawMessage
 	if err := strictjson.Decode(record.Payload, &payload); err != nil ||
-		strictjson.Decode(record.Payload, &fields) != nil || len(fields) != 16 {
+		strictjson.Decode(record.Payload, &fields) != nil || len(fields) != 16 ||
+		!rrsiJSONFieldTypesMatch(fields,
+			[]string{"schema_version", "domain", "artifact_kind", "round_sha256", "variant_sha256", "artifact_path_sha256", "verdict", "source_sha256"},
+			[]string{"human_review_required", "selection_accepted", "execution_authorized", "cutover_evidence_eligible"},
+			map[string][2]int64{
+				"attempt_index":   {0, maxRRSICriticAttempt},
+				"reason_count":    {0, maxRRSICriticNotes},
+				"risk_note_count": {0, maxRRSICriticNotes},
+				"source_bytes":    {0, maxRRSITrialFileBytes},
+			}) {
 		return errors.New("RRSI critic summary payload is invalid")
 	}
 	critic, ok := rrsiCriticSourceForPath(source.Path)

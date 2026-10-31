@@ -256,6 +256,70 @@ func TestRRSICriticSummaryMigrationReadback(t *testing.T) {
 	}
 }
 
+func TestRRSISmokeOutcomeMigrationReadback(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "rrsi-smoke")
+	fixtures := map[string]string{
+		"runs/coding/r0/A/smoke.json":    `{"ok":false,"stage":"smoke_run","private-task-id":"private-smoke-error","missing_trials":"0/1"}`,
+		"runs/workspace/r1/B/smoke.json": `{"ok":true,"stage":"smoke_run","n":2}`,
+		"runs/eng/r2/C/smoke.json":       `{"ok":false,"stage":"run","smoke_ids":["private-eng-task"],"missing":1,"total_passes":2,"n_trials":4,"pass_rate":0.5,"mean_combined_score":0.25,"valid_rate":0.75,"no_payload_rate":0.25}`,
+	}
+	for relative, contents := range fixtures {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatalf("create synthetic RRSI smoke directory: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatalf("write synthetic RRSI smoke artifact: %v", err)
+		}
+	}
+	readback := runConfiguredMigrationSourceReadback(t, migrate.RRSI, root)
+	if readback.Snapshot.Summary.FilesScanned != 3 || readback.Snapshot.Summary.FilesUnsupported != 0 ||
+		readback.Snapshot.Summary.RecordsImported != 3 || readback.Verification.Status != "reconciled" ||
+		readback.Verification.CutoverAuthorized || readback.Coverage.UnconvertedFiles != 0 {
+		t.Fatalf("RRSI smoke migration did not reconcile as review-only: %#v", readback)
+	}
+	smokeFamilyFound := false
+	for _, format := range readback.Coverage.Formats {
+		if format.ID == "rrsi.smoke-outcome" {
+			smokeFamilyFound = format.Files == 3 && format.RecordsFound == 3 && format.RecordsImported == 3
+		}
+	}
+	if !smokeFamilyFound {
+		t.Fatalf("RRSI smoke coverage did not reconcile its source family: %#v", readback.Coverage.Formats)
+	}
+	records, err := migrate.ReadSnapshotRecords(readback.ManifestPath, readback.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("RRSI smoke summary count = %d, want 3", len(records))
+	}
+	for _, record := range records {
+		if record.Type != "rrsi_smoke_summary" || record.Scope != "local_pending_review" ||
+			strings.Contains(record.SourcePath, "runs/") || strings.Contains(record.SourcePath, "smoke.json") {
+			t.Fatalf("RRSI smoke summary retained source identity or unsafe scope: %#v", record)
+		}
+		for _, private := range []string{"private-task-id", "private-smoke-error", "private-eng-task", "no_payload_rate"} {
+			if strings.Contains(string(record.Payload), private) {
+				t.Fatalf("RRSI smoke receipt retained source detail %q: %s", private, record.Payload)
+			}
+		}
+		var boundary struct {
+			ProducerReportedOK      bool `json:"producer_reported_ok"`
+			HumanReviewRequired     bool `json:"human_review_required"`
+			SelectionAccepted       bool `json:"selection_accepted"`
+			ExecutionAuthorized     bool `json:"execution_authorized"`
+			CutoverEvidenceEligible bool `json:"cutover_evidence_eligible"`
+		}
+		if err := json.Unmarshal(record.Payload, &boundary); err != nil {
+			t.Fatal(err)
+		}
+		if !boundary.HumanReviewRequired || boundary.SelectionAccepted || boundary.ExecutionAuthorized || boundary.CutoverEvidenceEligible {
+			t.Fatalf("RRSI smoke record crossed its review boundary: %#v", boundary)
+		}
+	}
+}
+
 func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "rrsi-evaluations")
 	fixtures := map[string]string{

@@ -753,6 +753,11 @@ func ReadSnapshotRecords(manifestPath string, manifest Manifest) ([]Record, erro
 					return nil, fmt.Errorf("RRSI critic summary failed source reconciliation: %s", record.Key)
 				}
 			}
+			if manifest.Product == RRSI && record.Type == rrsiSmokeRecordType {
+				if err := validateRRSISmokeSummary(record, file); err != nil {
+					return nil, fmt.Errorf("RRSI smoke summary failed source reconciliation: %s", record.Key)
+				}
+			}
 			if _, duplicate := seenKeys[record.Key]; duplicate {
 				return nil, fmt.Errorf("duplicate snapshot record key: %s", record.Key)
 			}
@@ -782,7 +787,7 @@ func validateSnapshotRecord(record Record, file FileEntry, product Product, sour
 	workflowChecks ...[]migrationcoverage.MancodeLegacyWorkflowCheck) error {
 	aliasedRRSIRecord := product == RRSI && (record.Type == "rrsi_trial_artifact" ||
 		record.Type == "rrsi_trajectory_summary" || record.Type == rrsiDeliverableRecordType ||
-		record.Type == rrsiCriticRecordType)
+		record.Type == rrsiCriticRecordType || record.Type == rrsiSmokeRecordType)
 	aliasedMancodeCoordinationRecord := product == Mancode && isMancodeCoordinationRecordType(record.Type)
 	aliasedMancodeLegacyWorkflowRecord := product == Mancode && record.Type == "mancode_legacy_workflow_summary"
 	aliasedMancodeLegacyRequirementsRecord := product == Mancode && record.Type == "mancode_legacy_requirements"
@@ -864,7 +869,7 @@ func knownRecordType(value string) bool {
 		"workflow_verification", "workflow_plan", "workflow_checkpoint",
 		"mancode_workflow_aggregate", "mancode_legacy_workflow_summary", "mancode_legacy_requirements", "mancode_legacy_review_summary", "mancode_legacy_verification_summary", "mancode_legacy_workflow_plan",
 		"rrsi_evaluation_result", "rrsi_edit_history", "rrsi_attribution", "rrsi_selection_decision", "rrsi_trial_artifact",
-		"rrsi_trajectory_summary", rrsiDeliverableRecordType, rrsiCriticRecordType:
+		"rrsi_trajectory_summary", rrsiDeliverableRecordType, rrsiCriticRecordType, rrsiSmokeRecordType:
 		return true
 	default:
 		return false
@@ -1166,6 +1171,10 @@ func scanFileWithMancodeGitRef(product Product, sourceRoot, relative, fullPath s
 	}
 	if product == RRSI && isRRSICriticPath(relative) {
 		file := scanRRSICriticFile(relative, data)
+		return file, int64(len(data)), nil
+	}
+	if product == RRSI && isRRSISmokePath(relative) {
+		file := scanRRSISmokeFile(relative, data)
 		return file, int64(len(data)), nil
 	}
 	if product == Beacon && isBeaconOpenCodePluginPath(relative, sourceRoot) {
@@ -1647,6 +1656,9 @@ func classifyRecord(product Product, relative string) string {
 		}
 		return "decision_calibration_artifact"
 	case RRSI:
+		if isRRSISmokePath(relative) {
+			return rrsiSmokeRecordType
+		}
 		if isRRSICriticPath(relative) {
 			return rrsiCriticRecordType
 		}

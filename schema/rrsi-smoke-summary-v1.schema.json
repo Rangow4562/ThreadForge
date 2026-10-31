@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/rrsi-smoke-summary-v1.schema.json",
+  "title": "Threadforge RRSI content-free smoke outcome summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "threadforge.rrsi-smoke-summary.v1" },
+    "domain": { "enum": ["coding", "workspace", "eng"] },
+    "stage": { "enum": ["compile", "ctor", "smoke_run", "run"] },
+    "round_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "variant_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artifact_path_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "producer_reported_ok": { "type": "boolean" },
+    "reported_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "reported_count_present": { "type": "boolean" },
+    "missing_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "missing_count_present": { "type": "boolean" },
+    "smoke_id_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "numeric_metric_count": { "type": "integer", "minimum": 0, "maximum": 64 },
+    "supplemental_field_count": { "type": "integer", "minimum": 0, "maximum": 510 },
+    "source_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "source_bytes": { "type": "integer", "minimum": 1, "maximum": 33554432 },
+    "human_review_required": { "const": true },
+    "selection_accepted": { "const": false },
+    "execution_authorized": { "const": false },
+    "cutover_evidence_eligible": { "const": false }
+  },
+  "required": [
+    "schema_version", "domain", "stage", "round_sha256", "variant_sha256",
+    "artifact_path_sha256", "producer_reported_ok", "reported_count", "reported_count_present",
+    "missing_count", "missing_count_present", "smoke_id_count", "numeric_metric_count",
+    "supplemental_field_count", "source_sha256", "source_bytes", "human_review_required",
+    "selection_accepted", "execution_authorized", "cutover_evidence_eligible"
+  ],
+  "allOf": [
+    {
+      "if": { "properties": { "stage": { "enum": ["compile", "ctor"] } }, "required": ["stage"] },
+      "then": {
+        "properties": {
+          "producer_reported_ok": { "const": false },
+          "reported_count_present": { "const": false },
+          "missing_count_present": { "const": false },
+          "smoke_id_count": { "const": 0 },
+          "numeric_metric_count": { "const": 0 },
+          "supplemental_field_count": { "const": 1 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "domain": { "const": "workspace" } }, "required": ["domain"] },
+      "then": { "properties": { "stage": { "enum": ["compile", "smoke_run"] } } }
+    },
+    {
+      "if": { "properties": { "domain": { "const": "eng" } }, "required": ["domain"] },
+      "then": { "properties": { "stage": { "enum": ["compile", "ctor", "run"] } } }
+    },
+    {
+      "if": { "properties": { "domain": { "const": "coding" } }, "required": ["domain"] },
+      "then": { "properties": { "stage": { "enum": ["compile", "ctor", "smoke_run"] } } }
+    },
+    {
+      "if": { "properties": { "domain": { "enum": ["coding", "workspace"] } }, "required": ["domain"] },
+      "then": {
+        "properties": {
+          "missing_count": { "const": 0 },
+          "missing_count_present": { "const": false },
+          "smoke_id_count": { "const": 0 },
+          "numeric_metric_count": { "const": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "smoke_run" } }, "required": ["stage"] },
+      "then": { "properties": { "domain": { "enum": ["coding", "workspace"] } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "run" } }, "required": ["stage"] },
+      "then": { "properties": { "domain": { "const": "eng" } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "domain": { "enum": ["coding", "workspace"] },
+          "stage": { "const": "smoke_run" },
+          "producer_reported_ok": { "const": true }
+        },
+        "required": ["domain", "stage", "producer_reported_ok"]
+      },
+      "then": {
+        "properties": {
+          "reported_count_present": { "const": true },
+          "supplemental_field_count": { "const": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "domain": { "enum": ["coding", "workspace"] },
+          "stage": { "const": "smoke_run" },
+          "producer_reported_ok": { "const": false }
+        },
+        "required": ["domain", "stage", "producer_reported_ok"]
+      },
+      "then": {
+        "properties": {
+          "reported_count_present": { "const": false },
+          "supplemental_field_count": { "minimum": 1 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "domain": { "const": "eng" }, "stage": { "const": "run" } }, "required": ["domain", "stage"] },
+      "then": {
+        "properties": {
+          "missing_count_present": { "const": true },
+          "numeric_metric_count": { "const": 6 },
+          "supplemental_field_count": { "const": 8 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "domain": { "const": "eng" }, "stage": { "enum": ["compile", "ctor"] } }, "required": ["domain", "stage"] },
+      "then": { "properties": { "missing_count_present": { "const": false } } }
+    },
+    {
+      "if": { "properties": { "reported_count_present": { "const": false } }, "required": ["reported_count_present"] },
+      "then": { "properties": { "reported_count": { "const": 0 } } }
+    },
+    {
+      "if": { "properties": { "missing_count_present": { "const": false } }, "required": ["missing_count_present"] },
+      "then": { "properties": { "missing_count": { "const": 0 } } }
+    }
+  ]
+}

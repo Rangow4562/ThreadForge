@@ -446,6 +446,71 @@ func TestRRSIRoundDirectivesMigrationReadback(t *testing.T) {
 	}
 }
 
+func TestRRSIAnalysisReportMigrationReadback(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "rrsi-analysis")
+	report := `{"failure_modes":[{"mode":"tool_state_loss","n_tasks":2,"affected_tasks":["private-task-a","private-task-b"],"description":"private failure description","needed_instead":"private correction","representative_evidence":[{"task_id":"private-task-a","where":"private/file.py:8","quote":"private evidence quote"}]}],"capability_gaps":[{"gap":"missing_observation","n_tasks":1,"affected_tasks":["private-task-c"],"description":"private gap description","representative_evidence":[]}],"success_habits":[{"habit":"verify_before_commit","n_tasks":3,"description":"private success description","risk_if_broken":"private regression risk"}],"n_digests":4}`
+	global := `{"failure_modes":[{"mode":"tool_state_loss","n_tasks":2,"affected_tasks":["private-task-a"],"description":"private failure description","needed_instead":"private correction","representative_evidence":[]}],"success_habits":[{"habit":"verify_before_commit","n_tasks":3,"description":"private success description","risk_if_broken":"private regression risk"}]}`
+	fixtures := map[string]string{
+		"runs/coding/r0/analysis_report.json": report,
+		"runs/workspace/global_analysis.json": global,
+	}
+	for relative, contents := range fixtures {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatalf("create synthetic RRSI analysis directory: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatalf("write synthetic RRSI analysis: %v", err)
+		}
+	}
+	readback := runConfiguredMigrationSourceReadback(t, migrate.RRSI, root)
+	if readback.Snapshot.Summary.FilesScanned != 2 || readback.Snapshot.Summary.FilesUnsupported != 0 ||
+		readback.Snapshot.Summary.RecordsImported != 2 || readback.Verification.Status != "reconciled" ||
+		readback.Verification.CutoverAuthorized || readback.Coverage.UnconvertedFiles != 0 {
+		t.Fatalf("RRSI analysis artifacts did not reconcile as review-only: %#v", readback)
+	}
+	families := map[string]bool{"rrsi.analysis-report": false, "rrsi.global-analysis": false}
+	for _, format := range readback.Coverage.Formats {
+		if _, exists := families[format.ID]; exists {
+			families[format.ID] = format.Files == 1 && format.RecordsFound == 1 && format.RecordsImported == 1
+		}
+	}
+	for family, found := range families {
+		if !found {
+			t.Fatalf("RRSI analysis coverage family %s did not reconcile: %#v", family, readback.Coverage.Formats)
+		}
+	}
+	records, err := migrate.ReadSnapshotRecords(readback.ManifestPath, readback.Snapshot)
+	if err != nil || len(records) != 2 {
+		t.Fatalf("read RRSI analysis summaries: count=%d err=%v", len(records), err)
+	}
+	for _, record := range records {
+		if record.Type != "rrsi_analysis_summary" || record.Scope != "local_pending_review" ||
+			strings.Contains(record.SourcePath, "runs/") || strings.Contains(record.SourcePath, ".json") {
+			t.Fatalf("RRSI analysis summary retained a raw identity or unsafe scope: %#v", record)
+		}
+		for _, private := range []string{
+			"tool_state_loss", "missing_observation", "verify_before_commit", "private-task-a", "private/file.py",
+			"private evidence quote", "private failure description", "private correction", "private success description",
+		} {
+			if strings.Contains(string(record.Payload), private) {
+				t.Fatalf("RRSI analysis summary retained model/task content %q: %s", private, record.Payload)
+			}
+		}
+		var boundary struct {
+			HumanReviewRequired     bool `json:"human_review_required"`
+			ExecutionAuthorized     bool `json:"execution_authorized"`
+			CutoverEvidenceEligible bool `json:"cutover_evidence_eligible"`
+		}
+		if err := json.Unmarshal(record.Payload, &boundary); err != nil {
+			t.Fatal(err)
+		}
+		if !boundary.HumanReviewRequired || boundary.ExecutionAuthorized || boundary.CutoverEvidenceEligible {
+			t.Fatalf("RRSI analysis summary crossed its review boundary: %#v", boundary)
+		}
+	}
+}
+
 func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "rrsi-evaluations")
 	fixtures := map[string]string{

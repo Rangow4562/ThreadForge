@@ -300,6 +300,13 @@ func migrationFormatID(product Product, sourceRoot, relative string) string {
 			return anyJevUnconvertedResultsFormat(relative)
 		}
 	case RRSI:
+		if isRRSIAnalysisPath(relative) {
+			source, _ := rrsiAnalysisSourceForPath(relative)
+			if source.artifactKind == "global_latest" {
+				return "rrsi.global-analysis"
+			}
+			return "rrsi.analysis-report"
+		}
 		if isRRSIDirectivesPath(relative) {
 			return "rrsi.round-directives"
 		}

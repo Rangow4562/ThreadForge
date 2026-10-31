@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/rrsi-analysis-summary-v1.schema.json",
+  "title": "Threadforge content-free RRSI analysis summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "threadforge.rrsi-analysis-summary.v1" },
+    "domain": { "enum": ["coding", "workspace", "eng"] },
+    "artifact_kind": { "enum": ["round_report", "global_latest"] },
+    "round_index": { "oneOf": [{ "type": "integer", "minimum": 0, "maximum": 1000000 }, { "type": "null" }] },
+    "round_sha256": { "type": "string", "pattern": "^(|[0-9a-f]{64})$" },
+    "artifact_path_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "failure_mode_count": { "type": "integer", "minimum": 0, "maximum": 512 },
+    "reported_failure_task_count": { "type": "integer", "minimum": 0, "maximum": 5120000 },
+    "failure_evidence_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "capability_gap_count": { "type": "integer", "minimum": 0, "maximum": 512 },
+    "reported_gap_task_count": { "type": "integer", "minimum": 0, "maximum": 5120000 },
+    "gap_evidence_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "success_habit_count": { "type": "integer", "minimum": 0, "maximum": 512 },
+    "reported_success_task_count": { "type": "integer", "minimum": 0, "maximum": 5120000 },
+    "affected_task_reference_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "digest_count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "digest_count_present": { "type": "boolean" },
+    "analysis_incomplete": { "type": "boolean" },
+    "source_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "source_bytes": { "type": "integer", "minimum": 1, "maximum": 33554432 },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "cutover_evidence_eligible": { "const": false }
+  },
+  "required": [
+    "schema_version", "domain", "artifact_kind", "round_index", "round_sha256", "artifact_path_sha256",
+    "failure_mode_count", "reported_failure_task_count", "failure_evidence_count", "capability_gap_count",
+    "reported_gap_task_count", "gap_evidence_count", "success_habit_count", "reported_success_task_count",
+    "affected_task_reference_count", "digest_count", "digest_count_present", "analysis_incomplete",
+    "source_sha256", "source_bytes", "human_review_required", "execution_authorized", "cutover_evidence_eligible"
+  ],
+  "allOf": [
+    {
+      "if": { "properties": { "artifact_kind": { "const": "round_report" } }, "required": ["artifact_kind"] },
+      "then": {
+        "properties": {
+          "round_index": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+          "round_sha256": { "pattern": "^[0-9a-f]{64}$" },
+          "digest_count_present": { "const": true }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "artifact_kind": { "const": "global_latest" } }, "required": ["artifact_kind"] },
+      "then": {
+        "properties": {
+          "round_index": { "type": "null" },
+          "round_sha256": { "const": "" },
+          "digest_count": { "const": 0 },
+          "digest_count_present": { "const": false },
+          "analysis_incomplete": { "const": false },
+          "capability_gap_count": { "const": 0 },
+          "reported_gap_task_count": { "const": 0 },
+          "gap_evidence_count": { "const": 0 }
+        }
+      }
+    }
+  ]
+}

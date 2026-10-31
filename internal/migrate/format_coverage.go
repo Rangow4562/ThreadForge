@@ -300,6 +300,9 @@ func migrationFormatID(product Product, sourceRoot, relative string) string {
 			return anyJevUnconvertedResultsFormat(relative)
 		}
 	case RRSI:
+		if isRRSIPrepPath(relative) {
+			return "rrsi.prep-state"
+		}
 		if isRRSISmokePath(relative) {
 			return "rrsi.smoke-outcome"
 		}

@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/rrsi-prep-summary-v1.schema.json",
+  "title": "Threadforge content-free RRSI candidate preparation summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "threadforge.rrsi-prep-summary.v1" },
+    "domain": { "enum": ["coding", "workspace", "eng"] },
+    "gate_failure": { "enum": ["", "no_proposal", "critic_reject", "smoke_fail"] },
+    "round_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "variant_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artifact_path_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "commit_sha256": { "type": "string", "pattern": "^(|[0-9a-f]{64})$" },
+    "commit_present": { "type": "boolean" },
+    "branch_matches_identity": { "type": "boolean" },
+    "edit_count": { "type": "integer", "minimum": 0, "maximum": 80 },
+    "edit_component_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prompt": { "type": "integer", "minimum": 0, "maximum": 80 },
+        "control_flow": { "type": "integer", "minimum": 0, "maximum": 80 },
+        "config": { "type": "integer", "minimum": 0, "maximum": 80 },
+        "output_plumbing": { "type": "integer", "minimum": 0, "maximum": 80 },
+        "context_mgmt": { "type": "integer", "minimum": 0, "maximum": 80 },
+        "client_tool": { "type": "integer", "minimum": 0, "maximum": 80 },
+        "skill": { "type": "integer", "minimum": 0, "maximum": 80 },
+        "memory": { "type": "integer", "minimum": 0, "maximum": 80 },
+        "subagent": { "type": "integer", "minimum": 0, "maximum": 80 }
+      },
+      "required": ["prompt", "control_flow", "config", "output_plumbing", "context_mgmt", "client_tool", "skill", "memory", "subagent"]
+    },
+    "diff_path_present": { "type": "boolean" },
+    "mechanism_present": { "type": "boolean" },
+    "diagnostic_bytes": { "type": "integer", "minimum": 0, "maximum": 8192 },
+    "source_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "source_bytes": { "type": "integer", "minimum": 1, "maximum": 33554432 },
+    "human_review_required": { "const": true },
+    "selection_accepted": { "const": false },
+    "execution_authorized": { "const": false },
+    "cutover_evidence_eligible": { "const": false }
+  },
+  "required": [
+    "schema_version", "domain", "gate_failure", "round_sha256", "variant_sha256",
+    "artifact_path_sha256", "commit_sha256", "commit_present", "branch_matches_identity",
+    "edit_count", "edit_component_counts", "diff_path_present", "mechanism_present",
+    "diagnostic_bytes", "source_sha256", "source_bytes", "human_review_required",
+    "selection_accepted", "execution_authorized", "cutover_evidence_eligible"
+  ],
+  "allOf": [
+    {
+      "if": { "properties": { "gate_failure": { "const": "" } }, "required": ["gate_failure"] },
+      "then": {
+        "properties": {
+          "commit_present": { "const": true },
+          "branch_matches_identity": { "const": true },
+          "edit_count": { "minimum": 1 },
+          "diff_path_present": { "const": true },
+          "mechanism_present": { "const": true },
+          "diagnostic_bytes": { "const": 0 },
+          "commit_sha256": { "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "gate_failure": { "enum": ["no_proposal", "critic_reject", "smoke_fail"] } }, "required": ["gate_failure"] },
+      "then": {
+        "properties": {
+          "commit_present": { "const": false },
+          "commit_sha256": { "const": "" },
+          "branch_matches_identity": { "const": false },
+          "mechanism_present": { "const": false },
+          "diagnostic_bytes": { "minimum": 1 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "gate_failure": { "const": "no_proposal" } }, "required": ["gate_failure"] },
+      "then": {
+        "properties": { "edit_count": { "const": 0 }, "diff_path_present": { "const": false } }
+      }
+    },
+    {
+      "if": { "properties": { "gate_failure": { "const": "critic_reject" } }, "required": ["gate_failure"] },
+      "then": { "properties": { "diff_path_present": { "const": true } } }
+    },
+    {
+      "if": { "properties": { "gate_failure": { "const": "smoke_fail" } }, "required": ["gate_failure"] },
+      "then": {
+        "properties": { "edit_count": { "minimum": 1 }, "diff_path_present": { "const": true } }
+      }
+    }
+  ]
+}

@@ -320,6 +320,80 @@ func TestRRSISmokeOutcomeMigrationReadback(t *testing.T) {
 	}
 }
 
+func TestRRSIPrepStateMigrationReadback(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "rrsi-prep")
+	edit := `{"id":"C1","component":"skill","hypothesis":"private-hypothesis","targets_mode":"private-target","predicted_affected":["private-task-id"],"retroactive_check":"private-counterfactual","mechanism":"private-edit-mechanism"}`
+	fixtures := map[string]string{
+		"runs/coding/r0/A/prep.json":    `{"commit":"a1b2c3d","branch":"coding/r0A","edits":[` + edit + `],"diff_path":"C:\\private\\repo\\runs\\coding\\r0\\A\\diff.patch","mechanism":"private-candidate-mechanism"}`,
+		"runs/workspace/r1/B/prep.json": `{"gate_failure":"no_proposal","detail":"private-no-proposal-diagnostic","edits":[],"diff_path":null}`,
+		"runs/eng/r2/C/prep.json":       `{"gate_failure":"critic_reject","detail":"private-critic-diagnostic","edits":[` + edit + `],"diff_path":"/private/repo/diff.patch"}`,
+		"runs/coding/r3/D/prep.json":    `{"gate_failure":"smoke_fail","detail":"private-smoke-diagnostic","edits":[` + edit + `],"diff_path":"/private/repo/diff.patch"}`,
+	}
+	for relative, contents := range fixtures {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatalf("create synthetic RRSI prep directory: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatalf("write synthetic RRSI prep artifact: %v", err)
+		}
+	}
+	readback := runConfiguredMigrationSourceReadback(t, migrate.RRSI, root)
+	if readback.Snapshot.Summary.FilesScanned != 4 || readback.Snapshot.Summary.FilesUnsupported != 0 ||
+		readback.Snapshot.Summary.RecordsImported != 4 || readback.Verification.Status != "reconciled" ||
+		readback.Verification.CutoverAuthorized || readback.Coverage.UnconvertedFiles != 0 {
+		t.Fatalf("RRSI prep migration did not reconcile as review-only: %#v", readback)
+	}
+	prepFamilyFound := false
+	for _, format := range readback.Coverage.Formats {
+		if format.ID == "rrsi.prep-state" {
+			prepFamilyFound = format.Files == 4 && format.RecordsFound == 4 && format.RecordsImported == 4
+		}
+	}
+	if !prepFamilyFound {
+		t.Fatalf("RRSI prep coverage did not reconcile its source family: %#v", readback.Coverage.Formats)
+	}
+	records, err := migrate.ReadSnapshotRecords(readback.ManifestPath, readback.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 4 {
+		t.Fatalf("RRSI prep summary count = %d, want 4", len(records))
+	}
+	for _, record := range records {
+		if record.Type != "rrsi_prep_summary" || record.Scope != "local_pending_review" ||
+			strings.Contains(record.SourcePath, "runs/") || strings.Contains(record.SourcePath, "prep.json") {
+			t.Fatalf("RRSI prep summary retained a raw identity or unsafe scope: %#v", record)
+		}
+		for _, private := range []string{
+			"a1b2c3d", "coding/r0A", "private/repo", "diff.patch", "private-hypothesis", "private-target",
+			"private-task-id", "private-counterfactual", "private-edit-mechanism", "private-candidate-mechanism",
+			"private-no-proposal-diagnostic", "private-critic-diagnostic", "private-smoke-diagnostic",
+		} {
+			if strings.Contains(string(record.Payload), private) {
+				t.Fatalf("RRSI prep summary retained private content %q: %s", private, record.Payload)
+			}
+		}
+		var boundary struct {
+			CommitPresent           bool   `json:"commit_present"`
+			GateFailure             string `json:"gate_failure"`
+			HumanReviewRequired     bool   `json:"human_review_required"`
+			SelectionAccepted       bool   `json:"selection_accepted"`
+			ExecutionAuthorized     bool   `json:"execution_authorized"`
+			CutoverEvidenceEligible bool   `json:"cutover_evidence_eligible"`
+		}
+		if err := json.Unmarshal(record.Payload, &boundary); err != nil {
+			t.Fatal(err)
+		}
+		if !boundary.HumanReviewRequired || boundary.SelectionAccepted || boundary.ExecutionAuthorized || boundary.CutoverEvidenceEligible {
+			t.Fatalf("RRSI prep summary crossed its review boundary: %#v", boundary)
+		}
+		if boundary.GateFailure == "" && !boundary.CommitPresent || boundary.GateFailure != "" && boundary.CommitPresent {
+			t.Fatalf("RRSI prep receipt misrepresented candidate commit state: %#v", boundary)
+		}
+	}
+}
+
 func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "rrsi-evaluations")
 	fixtures := map[string]string{

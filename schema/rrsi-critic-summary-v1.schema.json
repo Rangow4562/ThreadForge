@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/rrsi-critic-summary-v1.schema.json",
+  "title": "Threadforge RRSI content-free critic summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "threadforge.rrsi-critic-summary.v1" },
+    "domain": { "enum": ["coding", "workspace", "eng"] },
+    "artifact_kind": { "enum": ["attempt", "final"] },
+    "attempt_index": { "type": "integer", "minimum": 0, "maximum": 128 },
+    "round_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "variant_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artifact_path_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "verdict": { "enum": ["accept", "reject"] },
+    "reason_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+    "risk_note_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+    "source_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "source_bytes": { "type": "integer", "minimum": 1, "maximum": 33554432 },
+    "human_review_required": { "const": true },
+    "selection_accepted": { "const": false },
+    "execution_authorized": { "const": false },
+    "cutover_evidence_eligible": { "const": false }
+  },
+  "required": [
+    "schema_version", "domain", "artifact_kind", "attempt_index", "round_sha256",
+    "variant_sha256", "artifact_path_sha256", "verdict", "reason_count", "risk_note_count",
+    "source_sha256", "source_bytes", "human_review_required", "selection_accepted",
+    "execution_authorized", "cutover_evidence_eligible"
+  ],
+  "allOf": [
+    {
+      "if": { "properties": { "artifact_kind": { "const": "final" } }, "required": ["artifact_kind"] },
+      "then": { "properties": { "attempt_index": { "const": 0 } } }
+    },
+    {
+      "if": { "properties": { "artifact_kind": { "const": "attempt" } }, "required": ["artifact_kind"] },
+      "then": { "properties": { "attempt_index": { "minimum": 0 } } }
+    }
+  ]
+}

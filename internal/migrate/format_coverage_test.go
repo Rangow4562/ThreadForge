@@ -80,6 +80,8 @@ func TestMigrationFormatIDUsesDocumentedSourceSelectors(t *testing.T) {
 		{RRSI, "C:/RRSI", "runs/coding/jobs/job-1/task__t1/agent/trajectory.json", "rrsi.trajectory"},
 		{RRSI, "C:/RRSI", "runs/workspace/jobs/job-1/s0/task-1/trajectory.json", "rrsi.trajectory"},
 		{RRSI, "C:/RRSI", "runs/eng/jobs/job-1/task-1/t0/traj.json", "rrsi.trajectory"},
+		{RRSI, "C:/RRSI", "runs/coding/r0/A/critic.json", "rrsi.critic-verdict"},
+		{RRSI, "C:/RRSI", "runs/eng/r2/H/critic_a2.json", "rrsi.critic-verdict"},
 	}
 	for _, test := range tests {
 		t.Run(string(test.product)+"/"+test.path, func(t *testing.T) {

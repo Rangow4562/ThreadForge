@@ -189,6 +189,73 @@ func TestRRSISyntheticTrialMigrationReadback(t *testing.T) {
 	}
 }
 
+func TestRRSICriticSummaryMigrationReadback(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "rrsi-critic")
+	fixtures := map[string]string{
+		"runs/coding/r0/A/critic_a1.json": `{"verdict":"reject","reasons":["private-critic-reason"],"risk_notes":["private-critic-risk"]}`,
+		"runs/workspace/r2/b/critic.json": `{"verdict":"accept","reasons":[],"risk_notes":[]}`,
+		"runs/eng/r3/H/critic_a2.json":    `{"verdict":"reject","reasons":["private-final-reason"],"risk_notes":[]}`,
+	}
+	for relative, contents := range fixtures {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatalf("create synthetic RRSI critic directory: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatalf("write synthetic RRSI critic artifact: %v", err)
+		}
+	}
+
+	readback := runConfiguredMigrationSourceReadback(t, migrate.RRSI, root)
+	if readback.Snapshot.Summary.FilesScanned != 3 || readback.Snapshot.Summary.FilesUnsupported != 0 ||
+		readback.Snapshot.Summary.RecordsImported != 3 || readback.Verification.Status != "reconciled" ||
+		readback.Verification.CutoverAuthorized || readback.Coverage.UnconvertedFiles != 0 {
+		t.Fatalf("RRSI critic migration did not reconcile as review-only: %#v", readback)
+	}
+	criticFamilyFound := false
+	for _, format := range readback.Coverage.Formats {
+		if format.ID == "rrsi.critic-verdict" {
+			criticFamilyFound = format.Files == 3 && format.RecordsFound == 3 && format.RecordsImported == 3
+		}
+	}
+	if !criticFamilyFound {
+		t.Fatalf("RRSI critic coverage did not reconcile its source family: %#v", readback.Coverage.Formats)
+	}
+	records, err := migrate.ReadSnapshotRecords(readback.ManifestPath, readback.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("RRSI critic summary count = %d, want 3", len(records))
+	}
+	for _, record := range records {
+		var summary struct {
+			Verdict                 string `json:"verdict"`
+			HumanReviewRequired     bool   `json:"human_review_required"`
+			SelectionAccepted       bool   `json:"selection_accepted"`
+			ExecutionAuthorized     bool   `json:"execution_authorized"`
+			CutoverEvidenceEligible bool   `json:"cutover_evidence_eligible"`
+		}
+		if record.Type != "rrsi_critic_summary" || record.Scope != "local_pending_review" ||
+			strings.Contains(record.SourcePath, "runs/") || strings.Contains(record.SourcePath, "critic_a") ||
+			strings.Contains(record.SourcePath, ".json") {
+			t.Fatalf("RRSI critic summary retained a raw source identity or unsafe scope: %#v", record)
+		}
+		if err := json.Unmarshal(record.Payload, &summary); err != nil {
+			t.Fatal(err)
+		}
+		if (summary.Verdict != "accept" && summary.Verdict != "reject") || !summary.HumanReviewRequired ||
+			summary.SelectionAccepted || summary.ExecutionAuthorized || summary.CutoverEvidenceEligible {
+			t.Fatalf("RRSI critic receipt crossed its human-review boundary: %#v", summary)
+		}
+		for _, private := range []string{"private-critic-reason", "private-critic-risk", "private-final-reason"} {
+			if strings.Contains(string(record.Payload), private) {
+				t.Fatalf("RRSI critic summary retained model-generated prose %q: %s", private, record.Payload)
+			}
+		}
+	}
+}
+
 func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "rrsi-evaluations")
 	fixtures := map[string]string{

@@ -90,7 +90,7 @@ func isRRSIDeliverablePath(relative string) bool {
 }
 
 func isRRSISafelyReadPath(relative string) bool {
-	return isRRSITrialMetadataPath(relative) || isRRSIDeliverablePath(relative)
+	return isRRSITrialMetadataPath(relative) || isRRSIDeliverablePath(relative) || isRRSICriticPath(relative)
 }
 
 func normalizeRRSIDeliverableFile(relative string, data []byte) (normalizedItem, string, error) {

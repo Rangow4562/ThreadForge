@@ -124,7 +124,8 @@ func isRRSIRawTrialArtifactPath(relative string) bool {
 }
 
 func isRRSIMetadataPath(relative string) bool {
-	if isRRSITrialMetadataPath(relative) || isRRSIProposalPath(relative) || isRRSIDeliverablePath(relative) {
+	if isRRSITrialMetadataPath(relative) || isRRSIProposalPath(relative) ||
+		isRRSIDeliverablePath(relative) || isRRSICriticPath(relative) {
 		return true
 	}
 	tail, ok := rrsiRunTail(relative)

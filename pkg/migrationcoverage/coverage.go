@@ -244,7 +244,7 @@ var requiredFormats = map[string][]string{
 	"rrsi": {
 		"rrsi.evaluation-json", "rrsi.calibration-json", "rrsi.frontier-json",
 		"rrsi.history-jsonl", "rrsi.attribution-jsonl", "rrsi.decisions-json",
-		"rrsi.proposal-json", "rrsi.coding-trial-result", "rrsi.workspace-scores",
+		"rrsi.proposal-json", "rrsi.critic-verdict", "rrsi.coding-trial-result", "rrsi.workspace-scores",
 		"rrsi.engineering-meta", "rrsi.engineering-verdict", "rrsi.trajectory",
 		"rrsi.coding-terminal-recording", "rrsi.workspace-deliverable", "rrsi.engineering-payload",
 		"rrsi.raw-trial-artifact",

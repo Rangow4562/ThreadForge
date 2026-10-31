@@ -1085,6 +1085,15 @@ func TestMancodeProjectAndTeamRecordsAreImportedAsLocalReview(t *testing.T) {
 		if strings.Contains(string(record.Payload), "do-not-copy-this-secret") {
 			t.Fatal("credential-bearing Mancode state entered the snapshot")
 		}
+		if record.Type == "mancode_legacy_state" {
+			payload := string(record.Payload)
+			if strings.Contains(payload, "TypeScript") || strings.Contains(payload, "API_TOKEN") ||
+				!strings.Contains(payload, `"platform":"claude-code"`) ||
+				!strings.Contains(payload, `"tech_stack_present":true`) ||
+				!strings.Contains(payload, `"ui_library_present":false`) {
+				t.Fatalf("legacy state did not preserve only allowlisted facts and text-presence metadata: %s", payload)
+			}
+		}
 		if record.Type == "mancode_project_config" {
 			if strings.Contains(string(record.Payload), "private-pass") || strings.Contains(string(record.Payload), "lastOperationId") {
 				t.Fatalf("Mancode project config carried a remote credential or live operation pointer: %s", record.Payload)
@@ -1150,7 +1159,9 @@ func TestMancodeLegacyStateProjectionIsStrictAndOmitsFreeformSourceValues(t *tes
 	}
 	if projection["schema_version"] != "threadforge.mancode-legacy-state.v1" ||
 		projection["authority"] != "local_pending_review" || projection["human_review_required"] != true ||
-		projection["execution_authorized"] != false || projection["current_mode"] != "solo" ||
+		projection["execution_authorized"] != false || projection["platform"] != "codex" ||
+		projection["tech_stack_present"] != true || projection["ui_library_present"] != true ||
+		projection["current_mode"] != "solo" ||
 		projection["current_workflow_mode"] != "man" || projection["task_present"] != true ||
 		projection["skipped_step_count"] != float64(1) || projection["active_solo_plan_present"] != true ||
 		projection["active_solo_plan_version"] != float64(4) || projection["contributor_count"] != float64(3) {

@@ -348,10 +348,13 @@ type mancodeLegacyStateImport struct {
 	Authority             string `json:"authority"`
 	HumanReviewRequired   bool   `json:"human_review_required"`
 	ExecutionAuthorized   bool   `json:"execution_authorized"`
+	Platform              string `json:"platform"`
 	CurrentMode           string `json:"current_mode"`
 	LastMode              string `json:"last_mode"`
 	CurrentWorkflowMode   any    `json:"current_workflow_mode"`
 	TaskPresent           bool   `json:"task_present"`
+	TechStackPresent      bool   `json:"tech_stack_present"`
+	UILibraryPresent      bool   `json:"ui_library_present"`
 	SkippedStepCount      int    `json:"skipped_step_count"`
 	ActiveSoloPlanPresent bool   `json:"active_solo_plan_present"`
 	ActiveSoloPlanVersion *int64 `json:"active_solo_plan_version,omitempty"`
@@ -461,7 +464,9 @@ func normalizeMancodeLegacyState(value any) ([]normalizedItem, bool, error) {
 	imported := mancodeLegacyStateImport{
 		SchemaVersion: mancodeLegacyStateImportSchema, Authority: "local_pending_review",
 		HumanReviewRequired: true, ExecutionAuthorized: false,
-		CurrentMode: currentMode, LastMode: lastMode, CurrentWorkflowMode: projectedWorkflowMode,
+		Platform: platform, TechStackPresent: strings.TrimSpace(techStack) != "",
+		UILibraryPresent: strings.TrimSpace(uiLibrary) != "",
+		CurrentMode:      currentMode, LastMode: lastMode, CurrentWorkflowMode: projectedWorkflowMode,
 		TaskPresent: taskPresent, SkippedStepCount: len(skippedSteps),
 		ActiveSoloPlanPresent: activeSoloPlanPresent, ActiveSoloPlanVersion: activeSoloPlanVersion,
 		TeamModeAutoDetected: autoDetected, ContributorCount: contributors,

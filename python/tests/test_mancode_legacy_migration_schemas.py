@@ -19,10 +19,13 @@ SCHEMA_DIRECTORY = Path(__file__).resolve().parents[2] / "schema"
                 "authority": "local_pending_review",
                 "human_review_required": True,
                 "execution_authorized": False,
+                "platform": "claude-code",
                 "current_mode": "solo",
                 "last_mode": "man",
                 "current_workflow_mode": "man",
                 "task_present": True,
+                "tech_stack_present": True,
+                "ui_library_present": False,
                 "skipped_step_count": 1,
                 "active_solo_plan_present": True,
                 "active_solo_plan_version": 4,
@@ -345,3 +348,24 @@ def test_mancode_legacy_projection_schema_is_valid_and_non_authorizing(schema_na
         validator.validate({**projection, "execution_authorized": True})
     with pytest.raises(ValidationError):
         validator.validate({**projection, "private_value": "must-not-be-serialized"})
+
+
+def test_mancode_legacy_state_schema_accepts_previous_v1_projection_shape():
+    schema = json.loads((SCHEMA_DIRECTORY / "mancode-legacy-state-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    projection = {
+        "schema_version": "threadforge.mancode-legacy-state.v1",
+        "authority": "local_pending_review",
+        "human_review_required": True,
+        "execution_authorized": False,
+        "current_mode": "solo",
+        "last_mode": "solo",
+        "current_workflow_mode": None,
+        "task_present": False,
+        "skipped_step_count": 0,
+        "active_solo_plan_present": False,
+        "team_mode_auto_detected": False,
+        "contributor_count": 0,
+        "initialized_at": "2026-09-20T10:00:00Z",
+    }
+    validator.validate(projection)

@@ -206,7 +206,7 @@ func TestRRSIEvaluationRejectsInconsistentDomainMetrics(t *testing.T) {
 	}
 }
 
-func TestRRSITrajectoriesImportStructureOnlyAndOtherRawArtifactsStayUnsupported(t *testing.T) {
+func TestRRSITrajectoriesAndDocumentedDeliverablesImportContentFreeSummaries(t *testing.T) {
 	root := t.TempDir()
 	rawArtifacts := map[string]string{
 		"runs/coding/jobs/base/task__a1/agent/trajectory.json": `{"steps":[{"source":"assistant","message":"raw-trial-content-marker","tool_calls":[{"name":"private-tool","arguments":{"token":"private-argument-marker"}}],"observation":{"results":[{"content":"private-observation-marker"}]}},{"source":"tool","message":"private-tool-result"}]}`,
@@ -214,10 +214,15 @@ func TestRRSITrajectoriesImportStructureOnlyAndOtherRawArtifactsStayUnsupported(
 		"runs/eng/jobs/base/task-1/t0/traj.json":               `{"messages":[{"role":"system","content":"private-system-marker"},{"role":"user","content":"raw-trial-content-marker"},{"role":"assistant","content":"private-answer-marker","tool_calls":[{"name":"private-tool","args":{"secret":"private-argument-marker"}}]},{"role":"tool","content":"private-result-marker"}]}`,
 		"runs/eng/jobs/base/task-1/t0/payload.py":              "PAYLOAD = 'raw-trial-content-marker'\n",
 		"runs/workspace/jobs/base/s0/task-1/output/report.md":  "raw-trial-content-marker\n",
+		"runs/coding/jobs/base/task__a1/agent/recording.cast":  "{\"version\":2}\n[0.1,\"o\",\"private-terminal-recording-marker\"]\n",
+		"runs/eng/jobs/base/task-1/t0/unknown.log":             "unknown-raw-artifact-marker\n",
 	}
 	for relative, content := range rawArtifacts {
 		writeMancodeFixture(t, root, relative, []byte(content))
 	}
+	binaryOutputPath := "runs/workspace/jobs/base/s0/task-1/output/nested/report.pdf"
+	writeMancodeFixture(t, root, binaryOutputPath, []byte{0x00, 0xff, 0x81, 0x10})
+	unknownArtifactPath := "runs/eng/jobs/base/task-1/t0/unknown.log"
 	writeMancodeJSONFixture(t, root, "runs/coding/jobs/base/eval.json", map[string]any{
 		"job": "base", "k": 1, "S": 1.0, "C": nil, "n_expected": 1, "missing": 0,
 		"extra": map[string]any{"total_passes": 1, "n_trials": 1, "pass_rate": 1.0},
@@ -231,20 +236,35 @@ func TestRRSITrajectoriesImportStructureOnlyAndOtherRawArtifactsStayUnsupported(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Summary.FilesScanned != len(rawArtifacts)+1 || manifest.Summary.FilesUnsupported != 2 ||
-		manifest.Summary.RecordsImported != 4 || manifest.Summary.RecordsFound != 4 {
+	if manifest.Summary.FilesScanned != len(rawArtifacts)+2 || manifest.Summary.FilesUnsupported != 1 ||
+		manifest.Summary.RecordsImported != 8 || manifest.Summary.RecordsFound != 8 {
 		t.Fatalf("RRSI trial inventory did not reconcile: %#v", manifest.Summary)
 	}
+	deliverablesByKind := map[string]int{}
 	for _, file := range manifest.Files {
-		if _, raw := rawArtifacts[file.Path]; raw {
-			trajectory := strings.HasSuffix(file.Path, "trajectory.json") || strings.HasSuffix(file.Path, "traj.json")
-			if trajectory && (file.Status != "ready" || file.ImportedCount != 1 || file.RecordCount != 1) {
+		if file.Path == unknownArtifactPath {
+			if file.Status != "unsupported" || file.SnapshotPath != "" || file.RecordCount != 0 || !validDigest(file.SourceSHA256) {
+				t.Fatalf("unknown RRSI artifact was treated as supported: %#v", file)
+			}
+			continue
+		}
+		trajectory := strings.HasSuffix(file.Path, "trajectory.json") || strings.HasSuffix(file.Path, "traj.json")
+		if trajectory {
+			if file.Status != "ready" || file.ImportedCount != 1 || file.RecordCount != 1 {
 				t.Fatalf("RRSI trajectory structure was not summarized: %#v", file)
 			}
-			if !trajectory && (file.Status != "unsupported" || file.SnapshotPath != "" || file.RecordCount != 0 || !validDigest(file.SourceSHA256)) {
-				t.Fatalf("raw RRSI deliverable was copied or not hash-inventoried: %#v", file)
-			}
+			continue
 		}
+		if source, deliverable := rrsiDeliverableSourceForPath(file.Path); deliverable {
+			if file.Status != "ready" || file.ImportedCount != 1 || file.RecordCount != 1 {
+				t.Fatalf("documented RRSI deliverable was not summarized: %#v", file)
+			}
+			deliverablesByKind[source.recordKind]++
+		}
+	}
+	if deliverablesByKind["coding_terminal_recording"] != 1 || deliverablesByKind["workspace_deliverable"] != 2 ||
+		deliverablesByKind["engineering_payload"] != 1 {
+		t.Fatalf("documented RRSI deliverables were not all covered: %#v", deliverablesByKind)
 	}
 	dataRoot := t.TempDir()
 	snapshot, err := CreateSnapshot(RRSI, root, dataRoot)
@@ -257,16 +277,124 @@ func TestRRSITrajectoriesImportStructureOnlyAndOtherRawArtifactsStayUnsupported(
 		t.Fatal(err)
 	}
 	trajectorySummaries := 0
+	deliverableSummaries := 0
 	for _, record := range records {
-		if strings.Contains(string(record.Payload), "private-") || strings.Contains(string(record.Payload), "raw-trial-content-marker") {
-			t.Fatalf("raw RRSI trajectory content entered the normalized snapshot: %#v", record)
+		encoded := string(record.Payload)
+		for _, forbidden := range []string{
+			"private-", "raw-trial-content-marker", "private-terminal-recording-marker", "unknown-raw-artifact-marker",
+			"recording.cast", "report.md", "report.pdf", "payload.py",
+		} {
+			if strings.Contains(encoded, forbidden) || strings.Contains(record.SourcePath, forbidden) {
+				t.Fatalf("raw RRSI content or identity entered the normalized snapshot (%q): %#v", forbidden, record)
+			}
 		}
 		if record.Type == "rrsi_trajectory_summary" {
 			trajectorySummaries++
+		} else if record.Type == rrsiDeliverableRecordType {
+			deliverableSummaries++
+			var payload rrsiDeliverableSummary
+			if err := json.Unmarshal(record.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.ContentImported || !payload.HumanReviewRequired || payload.ExecutionAuthorized || payload.CutoverEvidenceEligible ||
+				!validDigest(payload.SourceSHA256) || payload.SourceBytes < 0 {
+				t.Fatalf("deliverable receipt violated its content-free review-only contract: %#v", payload)
+			}
+			if strings.Contains(record.SourcePath, "task-1") || strings.Contains(string(record.Payload), "task-1") {
+				t.Fatalf("deliverable receipt retained a raw task identity: %#v", record)
+			}
 		}
 	}
-	if len(records) != 4 || trajectorySummaries != 3 {
-		t.Fatalf("expected one evaluation and three structure-only trajectory summaries, got %#v", records)
+	if len(records) != 8 || trajectorySummaries != 3 || deliverableSummaries != 4 {
+		t.Fatalf("expected one evaluation, three trajectories, and four content-free deliverable summaries, got %#v", records)
+	}
+}
+
+func TestRRSIDeliverableReceiptReadbackRejectsTamperingAndUnknownLayouts(t *testing.T) {
+	relative := "runs/workspace/jobs/job-1/s2/task-1/output/nested/report.pdf"
+	data := []byte{0x00, 0xff, 0x81, 0x10}
+	item, alias, err := normalizeRRSIDeliverableFile(relative, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := FileEntry{Path: relative, SourceSHA256: digest(data), SourceBytes: int64(len(data))}
+	record := Record{
+		Key: alias + "#000001", Type: item.Type, SourcePath: alias,
+		ContentSHA256: digest(item.Payload), Scope: "local_pending_review", Payload: item.Payload,
+	}
+	if err := validateRRSIDeliverableSummary(record, entry); err != nil {
+		t.Fatalf("valid content-free deliverable receipt failed readback validation: %v", err)
+	}
+
+	var original map[string]any
+	if err := json.Unmarshal(item.Payload, &original); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(map[string]any){
+		"source byte count":       func(value map[string]any) { value["source_bytes"] = float64(len(data) + 1) },
+		"content import":          func(value map[string]any) { value["content_imported"] = true },
+		"path commitment":         func(value map[string]any) { value["artifact_path_sha256"] = strings.Repeat("0", 64) },
+		"unexpected raw path":     func(value map[string]any) { value["private_path"] = "runs/private/report.pdf" },
+		"cutover evidence status": func(value map[string]any) { value["cutover_evidence_eligible"] = true },
+	} {
+		payload := make(map[string]any, len(original))
+		for key, value := range original {
+			payload[key] = value
+		}
+		mutate(payload)
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record.Payload = encoded
+		if err := validateRRSIDeliverableSummary(record, entry); err == nil {
+			t.Errorf("readback accepted mutated %s", name)
+		}
+	}
+	record.Payload = item.Payload
+	record.SourcePath = "rrsi/deliverables/workspace/private-report"
+	if err := validateRRSIDeliverableSummary(record, entry); err == nil {
+		t.Fatal("readback accepted a source alias that does not bind the artifact path")
+	}
+
+	for _, unsupported := range []string{
+		"runs/workspace/jobs/job-1/s2/task-1/outputs/report.pdf",
+		"runs/coding/jobs/job-1/task__hash/agent/session.cast",
+		"runs/eng/jobs/job-1/task-1/t2/payload.txt",
+	} {
+		if isRRSIDeliverablePath(unsupported) {
+			t.Errorf("unsupported RRSI layout was accepted: %s", unsupported)
+		}
+	}
+}
+
+func TestRRSIDeliverableReadLimitsAndSymlinkProtection(t *testing.T) {
+	root := t.TempDir()
+	oversizedPath := "runs/eng/jobs/job-1/task-1/t0/payload.py"
+	writeMancodeFixture(t, root, oversizedPath, []byte(strings.Repeat("x", int(maxRRSITrialFileBytes+1))))
+	manifest, err := Inspect(RRSI, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Summary.FilesUnsupported != 1 || manifest.Summary.RecordsImported != 0 || manifest.Files[0].Status != "unsupported" {
+		t.Fatalf("oversized RRSI deliverable bypassed the 32 MiB source-file bound: %#v", manifest.Summary)
+	}
+
+	root = t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.bin")
+	if err := os.WriteFile(outside, []byte("private-outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := "runs/workspace/jobs/job-1/s0/task-1/output/report.pdf"
+	fullSymlinkPath := filepath.Join(root, filepath.FromSlash(symlinkPath))
+	if err := os.MkdirAll(filepath.Dir(fullSymlinkPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, fullSymlinkPath); err != nil {
+		t.Skipf("file symlink creation unavailable: %v", err)
+	}
+	if _, _, err := readSafeRRSIFile(root, symlinkPath, maxRRSITrialFileBytes); err == nil {
+		t.Fatal("RRSI deliverable safe reader followed a symlink")
 	}
 }
 
@@ -285,6 +413,8 @@ func TestRRSITrialImportSanitizesThreeDomainsAndJoinsEngineeringPair(t *testing.
 	})
 	writeMancodeFixture(t, root, "runs/coding/jobs/base/task-1__trialhash/agent/trajectory.json",
 		[]byte(`{"steps":[{"source":"assistant","message":"raw-trial-content-marker","tool_calls":[{"name":"private-tool","arguments":{"token":"private-argument-marker"}}],"observation":{"results":[{"content":"private-observation-marker"}]}},{"source":"tool","message":"private-result-marker"}]}`))
+	writeMancodeFixture(t, root, "runs/coding/jobs/base/task-1__trialhash/agent/recording.cast",
+		[]byte("{\"version\":2}\n[0.1,\"o\",\"private-terminal-recording-marker\"]\n"))
 	writeMancodeJSONFixture(t, root, "runs/workspace/jobs/work/s0/area__task/scores.json", map[string]any{
 		"task": "area__task", "all_pass": 0, "score": 0.5, "passed": 1, "total": 2,
 		"criteria": []any{map[string]any{"verdict": "pass", "reason": "raw-trial-content-marker"}},
@@ -312,8 +442,8 @@ func TestRRSITrialImportSanitizesThreeDomainsAndJoinsEngineeringPair(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Summary.RecordsImported != 6 || manifest.Summary.FilesJoined != 1 ||
-		manifest.Summary.FilesUnsupported != 2 || manifest.Summary.FilesScanned != 9 {
+	if manifest.Summary.RecordsImported != 9 || manifest.Summary.FilesJoined != 1 ||
+		manifest.Summary.FilesUnsupported != 0 || manifest.Summary.FilesScanned != 10 {
 		t.Fatalf("RRSI trial migration counts do not reconcile: %#v", manifest.Summary)
 	}
 	engMetaPath := "runs/eng/jobs/candidate/task-a/t2/meta.json"
@@ -338,14 +468,16 @@ func TestRRSITrialImportSanitizesThreeDomainsAndJoinsEngineeringPair(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 6 {
-		t.Fatalf("typed RRSI trial and trajectory record count = %d, want 6", len(records))
+	if len(records) != 9 {
+		t.Fatalf("typed RRSI trial, trajectory, and deliverable record count = %d, want 9", len(records))
 	}
 	seenDomains := map[string]bool{}
 	seenTrajectoryDomains := map[string]bool{}
+	seenDeliverables := map[string]bool{}
 	for _, record := range records {
 		validAlias := record.Type == "rrsi_trial_artifact" && strings.HasPrefix(record.SourcePath, "rrsi/trials/") ||
-			record.Type == "rrsi_trajectory_summary" && strings.HasPrefix(record.SourcePath, "rrsi/trajectories/")
+			record.Type == "rrsi_trajectory_summary" && strings.HasPrefix(record.SourcePath, "rrsi/trajectories/") ||
+			record.Type == rrsiDeliverableRecordType && strings.HasPrefix(record.SourcePath, "rrsi/deliverables/")
 		if !validAlias || record.Scope != "local_pending_review" {
 			t.Fatalf("RRSI trial record has an unsafe identity/scope: %#v", record)
 		}
@@ -360,13 +492,24 @@ func TestRRSITrialImportSanitizesThreeDomainsAndJoinsEngineeringPair(t *testing.
 			t.Fatalf("trajectory schema version = %v", payload["schema_version"])
 		}
 		domain, _ := payload["domain"].(string)
-		if record.Type == "rrsi_trial_artifact" {
+		if record.Type == rrsiDeliverableRecordType {
+			if payload["schema_version"] != RRSIDeliverableSummarySchema || payload["content_imported"] != false ||
+				payload["human_review_required"] != true || payload["execution_authorized"] != false ||
+				payload["cutover_evidence_eligible"] != false {
+				t.Fatalf("RRSI deliverable receipt violated its advisory-only schema: %#v", payload)
+			}
+			kind, _ := payload["record_kind"].(string)
+			seenDeliverables[kind] = true
+			continue
+		} else if record.Type == "rrsi_trial_artifact" {
 			seenDomains[domain] = true
-		} else {
+		} else if record.Type == "rrsi_trajectory_summary" {
 			seenTrajectoryDomains[domain] = true
+		} else {
+			t.Fatalf("unexpected RRSI record type %q", record.Type)
 		}
 		encoded := string(record.Payload)
-		for _, forbidden := range []string{"raw-trial-content-marker", "private-system-marker", "private-answer-marker", "private-tool", "private-argument-marker", "private-observation-marker", "private-result-marker", "C:/Users/private", "private-model-label", "private-cloud-project", "private-error-message", "terminal-bench/task-1", "area__task", "task-a"} {
+		for _, forbidden := range []string{"raw-trial-content-marker", "private-system-marker", "private-answer-marker", "private-tool", "private-argument-marker", "private-observation-marker", "private-result-marker", "private-terminal-recording-marker", "C:/Users/private", "private-model-label", "private-cloud-project", "private-error-message", "terminal-bench/task-1", "area__task", "task-a", "payload.py", "deliverable.md", "recording.cast"} {
 			if strings.Contains(encoded, forbidden) || strings.Contains(record.SourcePath, forbidden) {
 				t.Fatalf("RRSI trial snapshot retained %q: %s %s", forbidden, record.SourcePath, encoded)
 			}
@@ -418,6 +561,11 @@ func TestRRSITrialImportSanitizesThreeDomainsAndJoinsEngineeringPair(t *testing.
 		}
 		if !seenTrajectoryDomains[domain] {
 			t.Errorf("missing structure-only RRSI trajectory record for %s", domain)
+		}
+	}
+	for _, kind := range []string{"coding_terminal_recording", "workspace_deliverable", "engineering_payload"} {
+		if !seenDeliverables[kind] {
+			t.Errorf("missing content-free RRSI deliverable summary for %s", kind)
 		}
 	}
 }

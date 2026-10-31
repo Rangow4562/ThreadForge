@@ -102,19 +102,53 @@ func TestRRSISyntheticTrialMigrationReadback(t *testing.T) {
 	if err := os.WriteFile(trajectoryPath, []byte(trajectory), 0o600); err != nil {
 		t.Fatal("write synthetic RRSI trajectory source")
 	}
+	deliverables := map[string]string{
+		"runs/coding/jobs/base/task-1__trialhash/agent/recording.cast": "{\"version\":2}\n[0.1,\"o\",\"private-terminal-output\"]\n",
+		"runs/workspace/jobs/work/s0/area__task/output/report.md":      "private-workspace-deliverable",
+		"runs/eng/jobs/candidate/task-a/t2/payload.py":                 "PAYLOAD = 'private-engineering-payload'\n",
+	}
+	for relative, content := range deliverables {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatalf("create synthetic RRSI deliverable directory: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("write synthetic RRSI deliverable: %v", err)
+		}
+	}
 	readback := runConfiguredMigrationSourceReadback(t, migrate.RRSI, root)
-	if readback.Snapshot.Summary.FilesScanned != 2 || readback.Snapshot.Summary.RecordsImported != 2 ||
+	if readback.Snapshot.Summary.FilesScanned != 5 || readback.Snapshot.Summary.FilesUnsupported != 0 ||
+		readback.Snapshot.Summary.RecordsImported != 5 ||
 		readback.Verification.Status != "reconciled" || readback.Verification.CutoverAuthorized {
-		t.Fatalf("RRSI trajectory CLI migration receipt did not reconcile as review-only: %#v", readback)
+		t.Fatalf("RRSI trial, trajectory, and deliverable CLI migration receipt did not reconcile as review-only: %#v", readback)
 	}
 	records, err := migrate.ReadSnapshotRecords(readback.ManifestPath, readback.Snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 2 {
-		t.Fatalf("RRSI trial and trajectory CLI record count = %d, want 2", len(records))
+	if len(records) != 5 {
+		t.Fatalf("RRSI trial, trajectory, and deliverable CLI record count = %d, want 5", len(records))
+	}
+	expectedDeliverableFamilies := map[string]bool{
+		"rrsi.coding-terminal-recording": false,
+		"rrsi.workspace-deliverable":     false,
+		"rrsi.engineering-payload":       false,
+	}
+	for _, format := range readback.Coverage.Formats {
+		if _, expected := expectedDeliverableFamilies[format.ID]; expected {
+			if format.Files != 1 || format.RecordsImported != 1 {
+				t.Errorf("RRSI deliverable coverage did not reconcile for %s: %#v", format.ID, format)
+			}
+			expectedDeliverableFamilies[format.ID] = true
+		}
+	}
+	for family, found := range expectedDeliverableFamilies {
+		if !found {
+			t.Errorf("RRSI migration coverage omitted deliverable family %s", family)
+		}
 	}
 	foundTrajectory := false
+	deliverablesFound := map[string]bool{}
 	for _, record := range records {
 		if record.Type == "rrsi_trajectory_summary" {
 			foundTrajectory = true
@@ -123,9 +157,35 @@ func TestRRSISyntheticTrialMigrationReadback(t *testing.T) {
 				t.Fatalf("RRSI trajectory CLI snapshot retained trace content: %s", record.Payload)
 			}
 		}
+		if record.Type == "rrsi_deliverable_summary" {
+			var summary struct {
+				RecordKind              string `json:"record_kind"`
+				ContentImported         bool   `json:"content_imported"`
+				HumanReviewRequired     bool   `json:"human_review_required"`
+				ExecutionAuthorized     bool   `json:"execution_authorized"`
+				CutoverEvidenceEligible bool   `json:"cutover_evidence_eligible"`
+			}
+			if err := json.Unmarshal(record.Payload, &summary); err != nil {
+				t.Fatal(err)
+			}
+			if summary.ContentImported || !summary.HumanReviewRequired || summary.ExecutionAuthorized || summary.CutoverEvidenceEligible {
+				t.Fatalf("RRSI CLI deliverable receipt violated review-only boundary: %#v", summary)
+			}
+			deliverablesFound[summary.RecordKind] = true
+			for _, private := range []string{"private-terminal-output", "private-workspace-deliverable", "private-engineering-payload", "recording.cast", "report.md", "payload.py"} {
+				if strings.Contains(string(record.Payload), private) || strings.Contains(record.SourcePath, private) {
+					t.Fatalf("RRSI CLI deliverable receipt retained private content or source identity %q: %#v", private, record)
+				}
+			}
+		}
 	}
 	if !foundTrajectory {
 		t.Fatal("RRSI trajectory CLI snapshot omitted its structure-only record")
+	}
+	for _, kind := range []string{"coding_terminal_recording", "workspace_deliverable", "engineering_payload"} {
+		if !deliverablesFound[kind] {
+			t.Errorf("RRSI CLI snapshot omitted deliverable receipt %q", kind)
+		}
 	}
 }
 

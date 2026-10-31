@@ -238,7 +238,7 @@ func inspectWithOptions(product Product, sourceRoot string, scannedSink *[]scann
 			manifest.Summary.FilesUnsupported++
 			return nil
 		}
-		if product == RRSI && isRRSITrialMetadataPath(rel) &&
+		if product == RRSI && isRRSISafelyReadPath(rel) &&
 			(fileInfo.Size() > maxRRSITrialFileBytes || fileInfo.Size() > maxRRSITrialReadBytes-rrsiTrialReadBytes) {
 			hash, hashErr := hashFile(name)
 			if hashErr != nil {
@@ -246,7 +246,7 @@ func inspectWithOptions(product Product, sourceRoot string, scannedSink *[]scann
 			}
 			scanned = append(scanned, scannedFile{entry: FileEntry{
 				Path: rel, SourceSHA256: hash, SourceBytes: fileInfo.Size(), Status: "unsupported",
-				Issue: "RRSI trial metadata exceeds bounded conversion limits",
+				Issue: "RRSI converted source exceeds bounded conversion limits",
 			}})
 			manifest.Summary.FilesUnsupported++
 			return nil
@@ -261,11 +261,11 @@ func inspectWithOptions(product Product, sourceRoot string, scannedSink *[]scann
 			return nil
 		}
 		var data []byte
-		if product == RRSI && isRRSITrialMetadataPath(rel) {
+		if product == RRSI && isRRSISafelyReadPath(rel) {
 			var readEntry FileEntry
 			data, readEntry, err = readSafeRRSIFile(root, rel, maxRRSITrialFileBytes)
 			if err != nil || readEntry.SourceBytes != fileInfo.Size() || !validDigest(readEntry.SourceSHA256) {
-				return fmt.Errorf("RRSI trial metadata changed during inspection: %s", rel)
+				return fmt.Errorf("RRSI converted source changed during inspection: %s", rel)
 			}
 		} else {
 			data, err = os.ReadFile(name)
@@ -275,10 +275,10 @@ func inspectWithOptions(product Product, sourceRoot string, scannedSink *[]scann
 		}
 		file, expandedBytes, err := scanFileWithMancodeGitRef(product, root, rel, name, data,
 			maxTotalBytes-expandedTotalBytes, maxRRSITrialReadBytes-rrsiTrialReadBytes-int64(len(data)), gitRefSource, gitRefWorkspaceID)
-		if product == RRSI && isRRSITrialMetadataPath(rel) {
+		if product == RRSI && isRRSISafelyReadPath(rel) {
 			rrsiTrialReadBytes += int64(len(data)) + file.metadataReadBytes
 			if rrsiTrialReadBytes > maxRRSITrialReadBytes {
-				return errors.New("RRSI trial metadata exceeds 1 GiB aggregate read limit")
+				return errors.New("RRSI converted sources exceed 1 GiB aggregate read limit")
 			}
 		}
 		if expandedBytes > maxTotalBytes-expandedTotalBytes {
@@ -489,9 +489,9 @@ func CreateSnapshotWithOptions(product Product, sourceRoot, dataRoot string, opt
 			if err == nil && (current.SourceBytes != entry.SourceBytes || current.SourceSHA256 != entry.SourceSHA256) {
 				err = errors.New("source changed during snapshot")
 			}
-		} else if product == RRSI && isRRSITrialMetadataPath(entry.Path) {
+		} else if product == RRSI && isRRSISafelyReadPath(entry.Path) {
 			if entry.SourceBytes > maxRRSITrialFileBytes || entry.SourceBytes > maxRRSITrialReadBytes-rrsiTrialReadBytes {
-				return Manifest{}, errors.New("RRSI trial metadata exceeds bounded snapshot read limits")
+				return Manifest{}, errors.New("RRSI converted source exceeds bounded snapshot read limits")
 			}
 			var current FileEntry
 			data, current, err = readSafeRRSIFile(manifest.SourceRoot, entry.Path, maxRRSITrialFileBytes)
@@ -520,7 +520,7 @@ func CreateSnapshotWithOptions(product Product, sourceRoot, dataRoot string, opt
 		}
 		rrsiTrialReadBytes += parsed.metadataReadBytes
 		if rrsiTrialReadBytes > maxRRSITrialReadBytes {
-			return Manifest{}, errors.New("RRSI trial metadata exceeds 1 GiB aggregate snapshot read limit")
+			return Manifest{}, errors.New("RRSI converted sources exceed 1 GiB aggregate snapshot read limit")
 		}
 		if parsed.joinedCompanion != nil {
 			companion, exists := manifestFiles[parsed.joinedCompanion.Path]
@@ -743,6 +743,11 @@ func ReadSnapshotRecords(manifestPath string, manifest Manifest) ([]Record, erro
 					return nil, fmt.Errorf("RRSI trajectory record failed source reconciliation: %s", record.Key)
 				}
 			}
+			if manifest.Product == RRSI && record.Type == rrsiDeliverableRecordType {
+				if err := validateRRSIDeliverableSummary(record, file); err != nil {
+					return nil, fmt.Errorf("RRSI deliverable summary failed source reconciliation: %s", record.Key)
+				}
+			}
 			if _, duplicate := seenKeys[record.Key]; duplicate {
 				return nil, fmt.Errorf("duplicate snapshot record key: %s", record.Key)
 			}
@@ -770,7 +775,8 @@ func ReadSnapshotRecords(manifestPath string, manifest Manifest) ([]Record, erro
 
 func validateSnapshotRecord(record Record, file FileEntry, product Product, sourceRoot string,
 	workflowChecks ...[]migrationcoverage.MancodeLegacyWorkflowCheck) error {
-	aliasedRRSIRecord := product == RRSI && (record.Type == "rrsi_trial_artifact" || record.Type == "rrsi_trajectory_summary")
+	aliasedRRSIRecord := product == RRSI && (record.Type == "rrsi_trial_artifact" ||
+		record.Type == "rrsi_trajectory_summary" || record.Type == rrsiDeliverableRecordType)
 	aliasedMancodeCoordinationRecord := product == Mancode && isMancodeCoordinationRecordType(record.Type)
 	aliasedMancodeLegacyWorkflowRecord := product == Mancode && record.Type == "mancode_legacy_workflow_summary"
 	aliasedMancodeLegacyRequirementsRecord := product == Mancode && record.Type == "mancode_legacy_requirements"
@@ -852,7 +858,7 @@ func knownRecordType(value string) bool {
 		"workflow_verification", "workflow_plan", "workflow_checkpoint",
 		"mancode_workflow_aggregate", "mancode_legacy_workflow_summary", "mancode_legacy_requirements", "mancode_legacy_review_summary", "mancode_legacy_verification_summary", "mancode_legacy_workflow_plan",
 		"rrsi_evaluation_result", "rrsi_edit_history", "rrsi_attribution", "rrsi_selection_decision", "rrsi_trial_artifact",
-		"rrsi_trajectory_summary":
+		"rrsi_trajectory_summary", rrsiDeliverableRecordType:
 		return true
 	default:
 		return false
@@ -1195,6 +1201,24 @@ func scanFileWithMancodeGitRef(product Product, sourceRoot, relative, fullPath s
 			file.records = append(file.records, Record{
 				Key: relative + "#000001", Type: "beacon_hook_log_summary", SourcePath: relative,
 				ContentSHA256: digest(payload), Scope: "local_pending_review", Payload: payload,
+			})
+		}
+		finalizeScannedFile(&file)
+		return file, int64(len(data)), nil
+	}
+	if product == RRSI && isRRSIDeliverablePath(relative) {
+		item, alias, err := normalizeRRSIDeliverableFile(relative, data)
+		file := scannedFile{entry: entry}
+		if err != nil {
+			return file, int64(len(data)), err
+		}
+		file.entry.RecordCount = 1
+		if privacy.ContainsCredential(item.Payload) {
+			file.entry.ExcludedCount = 1
+		} else {
+			file.records = append(file.records, Record{
+				Key: alias + "#000001", Type: item.Type, SourcePath: alias,
+				ContentSHA256: digest(item.Payload), Scope: "local_pending_review", Payload: item.Payload,
 			})
 		}
 		finalizeScannedFile(&file)
@@ -1615,6 +1639,9 @@ func classifyRecord(product Product, relative string) string {
 	case RRSI:
 		if isRRSIProposalPath(relative) {
 			return "evolution_proposal"
+		}
+		if isRRSIDeliverablePath(relative) {
+			return rrsiDeliverableRecordType
 		}
 		if isRRSITrialMetadataPath(relative) {
 			if source, ok := rrsiTrialSourceForPath(relative); ok && isRRSITrajectoryKind(source.kind) {

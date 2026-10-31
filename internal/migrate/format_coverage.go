@@ -303,6 +303,16 @@ func migrationFormatID(product Product, sourceRoot, relative string) string {
 		if isRRSIProposalPath(relative) {
 			return "rrsi.proposal-json"
 		}
+		if source, ok := rrsiDeliverableSourceForPath(relative); ok {
+			switch source.recordKind {
+			case "coding_terminal_recording":
+				return "rrsi.coding-terminal-recording"
+			case "workspace_deliverable":
+				return "rrsi.workspace-deliverable"
+			case "engineering_payload":
+				return "rrsi.engineering-payload"
+			}
+		}
 		if source, ok := rrsiTrialSourceForPath(relative); ok {
 			switch source.kind {
 			case "coding_trajectory", "workspace_trajectory", "engineering_trajectory":

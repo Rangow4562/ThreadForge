@@ -6,7 +6,9 @@ import { isSameRealPathWithoutLinks, resolveRealPathWithoutLinks } from './path-
 
 const maxSkillBytes = 256 << 10;
 const approvalNotice = '> This portable procedure is approved guidance, not authorization to execute actions.';
+const memoryApprovalNotice = '> This portable memory skill provides advisory guidance, not authorization to execute actions.';
 const omissionNotice = 'Evidence digests, trace references, validation datasets, reviewer identity, and approval rationale are intentionally omitted from this portable projection.';
+const memoryContinuitySkillID = 'threadforge-memory-continuity';
 
 export type ProjectSkillHost = 'aider' | 'claude-code' | 'command-code' | 'cline' | 'cursor' | 'devin' | 'opencode' | 'codex-cli' | 'gemini-cli' | 'antigravity' | 'github-copilot' | 'openhands' | 'kimi-code' | 'zcode' | 'deepseek-harness' | 'qoder' | 'windsurf';
 
@@ -29,6 +31,7 @@ export interface ProjectSkillResult {
 export type ClineProjectSkillResult = ProjectSkillResult;
 
 interface PortableSkill {
+  kind: 'procedure' | 'memory-continuity' | 'legacy-memory-continuity';
   name: string;
   description: string;
   body: string;
@@ -53,10 +56,8 @@ interface OwnershipMarker {
 }
 
 /**
- * Copy a Threadforge-generated, privacy-reviewed portable procedure into
- * Cline's project skill directory. The caller must pass the SHA-256 printed by
- * `threadforge procedure export-skill`; this detects edits between review and
- * installation. Cline's project MCP/user settings are never modified.
+ * Copy a digest-verified Threadforge procedure or memory-continuity skill into
+ * Cline's project skill directory. Cline's project MCP/user settings are never modified.
  */
 export async function installClineProjectSkill(options: {
   projectRoot: string;
@@ -66,7 +67,7 @@ export async function installClineProjectSkill(options: {
   return installProjectSkill({ ...options, host: 'cline' });
 }
 
-/** Install a reviewed procedure into the selected host's managed project skill directory. */
+/** Install a validated Threadforge project-skill artifact into the selected host's managed directory. */
 export async function installProjectSkill(options: ProjectSkillOptions): Promise<ProjectSkillResult> {
   const host = validateHost(options.host);
   const { root, skill } = await resolvePortableSkill(options);
@@ -206,13 +207,16 @@ async function resolvePortableSkill(options: {
   return { root, skill: { ...generated, bytes, sha256: digest } };
 }
 
-/** Load the exact, digest-verified portable procedure export for another host-specific renderer. */
+/** Load the exact, digest-verified procedure export for another host-specific renderer. */
 export async function loadReviewedPortableSkillExport(options: {
   projectRoot: string;
   skillFile: string;
   sha256: string;
 }): Promise<ReviewedPortableSkillExport> {
   const { root, skill } = await resolvePortableSkill(options);
+  if (skill.kind !== 'procedure') {
+    throw new Error('only approved procedure exports can be rendered as prompts or slash commands');
+  }
   return {
     projectRoot: root,
     name: skill.name,
@@ -222,7 +226,7 @@ export async function loadReviewedPortableSkillExport(options: {
   };
 }
 
-function validateGeneratedSkill(text: string, graphID: string, revision: number): Pick<PortableSkill, 'name' | 'description' | 'body'> {
+function validateGeneratedSkill(text: string, graphID: string, revision: number): Pick<PortableSkill, 'kind' | 'name' | 'description' | 'body'> {
   const frontmatter = /^---\r?\nname: ("(?:\\.|[^"\\])*")\r?\ndescription: ("(?:\\.|[^"\\])*")\r?\n---\r?\n/.exec(text);
   if (!frontmatter) throw new Error('file is not a generated Threadforge portable SKILL.md');
   let name: unknown;
@@ -239,14 +243,39 @@ function validateGeneratedSkill(text: string, graphID: string, revision: number)
   if (typeof description !== 'string' || description.length === 0 || description.length > 1024) {
     throw new Error('portable skill description is invalid for project Agent Skills');
   }
-  const identity = /^> Source procedure: (\S+) revision (\d+)$/m.exec(text);
-  if (!identity || identity[1] !== graphID || Number(identity[2]) !== revision || !name.endsWith(`-r${revision}`)) {
+  const identities = [...text.matchAll(/^> Source (procedure|memory continuity skill): (\S+) revision (\d+)$/gm)];
+  if (identities.length !== 1 || !name.endsWith(`-r${revision}`)) {
     throw new Error('portable skill identity does not match its exported project path');
   }
-  if (!text.includes(approvalNotice) || !text.includes(omissionNotice)) {
+  const identity = identities[0]!;
+  const identityKind = identity[1]!;
+  const identityID = identity[2]!;
+  const identityRevision = Number(identity[3]);
+  let kind: PortableSkill['kind'];
+  let requiredNotice: string;
+  if (identityKind === 'procedure' && identityID === graphID && identityRevision === revision) {
+    if (graphID === memoryContinuitySkillID) {
+      if (revision !== 1) throw new Error('memory continuity exports require a memory-skill identity');
+      // Revision 1 shipped with a procedure-shaped identity. Keep it readable
+      // for exact uninstall/rollback, but never render it as a procedure prompt.
+      kind = 'legacy-memory-continuity';
+      requiredNotice = approvalNotice;
+    } else {
+      kind = 'procedure';
+      requiredNotice = approvalNotice;
+    }
+  } else if (identityKind === 'memory continuity skill' && identityID === memoryContinuitySkillID && identityID === graphID && identityRevision === revision) {
+    const expectedName = `threadforge-${memoryContinuitySkillID}-${createHash('sha256').update(memoryContinuitySkillID).digest('hex').slice(0, 8)}-r${revision}`;
+    if (name !== expectedName) throw new Error('memory skill name does not match its fixed identity and revision');
+    kind = 'memory-continuity';
+    requiredNotice = memoryApprovalNotice;
+  } else {
+    throw new Error('portable skill identity does not match its exported project path');
+  }
+  if (!text.includes(requiredNotice) || !text.includes(omissionNotice)) {
     throw new Error('portable skill is missing the Threadforge advisory/privacy notices');
   }
-  return { name, description, body: text.slice(frontmatter[0].length) };
+  return { kind, name, description, body: text.slice(frontmatter[0].length) };
 }
 
 async function ensureDirectories(root: string, segments: string[]): Promise<string> {

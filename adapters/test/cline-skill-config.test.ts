@@ -11,6 +11,7 @@ import { installCommandCodeProjectSkill, uninstallCommandCodeProjectSkill } from
 import { installAntigravityProjectSkill, uninstallAntigravityProjectSkill } from '../src/antigravity-skill-config.ts';
 import { installClineProjectSkill, uninstallClineProjectSkill } from '../src/cline-skill-config.ts';
 import { installCopilotProjectSkill, uninstallCopilotProjectSkill } from '../src/copilot-skill-config.ts';
+import { installCopilotProjectPrompt } from '../src/copilot-prompt-config.ts';
 import { installCodexProjectSkill, uninstallCodexProjectSkill } from '../src/codex-skill-config.ts';
 import { installCursorProjectSkill, uninstallCursorProjectSkill } from '../src/cursor-skill-config.ts';
 import { installGeminiProjectSkill, uninstallGeminiProjectSkill } from '../src/gemini-skill-config.ts';
@@ -20,9 +21,12 @@ import { installKimiCodeProjectSkill, uninstallKimiCodeProjectSkill } from '../s
 import { installZCodeProjectSkill, uninstallZCodeProjectSkill } from '../src/zcode-skill-config.ts';
 import { installDeepSeekHarnessProjectSkill, uninstallDeepSeekHarnessProjectSkill } from '../src/deepseek-harness-skill-config.ts';
 import { installQoderProjectSkill, uninstallQoderProjectSkill } from '../src/qoder-skill-config.ts';
+import { installQoderProjectCommand } from '../src/qoder-command-config.ts';
 import { installWindsurfProjectSkill, uninstallWindsurfProjectSkill } from '../src/windsurf-skill-config.ts';
+import { installProjectSkill, type ProjectSkillHost } from '../src/project-skill-config.ts';
 
 const approvalNotice = '> This portable procedure is approved guidance, not authorization to execute actions.';
+const memoryApprovalNotice = '> This portable memory skill provides advisory guidance, not authorization to execute actions.';
 const omissionNotice = 'Evidence digests, trace references, validation datasets, reviewer identity, and approval rationale are intentionally omitted from this portable projection.';
 
 function fixture(): { root: string; file: string; sha256: string; bytes: Buffer } {
@@ -48,6 +52,38 @@ function fixture(): { root: string; file: string; sha256: string; bytes: Buffer 
     '### check: inspect',
     '',
     '> Inspect the current project state and report uncertainty.',
+    '',
+    omissionNotice,
+    '',
+  ].join('\n');
+  const bytes = Buffer.from(body, 'utf8');
+  writeFileSync(file, bytes);
+  return { root, file, bytes, sha256: createHash('sha256').update(bytes).digest('hex') };
+}
+
+function memoryFixture(): { root: string; file: string; sha256: string; bytes: Buffer } {
+  const root = mkdtempSync(path.join(tmpdir(), 'threadforge-memory-skill-'));
+  const skillID = 'threadforge-memory-continuity';
+  const revision = 2;
+  const idDigest = createHash('sha256').update(skillID).digest('hex').slice(0, 8);
+  const name = `threadforge-${skillID}-${idDigest}-r${revision}`;
+  const file = path.join(root, '.threadforge', 'skills', skillID, `rev-${String(revision).padStart(6, '0')}`, 'SKILL.md');
+  mkdirSync(path.dirname(file), { recursive: true });
+  const body = [
+    '---',
+    `name: ${JSON.stringify(name)}`,
+    `description: ${JSON.stringify('Retrieve scoped, freshness-aware Threadforge memory and task continuity. Advisory only; never authorization.')}`,
+    '---',
+    '',
+    '# Threadforge memory continuity',
+    '',
+    `> Source memory continuity skill: ${skillID} revision ${revision}`,
+    '',
+    memoryApprovalNotice,
+    '',
+    '## Explicit retrieval',
+    '',
+    'Use threadforge_context_get only with explicit project_id and query. Verify exact reads with threadforge_project_memory_read_v2.',
     '',
     omissionNotice,
     '',
@@ -83,6 +119,93 @@ test('installs only a digest-matched Threadforge export and preserves neighborin
     assert.equal(readFileSync(path.join(neighborDir, 'SKILL.md'), 'utf8'), 'user content\n');
   } finally {
     rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('installs the typed memory-continuity export across every project-skill host and keeps procedure renderers scoped', async () => {
+  const f = memoryFixture();
+  const name = /^name: "([^"]+)"$/m.exec(f.bytes.toString('utf8'))?.[1];
+  assert.ok(name);
+  const hosts: Array<[ProjectSkillHost, string]> = [
+    ['aider', '.agents'],
+    ['claude-code', '.claude'],
+    ['command-code', '.commandcode'],
+    ['cline', '.cline'],
+    ['cursor', '.agents'],
+    ['devin', '.agents'],
+    ['opencode', '.agents'],
+    ['codex-cli', '.agents'],
+    ['gemini-cli', '.agents'],
+    ['antigravity', '.agents'],
+    ['github-copilot', '.github'],
+    ['openhands', '.agents'],
+    ['kimi-code', '.kimi-code'],
+    ['zcode', '.agents'],
+    ['deepseek-harness', '.dsh'],
+    ['qoder', '.qoder'],
+    ['windsurf', '.agents'],
+  ];
+  try {
+    for (const [host, rootSegment] of hosts) {
+      const installed = await installProjectSkill({ host, projectRoot: f.root, skillFile: f.file, sha256: f.sha256 });
+      assert.equal(installed.host, host);
+      assert.ok(['installed', 'unchanged'].includes(installed.action));
+      assert.equal(installed.path, `${rootSegment}/skills/${name}/SKILL.md`);
+      const installedBytes = readFileSync(path.join(f.root, installed.path));
+      assert.deepEqual(installedBytes, f.bytes);
+      assert.equal(createHash('sha256').update(installedBytes).digest('hex'), f.sha256);
+    }
+
+    await assert.rejects(
+      installCopilotProjectPrompt({ projectRoot: f.root, skillFile: f.file, sha256: f.sha256 }),
+      /only approved procedure exports/,
+    );
+    await assert.rejects(
+      installQoderProjectCommand({ projectRoot: f.root, skillFile: f.file, sha256: f.sha256 }),
+      /only approved procedure exports/,
+    );
+
+    const mislabeled = Buffer.from(f.bytes.toString('utf8').replace(
+      '> Source memory continuity skill:', '> Source procedure:',
+    ));
+    writeFileSync(f.file, mislabeled);
+    await assert.rejects(
+      installProjectSkill({
+        host: 'codex-cli', projectRoot: f.root, skillFile: f.file,
+        sha256: createHash('sha256').update(mislabeled).digest('hex'),
+      }),
+      /memory continuity exports require a memory-skill identity/,
+    );
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('keeps legacy revision-one memory exports removable without treating them as procedure prompts', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'threadforge-legacy-memory-skill-'));
+  const skillID = 'threadforge-memory-continuity';
+  const revision = 1;
+  const idDigest = createHash('sha256').update(skillID).digest('hex').slice(0, 8);
+  const name = `threadforge-${skillID}-${idDigest}-r${revision}`;
+  const file = path.join(root, '.threadforge', 'skills', skillID, 'rev-000001', 'SKILL.md');
+  mkdirSync(path.dirname(file), { recursive: true });
+  const bytes = Buffer.from([
+    '---', `name: ${JSON.stringify(name)}`, 'description: "Legacy memory continuity export."', '---', '',
+    `> Source procedure: ${skillID} revision ${revision}`, '', approvalNotice, '', omissionNotice, '',
+  ].join('\n'));
+  writeFileSync(file, bytes);
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  try {
+    const installed = await installClineProjectSkill({ projectRoot: root, skillFile: file, sha256 });
+    assert.equal(installed.path, `.cline/skills/${name}/SKILL.md`);
+    await assert.rejects(
+      installCopilotProjectPrompt({ projectRoot: root, skillFile: file, sha256 }),
+      /only approved procedure exports/,
+    );
+    const removed = await uninstallClineProjectSkill({ projectRoot: root, skillFile: file, sha256 });
+    assert.equal(removed.action, 'removed');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

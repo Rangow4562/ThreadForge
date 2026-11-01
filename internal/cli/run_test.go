@@ -5193,8 +5193,8 @@ func TestMemoryExportSkillCommandWritesPortableMCPContinuityGuide(t *testing.T) 
 	if err := json.Unmarshal(out.Bytes(), &first); err != nil {
 		t.Fatal(err)
 	}
-	if first.SchemaVersion != "threadforge.memory-skill-export.v1" || first.SkillID != "threadforge-memory-continuity" ||
-		first.SkillRevision != 1 || first.AlreadyExists {
+	if first.SchemaVersion != "threadforge.memory-skill-export.v2" || first.SkillID != "threadforge-memory-continuity" ||
+		first.SkillRevision != 2 || first.AlreadyExists {
 		t.Fatalf("unexpected memory skill export response: %#v", first)
 	}
 	filename := filepath.Join(projectRoot, filepath.FromSlash(first.Path))

@@ -6,25 +6,26 @@ from jsonschema.exceptions import ValidationError
 from jsonschema.validators import validator_for
 
 
-SCHEMA_PATH = Path(__file__).resolve().parents[2] / "schema" / "memory-skill-export-v1.schema.json"
+SCHEMA_DIRECTORY = Path(__file__).resolve().parents[2] / "schema"
 
 
 def test_memory_skill_export_schema_validates_export_and_rejects_unsafe_shape():
-    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-    validator = validator_for(schema)(schema)
-    result = {
-        "schema_version": "threadforge.memory-skill-export.v1",
-        "skill_id": "threadforge-memory-continuity",
-        "skill_revision": 1,
-        "path": ".threadforge/skills/threadforge-memory-continuity/rev-000001/SKILL.md",
-        "sha256": "a" * 64,
-        "already_exists": False,
-    }
-    validator.validate(result)
+    for revision in (1, 2):
+        schema = json.loads((SCHEMA_DIRECTORY / f"memory-skill-export-v{revision}.schema.json").read_text(encoding="utf-8"))
+        validator = validator_for(schema)(schema)
+        result = {
+            "schema_version": f"threadforge.memory-skill-export.v{revision}",
+            "skill_id": "threadforge-memory-continuity",
+            "skill_revision": revision,
+            "path": f".threadforge/skills/threadforge-memory-continuity/rev-{revision:06d}/SKILL.md",
+            "sha256": "a" * 64,
+            "already_exists": False,
+        }
+        validator.validate(result)
 
-    with pytest.raises(ValidationError):
-        validator.validate({**result, "already_exists": "false"})
-    with pytest.raises(ValidationError):
-        validator.validate({**result, "path": "C:/private/SKILL.md"})
-    with pytest.raises(ValidationError):
-        validator.validate({**result, "execution_authorized": True})
+        with pytest.raises(ValidationError):
+            validator.validate({**result, "already_exists": "false"})
+        with pytest.raises(ValidationError):
+            validator.validate({**result, "path": "C:/private/SKILL.md"})
+        with pytest.raises(ValidationError):
+            validator.validate({**result, "execution_authorized": True})

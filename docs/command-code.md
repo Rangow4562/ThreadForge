@@ -22,11 +22,11 @@ The same installer accepts the fixed portable memory continuity skill. It contai
 threadforge memory export-skill --project-root <project-root>
 npm.cmd --prefix adapters run adapter -- command-code skills install `
   --project-root <absolute-project-root> `
-  --skill-file <project-root>/.threadforge/skills/threadforge-memory-continuity/rev-000001/SKILL.md `
+  --skill-file <project-root>/.threadforge/skills/threadforge-memory-continuity/rev-000002/SKILL.md `
   --sha256 <export-sha256>
 ```
 
-Smoke v42 on November 1, 2026 verified the export→digest-gated install→`cmdc skills list` path with Command Code `1.88.2`, alongside an approved procedure. The isolated agent run remains skipped because Command Code requires login; no agent use or real-model behavior is claimed.
+Smoke v43 on November 1, 2026 verified the revision-2 export→digest-gated install→`cmdc skills list` path with Command Code `1.88.2`, alongside an approved procedure. The isolated agent run remains skipped because Command Code requires login; no agent use or real-model behavior is claimed.
 
 ## Project MCP
 

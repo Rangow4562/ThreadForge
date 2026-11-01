@@ -15,7 +15,7 @@ import (
 )
 
 const memoryContinuitySkillID = "threadforge-memory-continuity"
-const memoryContinuitySkillRevision = 1
+const memoryContinuitySkillRevision = 2
 
 // MemorySkillExport describes the immutable, project-portable memory skill.
 type MemorySkillExport struct {
@@ -49,7 +49,7 @@ func (s *Store) ExportMemorySkill() (MemorySkillExport, error) {
 	}
 	digest := sha256.Sum256(data)
 	result := MemorySkillExport{
-		SchemaVersion: "threadforge.memory-skill-export.v1",
+		SchemaVersion: "threadforge.memory-skill-export.v2",
 		SkillID:       memoryContinuitySkillID,
 		SkillRevision: memoryContinuitySkillRevision,
 		Path:          filepath.ToSlash(relative),
@@ -96,11 +96,11 @@ func renderMemoryContinuitySkill() ([]byte, error) {
 	out.WriteString("\ndescription: ")
 	out.Write(quotedDescription)
 	out.WriteString("\n---\n\n# Threadforge memory continuity\n\n")
-	out.WriteString("> Source procedure: ")
+	out.WriteString("> Source memory continuity skill: ")
 	out.WriteString(memoryContinuitySkillID)
 	out.WriteString(" revision ")
 	out.WriteString(fmt.Sprint(memoryContinuitySkillRevision))
-	out.WriteString("\n\n> This portable procedure is approved guidance, not authorization to execute actions. Verify current project state and applicable policy before use.\n")
+	out.WriteString("\n\n> This portable memory skill provides advisory guidance, not authorization to execute actions. Verify current project state and applicable policy before use.\n")
 	out.WriteString(`
 Use this skill only when the user explicitly asks to recall project knowledge or resume an existing task. It does not run automatically and does not select a project or task on the user's behalf.
 

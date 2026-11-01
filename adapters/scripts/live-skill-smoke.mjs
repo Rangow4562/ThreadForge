@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createOpenCodeAdapter } from '../src/opencode-plugin.ts';
+import { installAiderProjectSkill } from '../src/aider-skill-config.ts';
 import { installAntigravityProjectPlanGateHook } from '../src/antigravity-hooks-config.ts';
 import { installAntigravityProjectSkill } from '../src/antigravity-skill-config.ts';
 import { installClaudeCodeProjectSkill } from '../src/claude-skill-config.ts';
@@ -17,6 +18,10 @@ import { installCopilotProjectSkill } from '../src/copilot-skill-config.ts';
 import { installCodexProjectSkill } from '../src/codex-skill-config.ts';
 import { installCursorProjectSkill } from '../src/cursor-skill-config.ts';
 import { installGeminiProjectSkill } from '../src/gemini-skill-config.ts';
+import { installDevinProjectSkill } from '../src/devin-skill-config.ts';
+import { installOpenHandsProjectSkill } from '../src/openhands-skill-config.ts';
+import { installKimiCodeProjectSkill } from '../src/kimi-code-skill-config.ts';
+import { installWindsurfProjectSkill } from '../src/windsurf-skill-config.ts';
 import { installOpenCodeProjectSkill } from '../src/opencode-skill-config.ts';
 import { installOpenCodeProjectMcpServer } from '../src/opencode-mcp-config.ts';
 import { installOpenCodeProjectPlugin, opencodeManagedMarker } from '../src/opencode-plugin-config.ts';
@@ -956,6 +961,7 @@ try {
   writeFileSync(copilotInstructionsPath, copilotInstructionsBytes, { flag: 'wx', mode: 0o600 });
 
   const installationCases = [
+    ['aider', installAiderProjectSkill, '.agents'],
     ['claude_code', installClaudeCodeProjectSkill, '.claude'],
     ['cline', installClineProjectSkill, '.cline'],
     ['github_copilot', installCopilotProjectSkill, '.github'],
@@ -967,6 +973,10 @@ try {
     ['zcode', installZCodeProjectSkill, '.agents'],
     ['deepseek_harness', installDeepSeekHarnessProjectSkill, '.dsh'],
     ['qoder', installQoderProjectSkill, '.qoder'],
+    ['devin', installDevinProjectSkill, '.agents'],
+    ['openhands', installOpenHandsProjectSkill, '.agents'],
+    ['kimi_code', installKimiCodeProjectSkill, '.kimi-code'],
+    ['windsurf', installWindsurfProjectSkill, '.agents'],
   ];
   const installations = {};
   for (const [host, install, rootSegment] of installationCases) {
@@ -997,20 +1007,47 @@ try {
     path: commandCodeSkill.path, action: commandCodeSkill.action, sha256_verified: commandCodeSkill.sha256 === exportResult.sha256,
   };
   const memorySkillExport = JSON.parse(runThreadforge([
-    'memory', 'export-skill', '--project-root', commandCodeProjectRoot,
+    'memory', 'export-skill', '--project-root', projectRoot,
   ]));
-  assert.equal(memorySkillExport.schema_version, 'threadforge.memory-skill-export.v1');
+  assert.equal(memorySkillExport.schema_version, 'threadforge.memory-skill-export.v2');
   assert.equal(memorySkillExport.skill_id, 'threadforge-memory-continuity');
-  const memorySkillFile = path.join(commandCodeProjectRoot, ...memorySkillExport.path.split('/'));
+  assert.equal(memorySkillExport.skill_revision, 2);
+  const memorySkillFile = path.join(projectRoot, ...memorySkillExport.path.split('/'));
   const memorySkillBytes = readFileSync(memorySkillFile);
+  assert.equal(createHash('sha256').update(memorySkillBytes).digest('hex'), memorySkillExport.sha256);
+  assert.ok(memorySkillBytes.toString('utf8').includes('Source memory continuity skill: threadforge-memory-continuity revision 2'));
+  assert.equal(memorySkillBytes.toString('utf8').includes('Source procedure:'), false);
   const memorySkillName = /^name: ("(?:\\.|[^"\\])*")$/m.exec(memorySkillBytes.toString('utf8'))?.[1];
   assert.ok(memorySkillName, 'portable memory skill omitted generated Agent Skill frontmatter');
   const decodedMemorySkillName = JSON.parse(memorySkillName);
+  const memorySkillInstallations = {};
+  for (const [host, install, rootSegment] of installationCases) {
+    const installed = await install({ projectRoot, skillFile: memorySkillFile, sha256: memorySkillExport.sha256 });
+    const expectedPath = `${rootSegment}/skills/${decodedMemorySkillName}/SKILL.md`;
+    assert.equal(installed.path, expectedPath, `${host} installed the memory skill to an unexpected project path`);
+    assert.equal(installed.sha256, memorySkillExport.sha256, `${host} changed the memory-skill digest`);
+    const installedBytes = readFileSync(path.join(projectRoot, ...installed.path.split('/')));
+    assert.deepEqual(installedBytes, memorySkillBytes, `${host} changed the memory-skill bytes`);
+    memorySkillInstallations[host] = { path: installed.path, action: installed.action, sha256_verified: true };
+  }
+  const commandCodeMemorySkillExport = JSON.parse(runThreadforge([
+    'memory', 'export-skill', '--project-root', commandCodeProjectRoot,
+  ]));
+  assert.equal(commandCodeMemorySkillExport.schema_version, 'threadforge.memory-skill-export.v2');
+  assert.equal(commandCodeMemorySkillExport.sha256, memorySkillExport.sha256);
+  const commandCodeMemorySkillFile = path.join(commandCodeProjectRoot, ...commandCodeMemorySkillExport.path.split('/'));
+  const commandCodeMemorySkillBytes = readFileSync(commandCodeMemorySkillFile);
+  assert.deepEqual(commandCodeMemorySkillBytes, memorySkillBytes);
   const installedMemorySkill = await installCommandCodeProjectSkill({
-    projectRoot: commandCodeProjectRoot, skillFile: memorySkillFile, sha256: memorySkillExport.sha256,
+    projectRoot: commandCodeProjectRoot, skillFile: commandCodeMemorySkillFile, sha256: commandCodeMemorySkillExport.sha256,
   });
   assert.equal(installedMemorySkill.path, `.commandcode/skills/${decodedMemorySkillName}/SKILL.md`);
-  assert.deepEqual(readFileSync(path.join(commandCodeProjectRoot, ...installedMemorySkill.path.split('/'))), memorySkillBytes);
+  assert.deepEqual(readFileSync(path.join(commandCodeProjectRoot, ...installedMemorySkill.path.split('/'))), commandCodeMemorySkillBytes);
+  memorySkillInstallations.command_code = {
+    path: installedMemorySkill.path,
+    action: installedMemorySkill.action,
+    sha256_verified: installedMemorySkill.sha256 === commandCodeMemorySkillExport.sha256,
+  };
   assert.deepEqual(readFileSync(neighborSkillPath), neighborSkillBytes,
     'project skill installers changed a neighboring user-owned skill');
   assert.deepEqual(readFileSync(qoderCommandNeighbor), qoderCommandNeighborBytes,
@@ -1800,13 +1837,16 @@ try {
   const commandCodeVersion = runHost('cmdc', ['--no-auto-update', '--version']).trim();
   runHost('claude', ['doctor']);
   assert.ok(openCodeSkills.includes(skillName), 'OpenCode did not discover the exported approved procedure');
+  assert.ok(openCodeSkills.includes(decodedMemorySkillName), 'OpenCode did not discover the portable memory continuity skill');
   assert.ok(codexPromptInputs.includes(skillName), 'Codex CLI prompt inputs did not include the exported approved procedure');
+  assert.ok(codexPromptInputs.includes(decodedMemorySkillName), 'Codex CLI prompt inputs did not include the portable memory continuity skill');
   if (geminiDiscovery.discovered) {
     assert.ok(geminiDiscovery.output.includes(skillName), 'Gemini CLI did not discover the exported approved procedure');
+    assert.ok(geminiDiscovery.output.includes(decodedMemorySkillName), 'Gemini CLI did not discover the portable memory continuity skill');
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v42',
+    schema_version: 'threadforge.installed-skill-smoke.v43',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,
@@ -1818,6 +1858,7 @@ try {
     project_skill_path: installations.opencode.path,
     sha256_verified: true,
     installations,
+    memory_skill_installations: memorySkillInstallations,
     qoder_command: {
       action: qoderCommand.action,
       path: qoderCommand.path,

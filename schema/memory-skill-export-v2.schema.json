@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/memory-skill-export-v2.schema.json",
+  "title": "Threadforge portable memory skill export v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "skill_id",
+    "skill_revision",
+    "path",
+    "sha256",
+    "already_exists"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.memory-skill-export.v2" },
+    "skill_id": { "const": "threadforge-memory-continuity" },
+    "skill_revision": { "const": 2 },
+    "path": { "const": ".threadforge/skills/threadforge-memory-continuity/rev-000002/SKILL.md" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "already_exists": { "type": "boolean" }
+  }
+}

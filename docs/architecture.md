@@ -23,7 +23,7 @@ An approval requires a passing held-out validation report and an identified huma
 
 `threadforge procedure export-skill` creates a separate immutable `.threadforge/skills/<id>/rev-NNNNNN/SKILL.md` projection. The command requires explicit privacy review, emits only approved graph instructions and applicability, omits evidence/validation/reviewer metadata, and fails on a conflicting existing revision. It is a portable file export, not host installation or prompt injection.
 
-`threadforge memory export-skill --project-root <project>` separately writes a fixed, project-neutral memory-continuity skill at `.threadforge/skills/threadforge-memory-continuity/rev-000001/SKILL.md`. The skill uses an explicit `project_id`, freshness-aware MCP retrieval, and ambiguity-safe task resume. It contains no project data; existing digest-gated host skill installers can install it without configuring MCP, trust, permissions, or prompt injection.
+`threadforge memory export-skill --project-root <project>` separately writes a fixed, project-neutral memory-continuity skill at `.threadforge/skills/threadforge-memory-continuity/rev-000002/SKILL.md`. Its typed memory-skill identity is distinct from approved procedure exports. The skill uses an explicit `project_id`, freshness-aware MCP retrieval, and ambiguity-safe task resume. It contains no project data; digest-gated project-skill installers can install it without configuring MCP, trust, permissions, or prompt injection.
 
 ### Source freshness and retrieval
 

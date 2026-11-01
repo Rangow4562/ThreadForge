@@ -21,9 +21,9 @@ func TestExportMemorySkillIsImmutableAndContainsBoundedRetrievalGuidance(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.SchemaVersion != "threadforge.memory-skill-export.v1" || first.SkillID != memoryContinuitySkillID ||
+	if first.SchemaVersion != "threadforge.memory-skill-export.v2" || first.SkillID != memoryContinuitySkillID ||
 		first.SkillRevision != memoryContinuitySkillRevision || first.AlreadyExists ||
-		first.Path != ".threadforge/skills/threadforge-memory-continuity/rev-000001/SKILL.md" || len(first.SHA256) != 64 {
+		first.Path != ".threadforge/skills/threadforge-memory-continuity/rev-000002/SKILL.md" || len(first.SHA256) != 64 {
 		t.Fatalf("unexpected portable memory-skill export: %#v", first)
 	}
 	filename := filepath.Join(root, filepath.FromSlash(first.Path))
@@ -38,11 +38,15 @@ func TestExportMemorySkillIsImmutableAndContainsBoundedRetrievalGuidance(t *test
 	for _, required := range []string{
 		"threadforge_context_get", "threadforge_project_memory_read_v2", "threadforge_task_resume_context",
 		"threadforge_task_discover", "project_id", "unverified", "privacy_blocked",
-		"separately trusted host configuration", "not authorization to execute actions", "Never send raw traces",
+		"separately trusted host configuration", "Source memory continuity skill: threadforge-memory-continuity revision 2",
+		"portable memory skill provides advisory guidance", "not authorization to execute actions", "Never send raw traces",
 	} {
 		if !strings.Contains(string(content), required) {
 			t.Errorf("portable memory skill is missing %q", required)
 		}
+	}
+	if strings.Contains(string(content), "> Source procedure:") || strings.Contains(string(content), "portable procedure is approved guidance") {
+		t.Fatalf("memory continuity artifact is mislabeled as a procedure: %s", content)
 	}
 	if strings.Contains(string(content), root) || strings.Contains(string(content), "example.invalid") {
 		t.Fatalf("portable memory skill contains project-specific data: %s", content)

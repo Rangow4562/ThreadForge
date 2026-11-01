@@ -16,6 +16,18 @@ npm.cmd --prefix adapters run adapter -- command-code skills install `
 
 The host-specific path is `.commandcode/skills/<skill-name>/SKILL.md`. The installer validates the exported skill and digest, uses Threadforge ownership metadata, preserves neighboring files, and refuses to overwrite unowned or modified content. Remove only the matching Threadforge-managed file with `command-code skills uninstall` and the same project/file/digest arguments. Skills are advisory guidance, not permission grants or execution authorization.
 
+The same installer accepts the fixed portable memory continuity skill. It contains no project data and guides explicit freshness-aware MCP retrieval; configure project MCP separately:
+
+```powershell
+threadforge memory export-skill --project-root <project-root>
+npm.cmd --prefix adapters run adapter -- command-code skills install `
+  --project-root <absolute-project-root> `
+  --skill-file <project-root>/.threadforge/skills/threadforge-memory-continuity/rev-000001/SKILL.md `
+  --sha256 <export-sha256>
+```
+
+Smoke v42 on November 1, 2026 verified the export→digest-gated install→`cmdc skills list` path with Command Code `1.88.2`, alongside an approved procedure. The isolated agent run remains skipped because Command Code requires login; no agent use or real-model behavior is claimed.
+
 ## Project MCP
 
 The `command-code` host ID manages the `threadforge` entry in the project's standard `.mcp.json` file. It shares that file format/manager with Claude Code; use separate review of the merged config when both clients use the project. The manager preserves unrelated server entries and does not change project trust or host permissions.

@@ -224,6 +224,7 @@ threadforge bootstrap mcp install --host claude-code --project-root .
 ### 2. Cryptographic Provenance, Retrieval Receipts & Team Sync
 - **Ed25519 Signatures**: Shared procedure records require signing keys pinned out-of-band by team administrators. Unsigned, altered, or stale records are withheld during retrieval.
 - **Task-Scoped Retrieval Receipts & Outcome Feedback**: Memory and procedure reads via CLI, hooks, MCP, and `/v2/context` record bounded local retrieval receipts when a task scope is active, enabling structured local outcome feedback via `threadforge memory feedback` ([`docs/memory-feedback.md`](docs/memory-feedback.md)).
+- **Portable Memory Continuity Skill**: `threadforge memory export-skill --project-root .` creates an immutable, digest-checked Agent Skill for explicit scoped memory retrieval and task resumption; it contains no project data and does not configure MCP or inject context ([setup and limits](docs/memory-continuity-skill.md)).
 - **Git-Ref Sync**: `threadforge team sync pull|push` synchronizes only signed, sanitized JSON records through a dedicated Git ref. Raw traces, session transcripts, local SQLite state, credentials, and worktrees are **never** transferred.
 - **Audited Decommissioning**: Team scopes can be frozen via `threadforge team scope decommission`, halting continuity writes while permanently preserving append-only audit logs.
 

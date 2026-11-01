@@ -1496,7 +1496,7 @@ func runSession(args []string, stdout, stderr io.Writer) int {
 
 func runMemory(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "memory command required: learn, feedback, inject, inject-codex, inject-gemini, inject-cursor, inject-qwen, inject-antigravity, inject-opencode, inject-copilot, inject-copilot-sdk, fingerprint, publish, read, get, list, or history")
+		_, _ = fmt.Fprintln(stderr, "memory command required: learn, feedback, export-skill, inject, inject-codex, inject-gemini, inject-cursor, inject-qwen, inject-antigravity, inject-opencode, inject-copilot, inject-copilot-sdk, fingerprint, publish, read, get, list, or history")
 		return 2
 	}
 	switch args[0] {
@@ -1504,6 +1504,8 @@ func runMemory(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return learnMemory(args[1:], stdout, stderr)
 	case "feedback":
 		return runMemoryFeedback(args[1:], stdout, stderr)
+	case "export-skill":
+		return exportMemorySkill(args[1:], stdout, stderr)
 	case "inject":
 		return injectClaudeMemory(args[1:], stdin, stdout, stderr)
 	case "inject-codex":
@@ -1538,6 +1540,30 @@ func runMemory(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "unknown memory command %q\n", args[0])
 		return 2
 	}
+}
+
+func exportMemorySkill(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("memory export-skill", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("project-root", "", "project repository root")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if strings.TrimSpace(*root) == "" || fs.NArg() != 0 {
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory export-skill --project-root <root>")
+		return 2
+	}
+	projectStore, err := procedurefiles.NewLocal(*root)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	result, err := projectStore.ExportMemorySkill()
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return writeIndentedJSON(stdout, result, stderr)
 }
 
 func fingerprintProjectMemorySources(args []string, stdout, stderr io.Writer) int {
@@ -4496,6 +4522,7 @@ Commands:
   migrate records --id <migration-id> [--limit 50] [--offset 0]
   migrate rollback --id <migration-id> --reason <reason> [--db <path>]
   memory learn (--input <events.jsonl> | --session-id <id> [--harness <name>] [--trace-path <file>]) --project-id <id> [--project-root <root>] [--model-path <local-dir>] [--device cpu] [--dtype float32] [--python python] [--actor local-user] [--db <path>]
+  memory export-skill --project-root <root>
   memory feedback record --project-root <root> --project-id <id> --task-id <id> --target-kind <procedure|fact|decision|policy> --target-id <id> --target-revision <n> --exposure <used|shown_not_used> --utility <helpful|neutral|harmful|not_assessed> --task-result <passed|failed|inconclusive> --harness <id> [--db <path>]
   memory feedback list --project-id <id> [--task-id <id>] [--target-kind <kind>] [--target-id <id>] [--harness <id>] [--limit 50] [--offset 0]
   memory feedback receipts --project-id <id> --task-id <id> [--target-id <id>] [--limit 50] [--offset 0]

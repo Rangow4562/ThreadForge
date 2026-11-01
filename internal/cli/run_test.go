@@ -5182,6 +5182,43 @@ func TestProcedureExportSkillCommandWritesApprovedPortableArtifact(t *testing.T)
 	}
 }
 
+func TestMemoryExportSkillCommandWritesPortableMCPContinuityGuide(t *testing.T) {
+	projectRoot := t.TempDir()
+	args := []string{"memory", "export-skill", "--project-root", projectRoot}
+	var out, stderr bytes.Buffer
+	if code := Run(args, &out, &stderr); code != 0 {
+		t.Fatalf("memory skill export code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	var first procedurefiles.MemorySkillExport
+	if err := json.Unmarshal(out.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.SchemaVersion != "threadforge.memory-skill-export.v1" || first.SkillID != "threadforge-memory-continuity" ||
+		first.SkillRevision != 1 || first.AlreadyExists {
+		t.Fatalf("unexpected memory skill export response: %#v", first)
+	}
+	filename := filepath.Join(projectRoot, filepath.FromSlash(first.Path))
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "threadforge_context_get") || strings.Contains(string(content), projectRoot) {
+		t.Fatalf("memory skill omitted retrieval guidance or retained project-specific data: %s", content)
+	}
+	out.Reset()
+	stderr.Reset()
+	if code := Run(args, &out, &stderr); code != 0 {
+		t.Fatalf("repeat memory skill export code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	var second procedurefiles.MemorySkillExport
+	if err := json.Unmarshal(out.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if !second.AlreadyExists || second.SHA256 != first.SHA256 {
+		t.Fatalf("repeat memory-skill export differs: first=%#v second=%#v", first, second)
+	}
+}
+
 func TestProjectMemoryCLIRequiresReviewAndWritesVersionedFiles(t *testing.T) {
 	root := t.TempDir()
 	candidate := projectmemory.Candidate{

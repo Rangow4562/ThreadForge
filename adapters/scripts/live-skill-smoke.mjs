@@ -996,6 +996,21 @@ try {
   installations.command_code = {
     path: commandCodeSkill.path, action: commandCodeSkill.action, sha256_verified: commandCodeSkill.sha256 === exportResult.sha256,
   };
+  const memorySkillExport = JSON.parse(runThreadforge([
+    'memory', 'export-skill', '--project-root', commandCodeProjectRoot,
+  ]));
+  assert.equal(memorySkillExport.schema_version, 'threadforge.memory-skill-export.v1');
+  assert.equal(memorySkillExport.skill_id, 'threadforge-memory-continuity');
+  const memorySkillFile = path.join(commandCodeProjectRoot, ...memorySkillExport.path.split('/'));
+  const memorySkillBytes = readFileSync(memorySkillFile);
+  const memorySkillName = /^name: ("(?:\\.|[^"\\])*")$/m.exec(memorySkillBytes.toString('utf8'))?.[1];
+  assert.ok(memorySkillName, 'portable memory skill omitted generated Agent Skill frontmatter');
+  const decodedMemorySkillName = JSON.parse(memorySkillName);
+  const installedMemorySkill = await installCommandCodeProjectSkill({
+    projectRoot: commandCodeProjectRoot, skillFile: memorySkillFile, sha256: memorySkillExport.sha256,
+  });
+  assert.equal(installedMemorySkill.path, `.commandcode/skills/${decodedMemorySkillName}/SKILL.md`);
+  assert.deepEqual(readFileSync(path.join(commandCodeProjectRoot, ...installedMemorySkill.path.split('/'))), memorySkillBytes);
   assert.deepEqual(readFileSync(neighborSkillPath), neighborSkillBytes,
     'project skill installers changed a neighboring user-owned skill');
   assert.deepEqual(readFileSync(qoderCommandNeighbor), qoderCommandNeighborBytes,
@@ -1572,7 +1587,8 @@ try {
   assert.ok(commandCodeMcpOutput.toLowerCase().includes('threadforge'),
     'Command Code did not list the isolated project Threadforge MCP server');
   const commandCodeSkillOutput = runHost('cmdc', ['--no-auto-update', 'skills', 'list'], { cwd: commandCodeProjectRoot });
-  commandCodeSkillDiscovered = commandCodeSkillOutput.includes(skillName);
+  commandCodeSkillDiscovered = commandCodeSkillOutput.includes(skillName) && commandCodeSkillOutput.includes(decodedMemorySkillName);
+  assert.ok(commandCodeSkillDiscovered, 'Command Code did not discover both the approved procedure and portable memory continuity skill');
   commandCodeAgentMcpRead = await runCommandCodeAgentMcpRead({
     projectRoot: commandCodeProjectRoot,
     home: isolatedHome,

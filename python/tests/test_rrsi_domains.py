@@ -7,6 +7,7 @@ import pytest
 
 from rrsi import inventory as inventory_module
 from rrsi.domain import load_domain
+from rrsi.evaluate import aggregate
 from rrsi.inventory import RRSI_TRUSTED_INVENTORIES, RRSI_SOURCE_REVISION
 from rrsi.modelpolicy import evaluation_runtime
 
@@ -193,6 +194,53 @@ def test_coding_score_reconciles_fixture_harbor_results(tmp_path, monkeypatch):
     assert per_task[task_id].rewards == [1.0]
     assert per_task[task_id].tokens == [20]
     assert extra["pass_rate"] == 1.0
+    assert extra["total_cost_usd"] is None
+    assert extra["cost_usd_records"] == 0
+    assert extra["cost_usd_complete"] is False
+
+
+def test_coding_score_preserves_measured_per_trial_and_total_usd_cost(tmp_path, monkeypatch):
+    domain, _bundle = _load_coding_domain(tmp_path, monkeypatch)
+    task_id = "terminal-fixture-task"
+    job = "fixture-cost-score"
+    for trial, (reward, cost) in enumerate(((1.0, 0.125), (0.0, 0.375))):
+        trial_dir = tmp_path / "runs" / "jobs" / job / f"{task_id}__attempt-{trial}"
+        trial_dir.mkdir(parents=True)
+        (trial_dir / "result.json").write_text(json.dumps({
+            "task_name": f"terminal-bench/{task_id}",
+            "verifier_result": {"rewards": {"reward": reward}},
+            "agent_result": {
+                "n_input_tokens": 12,
+                "n_output_tokens": 8,
+                "cost_usd": cost,
+            },
+        }), encoding="utf-8")
+
+    per_task, extra = domain.score(tmp_path / "runs", job, [task_id], 2)
+
+    assert per_task[task_id].extra["trial_cost_usd"] == [0.125, 0.375]
+    assert extra["total_cost_usd"] == 0.5
+    assert extra["cost_usd_records"] == 2
+    assert extra["cost_usd_complete"] is True
+    persisted = aggregate(job, 2, per_task, extra).to_json()
+    assert persisted["extra"]["total_cost_usd"] == 0.5
+    assert persisted["per_task"][task_id]["extra"]["trial_cost_usd"] == [0.125, 0.375]
+
+
+@pytest.mark.parametrize("cost", [True, "0.25", -0.01, float("nan"), float("inf"), 1e13])
+def test_coding_score_rejects_invalid_reported_usd_cost(tmp_path, monkeypatch, cost):
+    domain, _bundle = _load_coding_domain(tmp_path, monkeypatch)
+    task_id = "terminal-fixture-task"
+    trial_dir = tmp_path / "runs" / "jobs" / "invalid-cost-score" / "trial-0"
+    trial_dir.mkdir(parents=True)
+    (trial_dir / "result.json").write_text(json.dumps({
+        "task_name": f"terminal-bench/{task_id}",
+        "verifier_result": {"rewards": {"reward": 1.0}},
+        "agent_result": {"cost_usd": cost},
+    }), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="cost_usd is malformed"):
+        domain.score(tmp_path / "runs", "invalid-cost-score", [task_id], 1)
 
 
 def test_coding_score_rejects_present_result_without_verifier_reward(tmp_path, monkeypatch):
@@ -264,6 +312,8 @@ def test_coding_harbor_success_requires_exact_noninfra_trials_for_requested_task
     [
         (None, "exactly k valid trials"),
         ({"task_name": "swe-bench/swe-fixture-task", "verifier_result": {}}, "missing a verifier reward"),
+        ({"task_name": "swe-bench/swe-fixture-task", "verifier_result": {"rewards": {"reward": 1.0}},
+          "agent_result": {"cost_usd": "not-a-number"}}, "cost_usd is malformed"),
         ({"task_name": "swe-bench/swe-fixture-task", "exception_info": {"exception_type": "RuntimeError", "exception_message": "docker daemon unavailable"}}, "infrastructure-failed trial"),
         ({"task_name": "swe-bench/unrequested-task", "verifier_result": {"rewards": {"reward": 0.0}}}, "outside the requested task set"),
     ],

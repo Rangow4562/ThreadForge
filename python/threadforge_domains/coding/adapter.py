@@ -166,6 +166,24 @@ def _tokens(result: dict) -> int | None:
     return tok or None
 
 
+def _cost_usd(result: dict) -> float | None:
+    """Return Harbor's measured agent cost, preserving unknown as None."""
+    agent_result = result.get("agent_result")
+    if agent_result is None:
+        return None
+    if not isinstance(agent_result, dict):
+        raise ValueError("agent result must be an object")
+    value = agent_result.get("cost_usd")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("agent cost_usd must be numeric")
+    cost = float(value)
+    if not math.isfinite(cost) or not 0.0 <= cost <= 1e12:
+        raise ValueError("agent cost_usd must be finite and nonnegative")
+    return cost
+
+
 class CodingDomain(Domain):
     name = "coding"
     harness_path = "../../third_party/harbor_terminus2"
@@ -333,6 +351,10 @@ class CodingDomain(Domain):
                 raise RuntimeError("Harbor trial result is missing a verifier reward")
             if not math.isfinite(reward) or not 0.0 <= reward <= 1.0:
                 raise RuntimeError("Harbor trial reward is invalid")
+            try:
+                _cost_usd(result)
+            except (AttributeError, TypeError, ValueError, OverflowError):
+                raise RuntimeError("Harbor trial cost_usd is malformed") from None
             completed[task_id] += 1
             if completed[task_id] > k:
                 raise RuntimeError("Harbor job contains excess trials for a requested task")
@@ -382,7 +404,7 @@ class CodingDomain(Domain):
         total_pass = 0
         for t in ids:
             dirs = trials.get(t, [])[:k]
-            rewards, toks = [], []
+            rewards, toks, costs = [], [], []
             for td in dirs:
                 res = _load_result(td) or {}
                 if infra_failure(res):
@@ -395,18 +417,31 @@ class CodingDomain(Domain):
                     raise RuntimeError("Harbor trial result is missing a verifier reward")
                 if not math.isfinite(rw) or not 0.0 <= rw <= 1.0:
                     raise RuntimeError("Harbor trial reward is invalid")
+                try:
+                    cost_usd = _cost_usd(res)
+                except (AttributeError, TypeError, ValueError, OverflowError):
+                    raise RuntimeError("Harbor trial cost_usd is malformed") from None
                 rewards.append(rw)
                 toks.append(_tokens(res))
+                costs.append(cost_usd)
             missing = k - len(rewards)
             rewards += [0.0] * missing
             toks += [None] * missing
+            costs += [None] * missing
             passes = sum(1 for x in rewards if x == 1.0)
             total_pass += passes
             per[t] = TaskResult(rewards=rewards, tokens=toks, missing=missing,
                                 extra={"passes": passes,
+                                       "trial_cost_usd": costs,
                                        "trial_dirs": [str(d) for d in dirs]})
+        all_costs = [cost for task in per.values() for cost in task.extra["trial_cost_usd"]]
+        cost_records = sum(cost is not None for cost in all_costs)
+        cost_complete = cost_records == len(ids) * k and all(task.missing == 0 for task in per.values())
+        total_cost = sum(all_costs) if cost_complete else None
         return per, {"total_passes": total_pass, "n_trials": len(ids) * k,
-                     "pass_rate": total_pass / max(1, len(ids) * k)}
+                     "pass_rate": total_pass / max(1, len(ids) * k),
+                     "total_cost_usd": total_cost, "cost_usd_records": cost_records,
+                     "cost_usd_complete": cost_complete}
 
     # ---- evidence ----------------------------------------------------------
     def load_trial(self, runs_dir, job, task_id, trial):

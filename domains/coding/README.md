@@ -1,6 +1,6 @@
 # Threadforge RRSI coding domain
 
-This adapter evaluates an evolvable Terminus-2 agent fork on Terminal-Bench 2.1 and uses SWE-bench Verified as its held-out split. It preserves trial-level rewards and token counts for the RRSI scorer.
+This adapter evaluates an evolvable Terminus-2 agent fork on Terminal-Bench 2.1 and uses SWE-bench Verified as its held-out split. It preserves trial-level rewards, token counts, and Harbor-reported `agent_result.cost_usd` when present. Cost values are validated as finite nonnegative numbers; missing cost stays unknown (`null`) and makes aggregate USD coverage incomplete rather than being treated as zero. This is runner-reported usage, not an independently reconciled provider invoice.
 
 ## Local prerequisites
 

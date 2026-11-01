@@ -272,6 +272,50 @@ def test_opencode_task_resume_smoke_schema_records_guidance_without_task_content
         }})
 
 
+def test_opencode_task_resume_receipt_smoke_schema_records_persisted_content_free_receipt():
+    schema = json.loads((SCHEMA_DIRECTORY / "opencode-task-resume-smoke-v2.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.opencode-task-resume-smoke.v2",
+        "status": "verified",
+        "host_cli_version": "1.18.31",
+        "provider": "deterministic-loopback-fixture",
+        "tool": "threadforge_task_resume_context_with_receipt",
+        "tool_call_count": 1,
+        "tool_result_observed": True,
+        "completion_requests": 3,
+        "auxiliary_completion_requests": 1,
+        "task_context_content_retained_in_report": False,
+        "result_advisory_markers_verified": True,
+        "requirements_not_finalized_warning_verified": True,
+        "action_ready": False,
+        "guidance_only": True,
+        "execution_authorized": False,
+        "receipt_v4_contract_verified": True,
+        "receipt_task_revision_binding_verified": True,
+        "receipt_persisted_locally": True,
+        "receipt_list_content_free": True,
+        "plugin_event_delivery": {
+            "status": "verified",
+            "event_count": 4,
+            "actions": ["assistant.message.completed", "prompt.submitted", "tool.completed", "tool.invoked"],
+            "provider": "loopback-only",
+            "prompt_text_retained": False,
+            "execution_authorized": False,
+        },
+        "real_model_invocations": 0,
+    }
+    validator.validate(result)
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "receipt_persisted_locally": False})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "receipt_id": "retrieval-private-id"})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "task_objective": "private task text"})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "execution_authorized": True})
+
+
 def test_opencode_read_only_plan_agent_smoke_records_resolved_permissions_without_claiming_task_binding():
     schema = json.loads((SCHEMA_DIRECTORY / "opencode-read-only-plan-agent-smoke-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

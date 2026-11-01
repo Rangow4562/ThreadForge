@@ -1166,6 +1166,34 @@ try {
       ],
     },
   );
+  const openCodeAgentTaskResumeWithReceipt = await runOpenCodeAgentMcpRead(
+    openCodeTaskFixture.id,
+    openCodeTaskFixture.objective,
+    {
+      hostVersion: openCodeVersion,
+      toolSuffix: 'threadforge_task_resume_context_with_receipt',
+      toolArguments: { task_id: openCodeTaskFixture.id },
+      prompt: 'Use the Threadforge MCP task-resume-with-receipt tool to read this explicitly selected task and report its advisory status.',
+      finalResponse: 'The task snapshot and its local retrieval receipt were prepared. Requirements are not finalized; execution is not authorized.',
+      expectedFinalText: 'Requirements are not finalized',
+      requiredResultMarkers: [
+        'threadforge.task-resume-context-with-receipt.v1',
+        'threadforge.task-resume-context.v1',
+        'threadforge.memory-retrieval-receipt.v4',
+        'threadforge_task_resume_context_with_receipt',
+        '"target_kind":"task_context"',
+        '"target_id":"task-resume-context"',
+        '"freshness":"snapshot"',
+        '"result_status":"available"',
+        '"guidance_included":true',
+        'mcp_handler_result_prepared',
+        'requirements_not_finalized',
+        '"action_ready":false',
+        '"guidance_only":true',
+        '"execution_authorized":false',
+      ],
+    },
+  );
   const opencodePluginCallbacks = readFileSync(opencodePluginCallbacksMarker, 'utf8').trim().split(/\r?\n/)
     .filter(Boolean).slice(0, 256).map((line) => JSON.parse(line));
   assert.ok(opencodePluginCallbacks.some((callback) => callback.hook === 'chat.message' && callback.role === 'user'),
@@ -1846,7 +1874,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v43',
+    schema_version: 'threadforge.installed-skill-smoke.v44',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,
@@ -1878,6 +1906,7 @@ try {
     opencode_agent_stale_mcp_read: openCodeAgentStaleMcpRead,
     opencode_procedure_freshness: openCodeProcedureFreshness,
     opencode_agent_task_resume: openCodeAgentTaskResume,
+    opencode_agent_task_resume_with_receipt: openCodeAgentTaskResumeWithReceipt,
     opencode_memory_injection: opencodeMemoryInjectionReport,
     opencode_agent_task_handoff_read: openCodeAgentTaskHandoffRead,
     codex_agent_mcp_read: codexAgentMcpRead,
@@ -2247,7 +2276,8 @@ async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = 
     for (const privateValue of [prompt, expectedGuidance, procedureID, 'threadforge-fixture-only', ...forbiddenResultMarkers, ...privateTelemetryMarkers]) {
       assert.equal(serializedPluginEvents.includes(privateValue), false, `OpenCode plugin telemetry retained ${privateValue}`);
     }
-    if (toolSuffix === 'threadforge_task_resume_context' || toolSuffix === 'threadforge_task_handoffs') {
+    if (toolSuffix === 'threadforge_task_resume_context' ||
+        toolSuffix === 'threadforge_task_resume_context_with_receipt' || toolSuffix === 'threadforge_task_handoffs') {
       assert.equal(serializedPluginEvents.includes(toolArguments.task_id), false,
         'OpenCode plugin telemetry retained the raw continuity task identifier');
     }
@@ -2255,6 +2285,54 @@ async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = 
       const compactResultText = observedToolResultText.replace(/\s+/g, '');
       assert.equal(requiredResultMarkers.every((marker) => compactResultText.includes(marker.replace(/\s+/g, ''))), true,
         'OpenCode task-resume MCP result omitted advisory fields');
+    }
+    let taskResumeReceiptChecks;
+    if (toolSuffix === 'threadforge_task_resume_context_with_receipt') {
+      const envelope = JSON.parse(observedToolResultText);
+      const taskContext = envelope?.context;
+      const receipt = envelope?.retrieval_receipt;
+      assert.equal(envelope?.schema_version, 'threadforge.task-resume-context-with-receipt.v1');
+      assert.equal(taskContext?.schema_version, 'threadforge.task-resume-context.v1');
+      assert.equal(taskContext?.status, 'available');
+      assert.equal(taskContext?.task?.id, toolArguments.task_id);
+      assert.equal(receipt?.schema_version, 'threadforge.memory-retrieval-receipt.v4');
+      assert.equal(receipt?.task_id, taskContext.task.id);
+      assert.equal(receipt?.project_id, taskContext.task.project_id);
+      assert.equal(receipt?.target_kind, 'task_context');
+      assert.equal(receipt?.target_id, 'task-resume-context');
+      assert.equal(receipt?.target_revision, 1);
+      assert.equal(receipt?.task_revision, taskContext.task.revision);
+      assert.ok(Number.isInteger(receipt?.task_revision) && receipt.task_revision > 0);
+      assert.equal(receipt?.tool, 'threadforge_task_resume_context_with_receipt');
+      assert.equal(receipt?.freshness, 'snapshot');
+      assert.equal(receipt?.result_status, 'available');
+      assert.equal(receipt?.guidance_included, true);
+      assert.equal(receipt?.observation_boundary, 'mcp_handler_result_prepared');
+
+      const localReceiptList = JSON.parse(runThreadforge([
+        'memory', 'feedback', 'receipts',
+        '--project-id', taskContext.task.project_id,
+        '--task-id', taskContext.task.id,
+        '--target-id', 'task-resume-context',
+        '--limit', '20',
+        '--db', databasePath,
+      ]));
+      assert.equal(localReceiptList.schema_version, 'threadforge.memory-retrieval-receipt-list.v2');
+      const persistedReceipt = localReceiptList.receipts.find((item) => item.id === receipt.id);
+      assert.ok(persistedReceipt, 'receipt returned to OpenCode was not persisted in the local SQLite receipt list');
+      assert.equal(persistedReceipt.task_revision, taskContext.task.revision);
+      assert.equal(persistedReceipt.guidance_included, true);
+      const serializedReceiptList = JSON.stringify(localReceiptList);
+      for (const privateValue of [taskContext.task.title, taskContext.task.objective, prompt, expectedGuidance]) {
+        assert.equal(serializedReceiptList.includes(privateValue), false,
+          'content-free local receipt listing retained task or prompt text');
+      }
+      taskResumeReceiptChecks = {
+        receipt_v4_contract_verified: true,
+        receipt_task_revision_binding_verified: true,
+        receipt_persisted_locally: true,
+        receipt_list_content_free: true,
+      };
     }
     return {
       ...(toolSuffix === 'threadforge_task_resume_context' ? {
@@ -2267,6 +2345,16 @@ async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = 
       ...(toolSuffix === 'threadforge_task_handoffs' ? {
         handoff_page_contract_markers_verified: requiredResultMarkers.length > 0,
         private_identifiers_absent_from_telemetry: true,
+      } : {}),
+      ...(toolSuffix === 'threadforge_task_resume_context_with_receipt' ? {
+        schema_version: 'threadforge.opencode-task-resume-smoke.v2',
+        task_context_content_retained_in_report: false,
+        result_advisory_markers_verified: requiredResultMarkers.length > 0,
+        requirements_not_finalized_warning_verified: requiredResultMarkers.includes('requirements_not_finalized'),
+        action_ready: false,
+        guidance_only: true,
+        execution_authorized: false,
+        ...taskResumeReceiptChecks,
       } : {}),
       status: 'verified', host_cli_version: hostVersion,
       provider: 'deterministic-loopback-fixture',

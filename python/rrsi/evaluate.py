@@ -49,6 +49,8 @@ from dataclasses import asdict, dataclass, field
 from numbers import Integral, Real
 from pathlib import Path
 
+MAX_TRIAL_COST_USD = 1e12
+
 
 @dataclass
 class TaskResult:
@@ -85,6 +87,12 @@ class TaskResult:
             raise ValueError("task missing count must be an integer within its trial count")
         if not isinstance(self.extra, dict):
             raise ValueError("task extra data must be an object")
+        if "trial_cost_usd" in self.extra:
+            costs = self.extra["trial_cost_usd"]
+            if not isinstance(costs, list) or len(costs) != trial_count:
+                raise ValueError("task trial_cost_usd must align with its trial results")
+            if any(value is not None and not _valid_cost_usd(value) for value in costs):
+                raise ValueError("task trial_cost_usd values must be finite nonnegative USD amounts or null")
 
     @property
     def mean(self) -> float:
@@ -159,6 +167,7 @@ class EvalResult:
             raise ValueError("evaluation n_expected does not match its task and trial counts")
         if isinstance(self.missing, bool) or not isinstance(self.missing, Integral) or self.missing != missing:
             raise ValueError("evaluation missing count does not match per-task records")
+        _validate_cost_summary(self.per_task, self.extra, expected)
         denominator = sum(sum(task_result.weights) for task_result in self.per_task.values())
         score = (
             sum(sum(reward * weight for reward, weight in zip(task_result.rewards, task_result.weights))
@@ -254,4 +263,51 @@ def relative_cost_change(C_cand: float | None, C_inc: float | None) -> float:
 
 
 def _finite_real(value) -> bool:
-    return isinstance(value, Real) and not isinstance(value, bool) and math.isfinite(float(value))
+    if not isinstance(value, Real) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
+def _valid_cost_usd(value) -> bool:
+    if not _finite_real(value):
+        return False
+    try:
+        amount = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+    return 0.0 <= amount <= MAX_TRIAL_COST_USD
+
+
+def _validate_cost_summary(per_task: dict, extra: dict, expected_trials: int) -> None:
+    summary_fields = ("total_cost_usd", "cost_usd_records", "cost_usd_complete")
+    summary_present = [field in extra for field in summary_fields]
+    task_vectors_present = ["trial_cost_usd" in result.extra for result in per_task.values()]
+    has_summary = any(summary_present)
+    has_vectors = any(task_vectors_present)
+    if not has_summary and not has_vectors:
+        return  # Backward-compatible result without USD cost reporting.
+    if not all(summary_present) or not all(task_vectors_present):
+        raise ValueError("evaluation USD cost summary and per-task trial vectors must be complete together")
+
+    costs = [cost for result in per_task.values() for cost in result.extra["trial_cost_usd"]]
+    records = sum(cost is not None for cost in costs)
+    complete = records == expected_trials
+    total = sum(cost for cost in costs if cost is not None) if complete else None
+
+    declared_records = extra["cost_usd_records"]
+    if (isinstance(declared_records, bool) or not isinstance(declared_records, Integral) or
+            declared_records != records):
+        raise ValueError("evaluation USD cost record count does not reconcile with per-task trials")
+    declared_complete = extra["cost_usd_complete"]
+    if not isinstance(declared_complete, bool) or declared_complete != complete:
+        raise ValueError("evaluation USD cost completeness does not reconcile with per-task trials")
+    declared_total = extra["total_cost_usd"]
+    if total is None:
+        if declared_total is not None:
+            raise ValueError("evaluation total USD cost must be null when any trial cost is unknown")
+    elif (not _finite_real(declared_total) or float(declared_total) < 0.0 or
+          not math.isclose(float(declared_total), float(total), rel_tol=1e-12, abs_tol=1e-12)):
+        raise ValueError("evaluation total USD cost does not reconcile with per-task trials")

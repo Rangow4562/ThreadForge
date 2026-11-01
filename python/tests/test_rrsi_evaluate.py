@@ -74,6 +74,75 @@ def test_eval_result_loader_rejects_summary_that_does_not_reconcile():
         EvalResult.from_json(tampered)
 
 
+def test_eval_result_roundtrips_complete_and_unknown_trial_costs():
+    complete = aggregate(
+        "cost-complete", 2,
+        {"task-a": TaskResult(rewards=[1.0, 0.0], extra={"trial_cost_usd": [0.25, 0.5]})},
+        {"total_cost_usd": 0.75, "cost_usd_records": 2, "cost_usd_complete": True},
+    )
+    assert EvalResult.from_json(complete.to_json()).to_json() == complete.to_json()
+
+    partial = aggregate(
+        "cost-partial", 2,
+        {
+            "task-a": TaskResult(rewards=[1.0, 0.0], extra={"trial_cost_usd": [0.25, None]}),
+            "task-b": TaskResult(rewards=[1.0, 1.0], extra={"trial_cost_usd": [0.5, 0.125]}),
+        },
+        {"total_cost_usd": None, "cost_usd_records": 3, "cost_usd_complete": False},
+    )
+    persisted = EvalResult.from_json(partial.to_json()).to_json()
+    assert persisted["extra"]["total_cost_usd"] is None
+    assert persisted["extra"]["cost_usd_records"] == 3
+    assert persisted["extra"]["cost_usd_complete"] is False
+    assert persisted["per_task"]["task-a"]["extra"]["trial_cost_usd"] == [0.25, None]
+
+
+@pytest.mark.parametrize(
+    "cost",
+    [True, "0.25", -0.01, float("nan"), float("inf"), 1e12 + 1, 10**1000],
+)
+def test_task_result_rejects_malformed_trial_costs(cost):
+    with pytest.raises(ValueError, match="trial_cost_usd values"):
+        TaskResult(rewards=[1.0], extra={"trial_cost_usd": [cost]})
+
+
+def test_task_result_rejects_misaligned_trial_cost_vector():
+    with pytest.raises(ValueError, match="trial_cost_usd must align"):
+        TaskResult(rewards=[1.0, 0.0], extra={"trial_cost_usd": [0.25]})
+
+
+@pytest.mark.parametrize(
+    "field, value, message",
+    [
+        ("total_cost_usd", 0.0, "must be null when any trial cost is unknown"),
+        ("cost_usd_records", 0, "record count does not reconcile"),
+        ("cost_usd_complete", True, "completeness does not reconcile"),
+    ],
+)
+def test_eval_result_loader_rejects_tampered_cost_summary(field, value, message):
+    result = aggregate(
+        "cost-tampered", 2,
+        {"task-a": TaskResult(rewards=[1.0, 0.0], extra={"trial_cost_usd": [0.25, None]})},
+        {"total_cost_usd": None, "cost_usd_records": 1, "cost_usd_complete": False},
+    )
+    tampered = copy.deepcopy(result.to_json())
+    tampered["extra"][field] = value
+    with pytest.raises(ValueError, match=message):
+        EvalResult.from_json(tampered)
+
+
+def test_eval_result_rejects_partial_cost_reporting_across_tasks():
+    with pytest.raises(ValueError, match="summary and per-task trial vectors must be complete together"):
+        aggregate(
+            "cost-mixed", 1,
+            {
+                "task-a": TaskResult(rewards=[1.0], extra={"trial_cost_usd": [0.25]}),
+                "task-b": TaskResult(rewards=[0.0]),
+            },
+            {"total_cost_usd": None, "cost_usd_records": 1, "cost_usd_complete": False},
+        )
+
+
 def test_domain_execution_requires_explicit_opt_in_before_runner_side_effects(tmp_path):
     class Domain:
         called = False

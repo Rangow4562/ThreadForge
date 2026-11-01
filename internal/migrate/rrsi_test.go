@@ -15,17 +15,21 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 	taskResults := map[string]any{
 		"coding": map[string]any{
 			"job": "base", "k": 2, "S": 0.5, "C": 150.0, "n_expected": 2, "missing": 0,
-			"extra": map[string]any{"total_passes": 1, "n_trials": 2, "pass_rate": 0.5},
+			"extra": map[string]any{"total_passes": 1, "n_trials": 2, "pass_rate": 0.5,
+				"total_cost_usd": 0.375, "cost_usd_records": 2, "cost_usd_complete": true},
 			"per_task": map[string]any{"extract-elf": map[string]any{
 				"rewards": []any{1.0, 0.0}, "weights": []any{1.0, 1.0}, "tokens": []any{100.0, 200.0}, "missing": 0,
-				"extra": map[string]any{"passes": 1, "trial_dirs": []any{"C:/Users/private/raw-trial"}},
+				"extra": map[string]any{"passes": 1, "trial_dirs": []any{"C:/Users/private/raw-trial"},
+					"trial_cost_usd": []any{0.125, 0.25}},
 			}},
 		},
 		"workspace": map[string]any{
 			"job": "heldout_champ", "k": 2, "S": 5.0 / 6.0, "C": 150.0, "n_expected": 2, "missing": 0,
-			"extra": map[string]any{"criteria_passed": 5, "criteria_total": 6, "all_pass_tasks": 0, "criterion_rate": 5.0 / 6.0},
+			"extra": map[string]any{"criteria_passed": 5, "criteria_total": 6, "all_pass_tasks": 0, "criterion_rate": 5.0 / 6.0,
+				"total_cost_usd": nil, "cost_usd_records": 0, "cost_usd_complete": false},
 			"per_task": map[string]any{"law/task-01": map[string]any{
-				"rewards": []any{0.5, 1.0}, "weights": []any{2.0, 4.0}, "tokens": []any{100.0, 200.0}, "missing": 0, "extra": map[string]any{},
+				"rewards": []any{0.5, 1.0}, "weights": []any{2.0, 4.0}, "tokens": []any{100.0, 200.0}, "missing": 0,
+				"extra": map[string]any{"trial_cost_usd": []any{nil, nil}},
 			}},
 		},
 		"eng": map[string]any{
@@ -96,11 +100,22 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 		}
 		if record.Type == "rrsi_evaluation_result" {
 			var payload struct {
-				SchemaVersion string                     `json:"schema_version"`
-				Domain        string                     `json:"domain"`
-				Score         float64                    `json:"score"`
-				Metrics       map[string]float64         `json:"metrics"`
-				PerTask       map[string]json.RawMessage `json:"per_task"`
+				SchemaVersion string             `json:"schema_version"`
+				Domain        string             `json:"domain"`
+				Score         float64            `json:"score"`
+				Metrics       map[string]float64 `json:"metrics"`
+				USDCost       struct {
+					SourceReported bool     `json:"source_reported"`
+					TotalUSD       *float64 `json:"total_usd"`
+					Records        int      `json:"records"`
+					Expected       int      `json:"expected_records"`
+					Complete       bool     `json:"complete"`
+				} `json:"usd_cost"`
+				PerTask map[string]struct {
+					Metrics struct {
+						TrialCostUSD []*float64 `json:"trial_cost_usd"`
+					} `json:"metrics"`
+				} `json:"per_task"`
 			}
 			if err := json.Unmarshal(record.Payload, &payload); err != nil {
 				t.Fatal(err)
@@ -117,15 +132,29 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 			}
 			switch payload.Domain {
 			case "coding":
-				if payload.Metrics["pass_rate"] != 0.5 || payload.Score != 0.5 {
+				if payload.Metrics["pass_rate"] != 0.5 || payload.Score != 0.5 ||
+					!payload.USDCost.SourceReported || payload.USDCost.TotalUSD == nil || *payload.USDCost.TotalUSD != 0.375 ||
+					payload.USDCost.Records != 2 || payload.USDCost.Expected != 2 || !payload.USDCost.Complete {
 					t.Fatalf("coding benchmark summary changed during conversion: %#v", payload)
 				}
+				costs := payload.PerTask[singleTask].Metrics.TrialCostUSD
+				if len(costs) != 2 || costs[0] == nil || *costs[0] != 0.125 || costs[1] == nil || *costs[1] != 0.25 {
+					t.Fatalf("coding USD trial costs changed during conversion: %#v", costs)
+				}
 			case "workspace":
-				if math.Abs(payload.Metrics["criterion_rate"]-5.0/6.0) > 1e-6 || math.Abs(payload.Score-5.0/6.0) > 1e-6 {
+				if math.Abs(payload.Metrics["criterion_rate"]-5.0/6.0) > 1e-6 || math.Abs(payload.Score-5.0/6.0) > 1e-6 ||
+					!payload.USDCost.SourceReported || payload.USDCost.TotalUSD != nil || payload.USDCost.Records != 0 ||
+					payload.USDCost.Expected != 2 || payload.USDCost.Complete {
 					t.Fatalf("workspace criterion metrics changed during conversion: %#v", payload)
 				}
+				costs := payload.PerTask[singleTask].Metrics.TrialCostUSD
+				if len(costs) != 2 || costs[0] != nil || costs[1] != nil {
+					t.Fatalf("workspace unknown USD costs changed during conversion: %#v", costs)
+				}
 			case "eng":
-				if payload.Metrics["valid_rate"] != 0.95 || payload.Metrics["no_payload_rate"] != 0 || payload.Score != 0.5 {
+				if payload.Metrics["valid_rate"] != 0.95 || payload.Metrics["no_payload_rate"] != 0 || payload.Score != 0.5 ||
+					payload.USDCost.SourceReported || payload.USDCost.TotalUSD != nil || payload.USDCost.Records != 0 ||
+					payload.USDCost.Expected != 2 || payload.USDCost.Complete {
 					t.Fatalf("engineering guard metrics changed during conversion: %#v", payload)
 				}
 			}
@@ -203,6 +232,96 @@ func TestRRSIEvaluationRejectsInconsistentDomainMetrics(t *testing.T) {
 	}
 	if manifest.Summary.FilesUnsupported != 1 || manifest.Summary.RecordsImported != 0 || manifest.Summary.RecordsRejected != 1 {
 		t.Fatalf("inconsistent RRSI result was not rejected: %#v", manifest.Summary)
+	}
+}
+
+func TestRRSIEvaluationRejectsInconsistentUSDCostCoverage(t *testing.T) {
+	makeEvaluation := func(costs any, summary map[string]any) map[string]any {
+		extra := map[string]any{"total_passes": float64(1), "n_trials": float64(2), "pass_rate": 0.5}
+		for key, value := range summary {
+			extra[key] = value
+		}
+		taskExtra := map[string]any{}
+		if costs != nil {
+			taskExtra["trial_cost_usd"] = costs
+		}
+		return map[string]any{
+			"job": "base", "k": float64(2), "S": 0.5, "C": 150.0, "n_expected": float64(2), "missing": float64(0),
+			"extra": extra,
+			"per_task": map[string]any{"task-1": map[string]any{
+				"rewards": []any{1.0, 0.0}, "weights": []any{1.0, 1.0}, "tokens": []any{100.0, 200.0},
+				"missing": float64(0), "extra": taskExtra,
+			}},
+		}
+	}
+	validSummary := map[string]any{
+		"total_cost_usd": 0.3, "cost_usd_records": float64(2), "cost_usd_complete": true,
+	}
+	cases := []struct {
+		name    string
+		costs   any
+		summary map[string]any
+	}{
+		{name: "negative cost", costs: []any{-0.1, 0.2}, summary: validSummary},
+		{name: "nonnumeric cost", costs: []any{"0.1", 0.2}, summary: validSummary},
+		{name: "over-bound cost", costs: []any{1e12 + 1, 0.2}, summary: validSummary},
+		{name: "misaligned vector", costs: []any{0.1}, summary: validSummary},
+		{name: "record count mismatch", costs: []any{0.1, 0.2}, summary: map[string]any{
+			"total_cost_usd": 0.3, "cost_usd_records": float64(1), "cost_usd_complete": false,
+		}},
+		{name: "complete flag mismatch", costs: []any{0.1, 0.2}, summary: map[string]any{
+			"total_cost_usd": 0.3, "cost_usd_records": float64(2), "cost_usd_complete": false,
+		}},
+		{name: "total mismatch", costs: []any{0.1, 0.2}, summary: map[string]any{
+			"total_cost_usd": 0.31, "cost_usd_records": float64(2), "cost_usd_complete": true,
+		}},
+		{name: "partial cost has total", costs: []any{0.1, nil}, summary: map[string]any{
+			"total_cost_usd": 0.1, "cost_usd_records": float64(1), "cost_usd_complete": false,
+		}},
+		{name: "summary field missing", costs: []any{0.1, 0.2}, summary: map[string]any{
+			"total_cost_usd": 0.3, "cost_usd_records": float64(2),
+		}},
+		{name: "cost vector missing", costs: nil, summary: validSummary},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := normalizeRRSIEvaluation("coding", makeEvaluation(test.costs, test.summary)); err == nil {
+				t.Fatal("inconsistent USD cost evidence was accepted")
+			}
+		})
+	}
+	if _, err := normalizeRRSIEvaluationUSDCost(validSummary, 1, 2, 1, 0.1, 4); err == nil {
+		t.Fatal("partial per-task cost-vector coverage was accepted")
+	}
+}
+
+func TestRRSIEvaluationLegacyMissingCostsRemainExplicitlyUnknown(t *testing.T) {
+	value := map[string]any{
+		"job": "base", "k": float64(1), "S": 1.0, "C": nil, "n_expected": float64(1), "missing": float64(0),
+		"extra": map[string]any{"total_passes": float64(1), "n_trials": float64(1), "pass_rate": 1.0},
+		"per_task": map[string]any{"task-1": map[string]any{
+			"rewards": []any{1.0}, "weights": []any{1.0}, "tokens": []any{nil}, "missing": float64(0),
+		}},
+	}
+	payload, err := normalizeRRSIEvaluation("coding", value)
+	if err != nil {
+		t.Fatalf("legacy result without USD fields was rejected: %v", err)
+	}
+	var decoded struct {
+		USDCost struct {
+			SourceReported bool     `json:"source_reported"`
+			TotalUSD       *float64 `json:"total_usd"`
+			Records        int      `json:"records"`
+			Expected       int      `json:"expected_records"`
+			Complete       bool     `json:"complete"`
+		} `json:"usd_cost"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.USDCost.SourceReported || decoded.USDCost.TotalUSD != nil || decoded.USDCost.Records != 0 ||
+		decoded.USDCost.Expected != 1 || decoded.USDCost.Complete {
+		t.Fatalf("legacy USD cost absence was not preserved as unknown: %#v", decoded.USDCost)
 	}
 }
 

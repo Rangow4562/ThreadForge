@@ -210,6 +210,8 @@ func normalizeRRSIEvaluation(domain string, value any) (json.RawMessage, error) 
 	totalMissing := 0
 	weightedScore, totalWeight := 0.0, 0.0
 	observedTokens, totalTokens := 0, 0.0
+	costVectors, costRecords := 0, 0
+	totalUSD := 0.0
 	for taskID, rawTask := range perTask {
 		if strings.TrimSpace(taskID) == "" || len(taskID) > 512 || strings.ContainsRune(taskID, '\x00') {
 			return nil, errors.New("RRSI evaluation task identifier is invalid")
@@ -289,14 +291,37 @@ func normalizeRRSIEvaluation(domain string, value any) (json.RawMessage, error) 
 		}
 		totalMissing += taskMissing
 		taskMetrics := map[string]any{}
+		taskExtra := map[string]any{}
+		if rawExtra, exists := task["extra"]; exists {
+			var extraOK bool
+			taskExtra, extraOK = rrsiObject(rawExtra)
+			if !extraOK {
+				return nil, errors.New("RRSI per-task domain metrics are invalid")
+			}
+		}
+		if rawCosts, exists := taskExtra["trial_cost_usd"]; exists {
+			costs, valid := rrsiNullableNumberArray(rawCosts)
+			if !valid || len(costs) != k {
+				return nil, errors.New("RRSI per-task USD costs do not match k")
+			}
+			for _, rawCost := range costs {
+				if rawCost == nil {
+					continue
+				}
+				cost, ok := rrsiNumber(rawCost)
+				if !ok || cost < 0 || cost > 1e12 {
+					return nil, errors.New("RRSI per-task USD cost is invalid")
+				}
+				costRecords++
+				totalUSD += cost
+			}
+			costVectors++
+			taskMetrics["trial_cost_usd"] = costs
+		}
 		switch domain {
 		case "coding":
-			if rawExtra, exists := task["extra"]; exists {
-				extra, ok := rrsiObject(rawExtra)
-				if !ok {
-					return nil, errors.New("RRSI coding task metrics are invalid")
-				}
-				if passes, ok := rrsiInteger(extra["passes"]); ok {
+			if _, exists := task["extra"]; exists {
+				if passes, ok := rrsiInteger(taskExtra["passes"]); ok {
 					if passes < 0 || passes > k {
 						return nil, errors.New("RRSI coding pass count is invalid")
 					}
@@ -304,12 +329,11 @@ func normalizeRRSIEvaluation(domain string, value any) (json.RawMessage, error) 
 				}
 			}
 		case "eng":
-			extra, ok := rrsiObject(task["extra"])
-			if !ok {
+			if _, exists := task["extra"]; !exists {
 				return nil, errors.New("RRSI engineering task metrics are invalid")
 			}
 			for _, key := range []string{"combined_scores", "valid", "no_payload"} {
-				values, ok := rrsiNumberArray(extra[key])
+				values, ok := rrsiNumberArray(taskExtra[key])
 				if !ok || len(values) != k {
 					return nil, fmt.Errorf("RRSI engineering task metric %s does not match k", key)
 				}
@@ -337,6 +361,10 @@ func normalizeRRSIEvaluation(domain string, value any) (json.RawMessage, error) 
 	} else if !hasMeanTokens || !rrsiClose(meanTokens, totalTokens/float64(observedTokens)) {
 		return nil, errors.New("RRSI evaluation token cost does not reconcile")
 	}
+	usdCost, err := normalizeRRSIEvaluationUSDCost(sourceMetrics, costVectors, len(perTask), costRecords, totalUSD, expected)
+	if err != nil {
+		return nil, err
+	}
 	metrics, err := normalizeRRSIDomainMetrics(domain, sourceMetrics, expected)
 	if err != nil {
 		return nil, err
@@ -344,9 +372,54 @@ func normalizeRRSIEvaluation(domain string, value any) (json.RawMessage, error) 
 	return rrsiMarshal(map[string]any{
 		"schema_version": rrsiEvaluationImportSchema, "domain": domain, "job": job,
 		"trials_per_task": k, "score": score, "mean_tokens": nullableRRsiNumber(meanTokens, hasMeanTokens),
-		"expected_trials": expected, "missing_trials": missing, "metrics": metrics,
+		"expected_trials": expected, "missing_trials": missing, "metrics": metrics, "usd_cost": usdCost,
 		"per_task": tasks,
 	})
+}
+
+func normalizeRRSIEvaluationUSDCost(source map[string]any, costVectors, taskCount, costRecords int,
+	totalUSD float64, expected int) (map[string]any, error) {
+	fields := []string{"total_cost_usd", "cost_usd_records", "cost_usd_complete"}
+	present := 0
+	for _, field := range fields {
+		if _, exists := source[field]; exists {
+			present++
+		}
+	}
+	if present != 0 && present != len(fields) {
+		return nil, errors.New("RRSI USD cost summary is incomplete")
+	}
+	if costVectors != 0 && costVectors != taskCount {
+		return nil, errors.New("RRSI USD cost vectors are missing for some tasks")
+	}
+	reported := present == len(fields)
+	if reported != (costVectors == taskCount) {
+		return nil, errors.New("RRSI USD cost summary does not match per-task vectors")
+	}
+	if !reported {
+		return map[string]any{
+			"source_reported": false, "total_usd": nil, "records": 0,
+			"expected_records": expected, "complete": false,
+		}, nil
+	}
+	declaredRecords, recordsOK := rrsiInteger(source["cost_usd_records"])
+	declaredComplete, completeOK := source["cost_usd_complete"].(bool)
+	declaredTotal, hasTotal, totalOK := rrsiOptionalNumber(source["total_cost_usd"])
+	if !recordsOK || declaredRecords != costRecords || !completeOK || declaredComplete != (costRecords == expected) ||
+		!totalOK || (hasTotal && declaredTotal < 0) {
+		return nil, errors.New("RRSI USD cost coverage does not reconcile with task vectors")
+	}
+	if costRecords == expected {
+		if !hasTotal || !rrsiClose(declaredTotal, totalUSD) {
+			return nil, errors.New("RRSI total USD cost does not reconcile with task vectors")
+		}
+	} else if hasTotal {
+		return nil, errors.New("RRSI total USD cost must be unknown when trial costs are incomplete")
+	}
+	return map[string]any{
+		"source_reported": true, "total_usd": nullableRRsiNumber(declaredTotal, hasTotal),
+		"records": declaredRecords, "expected_records": expected, "complete": declaredComplete,
+	}, nil
 }
 
 func normalizeRRSIDomainMetrics(domain string, source map[string]any, expected int) (map[string]any, error) {

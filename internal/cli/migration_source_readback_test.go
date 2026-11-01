@@ -514,9 +514,9 @@ func TestRRSIAnalysisReportMigrationReadback(t *testing.T) {
 func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "rrsi-evaluations")
 	fixtures := map[string]string{
-		"coding":    `{"job":"base","k":2,"S":0.5,"C":150,"n_expected":2,"missing":0,"extra":{"total_passes":1,"n_trials":2,"pass_rate":0.5},"per_task":{"task-01":{"rewards":[1,0],"weights":[1,1],"tokens":[100,200],"missing":0,"extra":{"passes":1,"trial_dirs":["C:/Users/private/raw-trial"]}}}}`,
+		"coding":    `{"job":"base","k":2,"S":0.5,"C":150,"n_expected":2,"missing":0,"extra":{"total_passes":1,"n_trials":2,"pass_rate":0.5,"total_cost_usd":0.375,"cost_usd_records":2,"cost_usd_complete":true},"per_task":{"task-01":{"rewards":[1,0],"weights":[1,1],"tokens":[100,200],"missing":0,"extra":{"passes":1,"trial_cost_usd":[0.125,0.25],"trial_dirs":["C:/Users/private/raw-trial"]}}}}`,
 		"workspace": `{"job":"base","k":2,"S":0.8333333333333334,"C":150,"n_expected":2,"missing":0,"extra":{"criteria_passed":5,"criteria_total":6,"all_pass_tasks":0,"criterion_rate":0.8333333333333334},"per_task":{"task-01":{"rewards":[0.5,1],"weights":[2,4],"tokens":[100,200],"missing":0,"extra":{}}}}`,
-		"eng":       `{"job":"base","k":2,"S":0.5,"C":150,"n_expected":2,"missing":0,"extra":{"total_passes":1,"n_trials":2,"pass_rate":0.5,"mean_combined_score":0.6,"valid_rate":0.95,"no_payload_rate":0},"per_task":{"task-01":{"rewards":[1,0],"weights":[1,1],"tokens":[100,200],"missing":0,"extra":{"combined_scores":[0.7,0.5],"valid":[1,0.9],"no_payload":[0,0]}}}}`,
+		"eng":       `{"job":"base","k":2,"S":0.5,"C":150,"n_expected":2,"missing":0,"extra":{"total_passes":1,"n_trials":2,"pass_rate":0.5,"mean_combined_score":0.6,"valid_rate":0.95,"no_payload_rate":0,"total_cost_usd":null,"cost_usd_records":1,"cost_usd_complete":false},"per_task":{"task-01":{"rewards":[1,0],"weights":[1,1],"tokens":[100,200],"missing":0,"extra":{"combined_scores":[0.7,0.5],"valid":[1,0.9],"no_payload":[0,0],"trial_cost_usd":[0.125,null]}}}}`,
 	}
 	for domain, contents := range fixtures {
 		file := filepath.Join(root, "runs", domain, "jobs", "base", "eval.json")
@@ -548,14 +548,33 @@ func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 		Expected      int                `json:"expected_trials"`
 		Missing       int                `json:"missing_trials"`
 		Metrics       map[string]float64 `json:"metrics"`
+		USDCost       struct {
+			SourceReported bool     `json:"source_reported"`
+			TotalUSD       *float64 `json:"total_usd"`
+			Records        int      `json:"records"`
+			Expected       int      `json:"expected_records"`
+			Complete       bool     `json:"complete"`
+		} `json:"usd_cost"`
+		PerTask map[string]struct {
+			Metrics struct {
+				TrialCostUSD []*float64 `json:"trial_cost_usd"`
+			} `json:"metrics"`
+		} `json:"per_task"`
+	}
+	type expectedUSD struct {
+		sourceReported bool
+		totalUSD       *float64
+		records        int
+		complete       bool
 	}
 	want := map[string]struct {
 		score   float64
 		metrics map[string]float64
+		usd     expectedUSD
 	}{
-		"coding":    {0.5, map[string]float64{"pass_rate": 0.5, "total_passes": 1}},
-		"workspace": {5.0 / 6.0, map[string]float64{"criterion_rate": 5.0 / 6.0, "criteria_passed": 5, "criteria_total": 6}},
-		"eng":       {0.5, map[string]float64{"pass_rate": 0.5, "mean_combined_score": 0.6, "valid_rate": 0.95, "no_payload_rate": 0}},
+		"coding":    {0.5, map[string]float64{"pass_rate": 0.5, "total_passes": 1}, expectedUSD{true, floatPtr(0.375), 2, true}},
+		"workspace": {5.0 / 6.0, map[string]float64{"criterion_rate": 5.0 / 6.0, "criteria_passed": 5, "criteria_total": 6}, expectedUSD{false, nil, 0, false}},
+		"eng":       {0.5, map[string]float64{"pass_rate": 0.5, "mean_combined_score": 0.6, "valid_rate": 0.95, "no_payload_rate": 0}, expectedUSD{true, nil, 1, false}},
 	}
 	seen := map[string]bool{}
 	for _, record := range records {
@@ -571,6 +590,23 @@ func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 			math.Abs(payload.Score-expected.score) > 1e-9 || payload.Expected != 2 || payload.Missing != 0 || payload.MeanTokens != 150 {
 			t.Fatalf("RRSI evaluation identity/aggregate did not replay: %#v", payload)
 		}
+		if payload.USDCost.SourceReported != expected.usd.sourceReported || payload.USDCost.Records != expected.usd.records ||
+			payload.USDCost.Expected != 2 || payload.USDCost.Complete != expected.usd.complete ||
+			!sameOptionalFloat(payload.USDCost.TotalUSD, expected.usd.totalUSD) {
+			t.Fatalf("RRSI %s USD cost coverage did not reconcile: %#v", payload.Domain, payload.USDCost)
+		}
+		if payload.Domain == "coding" {
+			costs := payload.PerTask["task-01"].Metrics.TrialCostUSD
+			if len(costs) != 2 || costs[0] == nil || *costs[0] != 0.125 || costs[1] == nil || *costs[1] != 0.25 {
+				t.Fatalf("coding per-trial USD costs did not survive migration: %#v", costs)
+			}
+		}
+		if payload.Domain == "eng" {
+			costs := payload.PerTask["task-01"].Metrics.TrialCostUSD
+			if len(costs) != 2 || costs[0] == nil || *costs[0] != 0.125 || costs[1] != nil {
+				t.Fatalf("partial engineering USD costs did not survive migration: %#v", costs)
+			}
+		}
 		for key, value := range expected.metrics {
 			if math.Abs(payload.Metrics[key]-value) > 1e-9 {
 				t.Fatalf("RRSI %s metric %s = %v, want %v", payload.Domain, key, payload.Metrics[key], value)
@@ -584,6 +620,15 @@ func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 	if len(seen) != 3 {
 		t.Fatalf("RRSI aggregate domains did not reconcile: %#v", seen)
 	}
+}
+
+func floatPtr(value float64) *float64 { return &value }
+
+func sameOptionalFloat(left, right *float64) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return math.Abs(*left-*right) < 1e-12
 }
 
 func TestMancodeSyntheticProjectTeamMigrationReadback(t *testing.T) {

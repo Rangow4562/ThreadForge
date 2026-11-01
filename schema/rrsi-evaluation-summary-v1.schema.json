@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/rrsi-evaluation-summary-v1.schema.json",
+  "title": "Threadforge RRSI evaluation summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "threadforge.rrsi-evaluation.v1" },
+    "domain": { "enum": ["coding", "workspace", "eng"] },
+    "job": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "trials_per_task": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "mean_tokens": { "type": ["number", "null"], "minimum": 0 },
+    "expected_trials": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+    "missing_trials": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "total_passes": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+        "n_trials": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+        "pass_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "criteria_passed": { "type": "integer", "minimum": 0 },
+        "criteria_total": { "type": "integer", "minimum": 1 },
+        "all_pass_tasks": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+        "criterion_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "mean_combined_score": { "type": "number", "minimum": 0 },
+        "valid_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "no_payload_rate": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "usd_cost": { "$ref": "#/$defs/usdCost" },
+    "per_task": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "type": "string", "minLength": 1, "maxLength": 512 },
+      "additionalProperties": { "$ref": "#/$defs/task" }
+    }
+  },
+  "required": [
+    "schema_version", "domain", "job", "trials_per_task", "score", "mean_tokens",
+    "expected_trials", "missing_trials", "metrics", "per_task"
+  ],
+  "$defs": {
+    "usdCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_reported": { "type": "boolean" },
+        "total_usd": { "type": ["number", "null"], "minimum": 0 },
+        "records": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+        "expected_records": {
+          "type": "integer", "minimum": 1, "maximum": 10000000,
+          "description": "Must equal expected_trials; this cross-field equality is validated by the migration converter."
+        },
+        "complete": { "type": "boolean" }
+      },
+      "required": ["source_reported", "total_usd", "records", "expected_records", "complete"],
+      "allOf": [
+        {
+          "if": { "properties": { "source_reported": { "const": false } }, "required": ["source_reported"] },
+          "then": {
+            "properties": {
+              "total_usd": { "const": null },
+              "records": { "const": 0 },
+              "complete": { "const": false }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "complete": { "const": true } }, "required": ["complete"] },
+          "then": { "properties": { "total_usd": { "type": "number" } } }
+        },
+        {
+          "if": { "properties": { "complete": { "const": false } }, "required": ["complete"] },
+          "then": { "properties": { "total_usd": { "const": null } } }
+        }
+      ]
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rewards": {
+          "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 },
+          "minItems": 1, "maxItems": 100
+        },
+        "weights": {
+          "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 },
+          "minItems": 1, "maxItems": 100
+        },
+        "tokens": {
+          "type": "array", "items": { "type": ["number", "null"], "minimum": 0 },
+          "minItems": 1, "maxItems": 100
+        },
+        "missing": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "metrics": { "$ref": "#/$defs/taskMetrics" }
+      },
+      "required": ["rewards", "weights", "tokens", "missing", "metrics"]
+    },
+    "taskMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "passes": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "combined_scores": { "type": "array", "items": { "type": "number", "minimum": 0 }, "maxItems": 100 },
+        "valid": { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 }, "maxItems": 100 },
+        "no_payload": { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 }, "maxItems": 100 },
+        "trial_cost_usd": {
+          "type": "array",
+          "description": "Per-trial runner-reported USD values or explicit unknowns. Exact length must equal trials_per_task; the migration converter reconciles that cross-field invariant.",
+          "items": { "type": ["number", "null"], "minimum": 0, "maximum": 1000000000000 },
+          "minItems": 1,
+          "maxItems": 100
+        }
+      }
+    }
+  }
+}

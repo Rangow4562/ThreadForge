@@ -10,6 +10,7 @@ import pytest
 
 from rrsi import inventory as inventory_module
 from rrsi.domain import load_domain
+from rrsi.evaluate import aggregate
 from rrsi.inventory import RRSI_TRUSTED_INVENTORIES, RRSI_SOURCE_REVISION
 from threadforge_domains.engineering.runtime import RuntimePinError
 from threadforge_domains.engineering.security import (
@@ -278,14 +279,20 @@ def test_engineering_scoring_reconciles_trials_and_counts_missing_as_zero(tmp_pa
 
     assert per_task[task_ids[0]].rewards == [1.0]
     assert per_task[task_ids[0]].tokens == [91]
+    assert per_task[task_ids[0]].extra["trial_cost_usd"] == [None]
     assert per_task[task_ids[0]].missing == 0
     assert per_task[task_ids[1]].rewards == [0.0]
     assert per_task[task_ids[1]].tokens == [None]
+    assert per_task[task_ids[1]].extra["trial_cost_usd"] == [None]
     assert per_task[task_ids[1]].missing == 1
     assert extra == {
         "total_passes": 1, "n_trials": 2, "pass_rate": 0.5,
         "mean_combined_score": 0.41, "valid_rate": 0.5, "no_payload_rate": 0.5,
+        "total_cost_usd": None, "cost_usd_records": 0, "cost_usd_complete": False,
     }
+    persisted = aggregate("engineering-score", 1, per_task, extra).to_json()
+    assert persisted["extra"]["total_cost_usd"] is None
+    assert persisted["per_task"][task_ids[0]]["extra"]["trial_cost_usd"] == [None]
 
     record = domain.load_trial(runs, job, task_ids[0], 0)
     assert record["trajectory"]["messages"][0]["content"] == "fixture trace"

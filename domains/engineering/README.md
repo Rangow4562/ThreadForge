@@ -46,3 +46,9 @@ Orchestration and transport are covered by mocked tests, but no real Docker,
 FastMCP, model, evaluator, or benchmark run has been verified. A reproducible
 Engineering image recipe is still missing, and no task data or evaluator is
 bundled. Synthetic/imported fixtures are not acceptance evidence.
+
+The current broker records token counts but no trusted billed-USD amount.
+Scored trial records therefore include `trial_cost_usd: [null, ...]`, and the
+job summary reports `total_cost_usd: null`, `cost_usd_records: 0`, and
+`cost_usd_complete: false`. No provider/model price estimate is treated as
+measured spend.

@@ -50,6 +50,12 @@ inventory/scoring tests only; it is not evidence of benchmark reproduction,
 held-out efficacy, or release acceptance. Workspace OOD adapters for JobBench,
 GDPval, and APEX-Agents remain incomplete.
 
+Scored trial records include `trial_cost_usd: [null, ...]` and the job summary
+reports `total_cost_usd: null`, `cost_usd_records: 0`, and
+`cost_usd_complete: false`. Harvey trajectory usage currently supplies token
+counts, not a trusted per-trial USD amount; the adapter does not infer billing
+from token counts or a model price table.
+
 ## Python package distribution
 
 From the `python/` directory, install the optional workspace dependencies with

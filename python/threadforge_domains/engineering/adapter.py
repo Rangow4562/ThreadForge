@@ -585,6 +585,7 @@ class EngineeringDomain(Domain):
         valid_sum = no_payload_sum = combined_sum = 0.0
         for task_id in ids:
             rewards, tokens, combined, valid, no_payload = [], [], [], [], []
+            trial_costs = [None] * k
             missing = 0
             for trial in range(k):
                 record = self._read_trial(runs_dir, job, task_id, trial)
@@ -608,7 +609,8 @@ class EngineeringDomain(Domain):
             no_payload_sum += sum(no_payload)
             per_task[task_id] = TaskResult(
                 rewards=rewards, tokens=tokens, missing=missing,
-                extra={"combined_scores": combined, "valid": valid, "no_payload": no_payload},
+                extra={"combined_scores": combined, "valid": valid,
+                       "no_payload": no_payload, "trial_cost_usd": trial_costs},
             )
         total = len(ids) * k
         return per_task, {
@@ -618,6 +620,10 @@ class EngineeringDomain(Domain):
             "mean_combined_score": combined_sum / total,
             "valid_rate": valid_sum / total,
             "no_payload_rate": no_payload_sum / total,
+            # Broker telemetry currently includes tokens, not billed USD.
+            "total_cost_usd": None,
+            "cost_usd_records": 0,
+            "cost_usd_complete": False,
         }
 
     def guards(self, incumbent, candidate) -> list[str]:

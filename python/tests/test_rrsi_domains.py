@@ -442,9 +442,16 @@ def test_workspace_scoring_reconciles_criterion_weights_and_tokens(tmp_path, mon
     assert per_task[task_id].weights == [2.0]
     assert per_task[task_id].tokens == [321]
     assert per_task[task_id].missing == 0
+    assert per_task[task_id].extra["trial_cost_usd"] == [None]
     assert extra["criterion_rate"] == 0.5
     assert extra["criteria_passed"] == 1
     assert extra["criteria_total"] == 2
+    assert extra["total_cost_usd"] is None
+    assert extra["cost_usd_records"] == 0
+    assert extra["cost_usd_complete"] is False
+    persisted = aggregate("workspace-score", 1, per_task, extra).to_json()
+    assert persisted["extra"]["total_cost_usd"] is None
+    assert persisted["per_task"][task_id]["extra"]["trial_cost_usd"] == [None]
 
 
 def test_workspace_complete_job_requires_matching_manifest_and_valid_scores(tmp_path, monkeypatch):

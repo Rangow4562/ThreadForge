@@ -510,6 +510,7 @@ class WorkspaceDomain(Domain):
         crit_passed = crit_total = all_pass = 0
         for task_id in ids:
             rewards, weights, tokens, missing = [], [], [], 0
+            trial_costs = [None] * k
             for trial in range(k):
                 folder = runs_dir / "jobs" / job / f"s{trial}" / _name(task_id)
                 score = self._score_record(folder / "scores.json", task_id)
@@ -534,12 +535,19 @@ class WorkspaceDomain(Domain):
                         not 0 <= token_count <= 10**12):
                     token_count = None
                 tokens.append(token_count)
-            per[task_id] = TaskResult(rewards=rewards, weights=weights, tokens=tokens, missing=missing)
+            per[task_id] = TaskResult(
+                rewards=rewards, weights=weights, tokens=tokens, missing=missing,
+                extra={"trial_cost_usd": trial_costs},
+            )
         return per, {
             "criteria_passed": crit_passed,
             "criteria_total": crit_total,
             "all_pass_tasks": all_pass,
             "criterion_rate": crit_passed / max(1, crit_total),
+            # Harvey trajectories expose token counts, not trustworthy USD cost.
+            "total_cost_usd": None,
+            "cost_usd_records": 0,
+            "cost_usd_complete": False,
         }
 
     def load_trial(self, runs_dir, job, task_id, trial):

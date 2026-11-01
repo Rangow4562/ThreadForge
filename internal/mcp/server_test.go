@@ -137,6 +137,7 @@ func TestServeStdioNegotiatesLegacyAndCurrentVersions(t *testing.T) {
 			for _, name := range []string{
 				"threadforge_context_get", "threadforge_project_memory_read", "threadforge_project_memory_read_v2",
 				"threadforge_procedure_get", "threadforge_procedure_guide", "threadforge_task_resume_context",
+				"threadforge_task_resume_context_with_receipt",
 			} {
 				found := false
 				for _, tool := range listed.Result.Tools {
@@ -1226,6 +1227,13 @@ func TestToolsAreReadOnlyAndRejectUnknownArguments(t *testing.T) {
 	defer procedures.Close()
 	server := New(procedures)
 	for _, tool := range definitions() {
+		if tool.Name == "threadforge_task_resume_context_with_receipt" {
+			if tool.Annotations["readOnlyHint"] != false || tool.Annotations["destructiveHint"] != false ||
+				tool.Annotations["idempotentHint"] != false || tool.Annotations["openWorldHint"] != false {
+				t.Fatalf("receipt-writing task-context tool has unsafe annotations: %#v", tool)
+			}
+			continue
+		}
 		if strings.Contains(tool.Name, "approve") || strings.Contains(tool.Name, "write") || !tool.Annotations["readOnlyHint"].(bool) {
 			t.Fatalf("unexpected mutating MCP tool: %#v", tool)
 		}
@@ -1241,6 +1249,12 @@ func TestToolsAreReadOnlyAndRejectUnknownArguments(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("project-memory index accepted a content-expansion argument")
+	}
+	_, err = server.callTool(context.Background(), toolCallParams{
+		Name: "threadforge_task_resume_context_with_receipt", Arguments: json.RawMessage(`{"task_id":"task-a","unexpected":true}`),
+	})
+	if err == nil {
+		t.Fatal("receipt-writing task-context tool accepted an unknown argument")
 	}
 }
 
@@ -1558,6 +1572,63 @@ func TestTaskResumeContextBundlesPlanAndHandoffWithoutAuthorizing(t *testing.T) 
 	if result.Entries[0].ID != "resume-task-note" || result.Entries[1].ID != "resume-session-note-a" {
 		t.Fatalf("resume entries are not task/session-scoped and chronological: %#v", result.Entries)
 	}
+	if _, count, err := database.ListMemoryRetrievalReceipts(ctx, memoryfeedback.RetrievalReceiptFilter{
+		ProjectID: task.ProjectID, TaskID: task.ID, Limit: 10,
+	}); err != nil || count != 0 {
+		t.Fatalf("legacy task-resume read unexpectedly wrote a receipt: count=%d err=%v", count, err)
+	}
+	value, err := server.callTool(ctx, toolCallParams{
+		Name: "threadforge_task_resume_context_with_receipt", Arguments: json.RawMessage(`{"task_id":"resume-task"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receiptResponse taskResumeContextWithReceiptResponse
+	if err := json.Unmarshal(encoded, &receiptResponse); err != nil {
+		t.Fatalf("decode task resume receipt response %s: %v", encoded, err)
+	}
+	receipt := receiptResponse.RetrievalReceipt
+	if receiptResponse.SchemaVersion != "threadforge.task-resume-context-with-receipt.v1" ||
+		receiptResponse.Context.Status != continuity.TaskResumeContextAvailable ||
+		receipt.SchemaVersion != memoryfeedback.RetrievalReceiptVersionV4 || receipt.Tool != "threadforge_task_resume_context_with_receipt" ||
+		receipt.ProjectID != task.ProjectID || receipt.TaskID != task.ID || receipt.SessionID != session.ID ||
+		receipt.TargetKind != memoryfeedback.TargetTaskContext || receipt.TargetID != "task-resume-context" ||
+		receipt.TargetRevision != 1 || receipt.TaskRevision != receiptResponse.Context.Task.Revision || receipt.Freshness != "snapshot" ||
+		receipt.ResultStatus != continuity.TaskResumeContextAvailable || !receipt.GuidanceIncluded ||
+		receipt.ObservationBoundary != "mcp_handler_result_prepared" || receiptResponse.Context.ExecutionAuthorized ||
+		receiptResponse.Context.ActionReady || !receiptResponse.Context.GuidanceOnly {
+		t.Fatalf("task context receipt did not bind an advisory snapshot: %#v", receiptResponse)
+	}
+	receiptJSON, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []string{"Continue the explicit task", "Focused tests have not run yet", session.Summary} {
+		if strings.Contains(string(receiptJSON), private) {
+			t.Fatalf("task-context receipt retained task/session prose %q: %s", private, receiptJSON)
+		}
+	}
+	feedback := memoryfeedback.Feedback{
+		SchemaVersion: memoryfeedback.SchemaVersionV3, ID: "memory-feedback-3123456789abcdef0123456789abcdef",
+		ProjectID: task.ProjectID, TaskID: task.ID, SessionID: session.ID, RetrievalReceiptID: receipt.ID,
+		TargetKind: memoryfeedback.TargetTaskContext, TargetID: "task-resume-context", TargetRevision: receipt.TargetRevision,
+		Exposure: memoryfeedback.ExposureUsed, Utility: memoryfeedback.UtilityHelpful, TaskResult: "passed",
+		Harness: "opencode", Actor: "local-user", EvidenceClass: memoryfeedback.EvidenceSelfReported,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if _, err := database.RecordMemoryFeedback(ctx, feedback); err != nil {
+		t.Fatalf("matching task-context receipt did not link to feedback: %v", err)
+	}
+	wrongRevision := feedback
+	wrongRevision.ID = "memory-feedback-4123456789abcdef0123456789abcdef"
+	wrongRevision.TargetRevision++
+	if _, err := database.RecordMemoryFeedback(ctx, wrongRevision); err == nil {
+		t.Fatal("task-context feedback linked to a different task revision")
+	}
 
 	second := continuity.Session{
 		SchemaVersion: continuity.SchemaVersion, ID: "resume-session-b", ProjectID: task.ProjectID,
@@ -1573,6 +1644,32 @@ func TestTaskResumeContextBundlesPlanAndHandoffWithoutAuthorizing(t *testing.T) 
 		len(ambiguous.SessionChoices) != 2 || len(ambiguous.Entries) != 0 ||
 		!strings.Contains(strings.Join(ambiguous.Warnings, ","), "multiple_active_sessions") {
 		t.Fatalf("multiple active sessions were guessed instead of surfaced: %#v", ambiguous)
+	}
+	ambiguousValue, err := server.callTool(ctx, toolCallParams{
+		Name: "threadforge_task_resume_context_with_receipt", Arguments: json.RawMessage(`{"task_id":"resume-task"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ambiguousJSON, err := json.Marshal(ambiguousValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ambiguousResponse taskResumeContextWithReceiptResponse
+	if err := json.Unmarshal(ambiguousJSON, &ambiguousResponse); err != nil {
+		t.Fatal(err)
+	}
+	withheld := ambiguousResponse.RetrievalReceipt
+	if ambiguousResponse.Context.Status != continuity.TaskResumeContextSessionSelectionRequired ||
+		withheld.ResultStatus != continuity.TaskResumeContextSessionSelectionRequired || withheld.GuidanceIncluded || withheld.SessionID != "" {
+		t.Fatalf("ambiguous session context was not recorded as withheld: %#v", ambiguousResponse)
+	}
+	feedback.ID = "memory-feedback-5123456789abcdef0123456789abcdef"
+	feedback.SessionID = ""
+	feedback.RetrievalReceiptID = withheld.ID
+	feedback.TargetRevision = withheld.TargetRevision
+	if _, err := database.RecordMemoryFeedback(ctx, feedback); err == nil {
+		t.Fatal("feedback linked to an ambiguous task context whose guidance was withheld")
 	}
 	third := continuity.Session{
 		SchemaVersion: continuity.SchemaVersion, ID: "resume-session-c", ProjectID: task.ProjectID,

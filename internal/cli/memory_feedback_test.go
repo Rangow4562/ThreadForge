@@ -77,7 +77,7 @@ func TestMemoryFeedbackCLIRecordsAndSummarizesScopedSelfReports(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &recorded); err != nil {
 		t.Fatal(err)
 	}
-	if recorded.SchemaVersion != memoryfeedback.RecordResultVersion || recorded.Status != "recorded" ||
+	if recorded.SchemaVersion != memoryfeedback.RecordResultVersionV3 || recorded.Status != "recorded" ||
 		recorded.Feedback.EvidenceClass != memoryfeedback.EvidenceSelfReported || recorded.Feedback.CutoverEvidenceEligible ||
 		recorded.Feedback.ExecutionAuthorized || recorded.Feedback.TargetRevision != 1 ||
 		recorded.Feedback.RetrievalReceiptID != receipt.ID ||
@@ -269,10 +269,120 @@ func TestMemoryFeedbackCLIRecordsApprovedSQLiteProcedureTarget(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &repeated); err != nil {
 		t.Fatal(err)
 	}
-	if repeated.SchemaVersion != memoryfeedback.FailureSummaryResultVersion || repeated.SignatureRecords != 1 ||
+	if repeated.SchemaVersion != memoryfeedback.FailureSummaryResultVersionV2 || repeated.SignatureRecords != 1 ||
 		len(repeated.Groups) != 1 || repeated.Groups[0].FailureSignatureSHA256 != strings.Repeat("e", 64) ||
 		repeated.Groups[0].RepeatedAfterFirstTaskCount != 0 || repeated.CutoverEvidenceEligible || repeated.ExecutionAuthorized {
 		t.Fatalf("unexpected repeated-failure summary: %s", stdout.String())
+	}
+}
+
+func TestMemoryFeedbackCLILinksTaskResumeReceiptsAndGroupsRepeatedFailuresAcrossTasks(t *testing.T) {
+	projectRoot := t.TempDir()
+	databasePath := filepath.Join(t.TempDir(), "threadforge.sqlite")
+	database, err := store.Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	taskIDs := []string{"resume-feedback-a", "resume-feedback-b"}
+	receiptIDs := []string{
+		"retrieval-0123456789abcdef0123456789abcdef",
+		"retrieval-1123456789abcdef0123456789abcdef",
+	}
+	for i, taskID := range taskIDs {
+		task := continuity.Task{
+			SchemaVersion: continuity.SchemaVersion, ID: taskID, ProjectID: "repo-task-context-feedback", Owner: "local-user",
+			Title: "Resume task", Objective: "Measure explicit task-context utility",
+			AcceptanceCriteria: []string{"Feedback remains scoped to a prepared task snapshot"},
+			Status:             continuity.TaskOpen, Revision: 1, CreatedAt: stamp, UpdatedAt: stamp,
+		}
+		if err := database.CreateTask(ctx, task, "local-user", "task-context feedback fixture"); err != nil {
+			t.Fatal(err)
+		}
+		receipt := memoryfeedback.RetrievalReceipt{
+			SchemaVersion: memoryfeedback.RetrievalReceiptVersionV4, ID: receiptIDs[i],
+			ProjectID: task.ProjectID, TaskID: task.ID,
+			TargetKind: memoryfeedback.TargetTaskContext, TargetID: "task-resume-context", TargetRevision: 1, TaskRevision: task.Revision,
+			Tool: "threadforge_task_resume_context_with_receipt", Freshness: "snapshot", ResultStatus: "available",
+			GuidanceIncluded: true, ObservationBoundary: "mcp_handler_result_prepared", CreatedAt: stamp,
+		}
+		if _, err := database.RecordMemoryRetrievalReceipt(ctx, receipt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, taskID := range taskIDs {
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{
+			"memory", "feedback", "record", "--project-root", projectRoot, "--project-id", "repo-task-context-feedback",
+			"--task-id", taskID, "--retrieval-receipt-id", receiptIDs[i], "--target-kind", "task_context",
+			"--target-id", "task-resume-context", "--target-revision", "1", "--exposure", "used", "--utility", "harmful",
+			"--task-result", "failed", "--failure-signature-sha256", strings.Repeat("a", 64),
+			"--harness", "opencode", "--db", databasePath,
+		}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("task-context feedback record exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+		var result memoryfeedback.RecordResult
+		if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.SchemaVersion != memoryfeedback.RecordResultVersionV3 ||
+			result.Feedback.SchemaVersion != memoryfeedback.SchemaVersionV3 ||
+			result.Feedback.TargetID != "task-resume-context" || result.Feedback.RetrievalReceiptID != receiptIDs[i] {
+			t.Fatalf("task-context feedback lost its v3 receipt binding: %s", stdout.String())
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"memory", "feedback", "list", "--project-id", "repo-task-context-feedback",
+		"--target-kind", "task_context", "--target-id", "task-resume-context", "--db", databasePath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("task-context feedback list exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var listed memoryfeedback.ListResult
+	if err := json.Unmarshal(stdout.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if listed.SchemaVersion != memoryfeedback.ListResultVersionV3 || listed.Total != 2 || len(listed.Feedback) != 2 ||
+		listed.Feedback[0].TargetKind != memoryfeedback.TargetTaskContext {
+		t.Fatalf("task-context feedback list lost the target contract: %+v", listed)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"memory", "feedback", "summary", "--project-id", "repo-task-context-feedback", "--db", databasePath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("task-context feedback summary exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var summary memoryfeedback.SummaryResult
+	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.SchemaVersion != memoryfeedback.SummaryResultVersionV3 || len(summary.Groups) != 1 ||
+		summary.Groups[0].TargetKind != memoryfeedback.TargetTaskContext || summary.Groups[0].DistinctTaskCount != 2 {
+		t.Fatalf("task-context summary was not safely aggregated: %+v", summary)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"memory", "feedback", "repeats", "--project-id", "repo-task-context-feedback", "--db", databasePath}, &stdout, &stderr); code != 0 {
+		t.Fatalf("task-context repeats exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var repeated memoryfeedback.FailureSummaryResult
+	if err := json.Unmarshal(stdout.Bytes(), &repeated); err != nil {
+		t.Fatal(err)
+	}
+	if repeated.SchemaVersion != memoryfeedback.FailureSummaryResultVersionV2 || len(repeated.Groups) != 1 ||
+		repeated.Groups[0].TargetKind != memoryfeedback.TargetTaskContext || repeated.Groups[0].TargetID != "task-resume-context" ||
+		repeated.Groups[0].DistinctTaskCount != 2 || repeated.Groups[0].RepeatedAfterFirstTaskCount != 1 {
+		t.Fatalf("task-context repeat-failure attribution was not grouped across tasks: %+v", repeated)
 	}
 }
 

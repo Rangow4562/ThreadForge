@@ -45,6 +45,12 @@ type contextGetWithReceipts struct {
 	RetrievalReceipts []memoryfeedback.RetrievalReceipt `json:"retrieval_receipts"`
 }
 
+type taskResumeContextWithReceiptResponse struct {
+	SchemaVersion    string                          `json:"schema_version"`
+	Context          continuity.TaskResumeContext    `json:"context"`
+	RetrievalReceipt memoryfeedback.RetrievalReceipt `json:"retrieval_receipt"`
+}
+
 type rpcRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
@@ -223,6 +229,7 @@ func (s *Server) dispatch(ctx context.Context, request rpcRequest) (any, int, st
 
 func definitions() []toolDefinition {
 	readOnly := map[string]any{"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+	localReceiptWrite := map[string]any{"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false}
 	tools := []toolDefinition{
 		{
 			Name:        "threadforge_context_get",
@@ -366,6 +373,16 @@ func definitions() []toolDefinition {
 				"max_entries": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 12},
 			}, []string{"task_id"}),
 			Annotations: readOnly,
+		},
+		{
+			Name:        "threadforge_task_resume_context_with_receipt",
+			Description: "Read one bounded task/plan/session/handoff snapshot and append a local content-free receipt bound to the exact task revision and selected session. The receipt proves only that this MCP handler prepared the snapshot, not that the client delivered it or a model saw, interpreted, or used it. Ambiguous session selection is recorded as withheld guidance; plan-only context remains advisory and never authorizes execution. " + storedTextTrustNotice,
+			InputSchema: objectSchema(map[string]any{
+				"task_id":     map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
+				"session_id":  map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
+				"max_entries": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 12},
+			}, []string{"task_id"}),
+			Annotations: localReceiptWrite,
 		},
 		{
 			Name:        "threadforge_task_sessions",
@@ -724,6 +741,54 @@ func (s *Server) callTool(ctx context.Context, params toolCallParams) (any, erro
 			return nil, errors.New("max_entries must be 1-100")
 		}
 		return s.procedures.TaskResumeContext(ctx, args.TaskID, args.SessionID, args.MaxEntries)
+	case "threadforge_task_resume_context_with_receipt":
+		var args struct {
+			TaskID     string `json:"task_id"`
+			SessionID  string `json:"session_id"`
+			MaxEntries int    `json:"max_entries"`
+		}
+		if err := strictDecode(params.Arguments, &args); err != nil {
+			return nil, fmt.Errorf("invalid task resume context with receipt arguments: %w", err)
+		}
+		if strings.TrimSpace(args.TaskID) == "" || len(args.TaskID) > 64 {
+			return nil, errors.New("task_id is required and cannot exceed 64 characters")
+		}
+		if args.MaxEntries == 0 {
+			args.MaxEntries = 12
+		}
+		if args.MaxEntries < 1 || args.MaxEntries > 100 {
+			return nil, errors.New("max_entries must be 1-100")
+		}
+		if s.procedures == nil {
+			return nil, errors.New("task resume receipts require a local SQLite store")
+		}
+		resume, err := s.procedures.TaskResumeContext(ctx, args.TaskID, args.SessionID, args.MaxEntries)
+		if err != nil {
+			return nil, err
+		}
+		sessionID := ""
+		if resume.SelectedSession != nil {
+			sessionID = resume.SelectedSession.ID
+		}
+		receipt, err := prepareMemoryRetrievalReceipt(memoryfeedback.RetrievalReceipt{
+			SchemaVersion: memoryfeedback.RetrievalReceiptVersionV4,
+			ProjectID:     resume.Task.ProjectID, TaskID: resume.Task.ID, SessionID: sessionID,
+			TargetKind: memoryfeedback.TargetTaskContext, TargetID: "task-resume-context", TargetRevision: 1,
+			TaskRevision: resume.Task.Revision,
+			Tool:         "threadforge_task_resume_context_with_receipt", Freshness: "snapshot", ResultStatus: resume.Status,
+			GuidanceIncluded:    resume.Status == continuity.TaskResumeContextAvailable,
+			ObservationBoundary: "mcp_handler_result_prepared", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.procedures.RecordMemoryRetrievalReceipt(ctx, receipt); err != nil {
+			return nil, fmt.Errorf("store local task resume receipt: %w", err)
+		}
+		return taskResumeContextWithReceiptResponse{
+			SchemaVersion: "threadforge.task-resume-context-with-receipt.v1",
+			Context:       resume, RetrievalReceipt: receipt,
+		}, nil
 	case "threadforge_task_discover":
 		var args struct {
 			ProjectID  string `json:"project_id"`

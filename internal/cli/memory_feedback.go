@@ -47,7 +47,7 @@ func listMemoryRetrievalReceipts(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	projectID := fs.String("project-id", "", "exact project scope to list")
 	taskID := fs.String("task-id", "", "exact task scope to list")
-	targetID := fs.String("target-id", "", "optional memory identifier filter")
+	targetID := fs.String("target-id", "", "optional memory or task-context contract identifier filter")
 	limit := fs.Int("limit", 50, "maximum content-free receipts (1-500)")
 	offset := fs.Int("offset", 0, "number of newest receipts to skip")
 	database := fs.String("db", "", "SQLite path (defaults under the local Threadforge data directory)")
@@ -77,7 +77,7 @@ func listMemoryRetrievalReceipts(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	result := memoryfeedback.RetrievalReceiptListResult{
-		SchemaVersion: memoryfeedback.RetrievalReceiptListVersion,
+		SchemaVersion: memoryfeedback.RetrievalReceiptListVersionV2,
 		ProjectID:     filter.ProjectID, TaskID: filter.TaskID, Total: total,
 		Limit: filter.Limit, Offset: filter.Offset, Receipts: items,
 	}
@@ -92,9 +92,9 @@ func recordMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 	taskID := fs.String("task-id", "", "existing Threadforge task associated with this report")
 	sessionID := fs.String("session-id", "", "optional session belonging to the task")
 	retrievalReceiptID := fs.String("retrieval-receipt-id", "", "optional local MCP handler-result receipt returned with memory guidance")
-	targetKind := fs.String("target-kind", "", "approved memory kind: procedure, fact, decision, or policy")
-	targetID := fs.String("target-id", "", "stable identifier of the approved memory revision")
-	targetRevision := fs.Int("target-revision", 0, "exact approved memory revision referenced by the report")
+	targetKind := fs.String("target-kind", "", "approved memory kind or task_context")
+	targetID := fs.String("target-id", "", "stable identifier of the approved memory revision, or task ID for task_context")
+	targetRevision := fs.Int("target-revision", 0, "exact memory or task-context revision referenced by the report")
 	exposure := fs.String("exposure", "", "reported exposure: used or shown_not_used")
 	utility := fs.String("utility", "", "reported utility: helpful, neutral, harmful, or not_assessed")
 	taskResult := fs.String("task-result", "", "self-reported result: passed, failed, or inconclusive")
@@ -109,7 +109,7 @@ func recordMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 		strings.TrimSpace(*targetKind) == "" || strings.TrimSpace(*targetID) == "" || *targetRevision < 1 ||
 		strings.TrimSpace(*exposure) == "" || strings.TrimSpace(*utility) == "" || strings.TrimSpace(*taskResult) == "" ||
 		strings.TrimSpace(*harness) == "" || strings.TrimSpace(*actor) == "" || fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory feedback record --project-root <absolute-root> --project-id <id> --task-id <id> [--session-id <id>] [--retrieval-receipt-id <id>] --target-kind <procedure|fact|decision|policy> --target-id <id> --target-revision <n> --exposure <used|shown_not_used> --utility <helpful|neutral|harmful|not_assessed> --task-result <passed|failed|inconclusive> [--failure-signature-sha256 <64-lowercase-hex>] --harness <id> [--actor local-user] [--db <path>]")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory feedback record --project-root <absolute-root> --project-id <id> --task-id <id> [--session-id <id>] [--retrieval-receipt-id <id>] --target-kind <procedure|fact|decision|policy|task_context> --target-id <id> --target-revision <n> --exposure <used|shown_not_used> --utility <helpful|neutral|harmful|not_assessed> --task-result <passed|failed|inconclusive> [--failure-signature-sha256 <64-lowercase-hex>] --harness <id> [--actor local-user] [--db <path>]")
 		return 2
 	}
 	feedbackID, err := newMemoryFeedbackID()
@@ -126,6 +126,9 @@ func recordMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 		FailureSignatureSHA256: *failureSignature,
 		Harness:                *harness, Actor: *actor, EvidenceClass: memoryfeedback.EvidenceSelfReported,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if feedback.TargetKind == memoryfeedback.TargetTaskContext {
+		feedback.SchemaVersion = memoryfeedback.SchemaVersionV3
 	}
 	if err := memoryfeedback.Validate(feedback); err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
@@ -147,7 +150,7 @@ func recordMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	result := memoryfeedback.RecordResult{
-		SchemaVersion: memoryfeedback.RecordResultVersion,
+		SchemaVersion: memoryfeedback.RecordResultVersionV3,
 		Status:        "recorded", Sequence: sequence, Feedback: feedback,
 	}
 	return writeIndentedJSON(stdout, result, stderr)
@@ -191,6 +194,13 @@ func verifyMemoryFeedbackTarget(ctx context.Context, databaseStore *store.Store,
 			return errors.New("target project memory is not the requested approved revision in this project")
 		}
 		return nil
+	case memoryfeedback.TargetTaskContext:
+		if feedback.RetrievalReceiptID == "" || feedback.TargetID != "task-resume-context" || feedback.TargetRevision != 1 {
+			return errors.New("task-context feedback requires its exact task resume receipt")
+		}
+		// The store validates that the receipt was prepared from this task revision
+		// and session in the same SQLite transaction as the feedback append.
+		return nil
 	default:
 		return errors.New("unsupported memory target kind")
 	}
@@ -201,7 +211,7 @@ func listMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	projectID := fs.String("project-id", "", "exact project scope to list")
 	taskID := fs.String("task-id", "", "optional task filter")
-	targetKind := fs.String("target-kind", "", "optional memory kind filter")
+	targetKind := fs.String("target-kind", "", "optional memory or task_context target filter")
 	targetID := fs.String("target-id", "", "optional memory identifier filter")
 	harness := fs.String("harness", "", "optional harness identifier filter")
 	limit := fs.Int("limit", 50, "maximum feedback records (1-500)")
@@ -234,7 +244,7 @@ func listMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	result := memoryfeedback.ListResult{
-		SchemaVersion: memoryfeedback.ListResultVersion, ProjectID: filter.ProjectID,
+		SchemaVersion: memoryfeedback.ListResultVersionV3, ProjectID: filter.ProjectID,
 		Total: total, Limit: filter.Limit, Offset: filter.Offset, Feedback: items,
 		EvidenceClass: memoryfeedback.EvidenceSelfReported,
 	}

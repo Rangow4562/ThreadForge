@@ -12,29 +12,37 @@ import (
 )
 
 const (
-	SchemaVersion               = "threadforge.memory-feedback.v1"
-	SchemaVersionV2             = "threadforge.memory-feedback.v2"
-	RecordResultVersion         = "threadforge.memory-feedback-result.v2"
-	ListResultVersion           = "threadforge.memory-feedback-list.v2"
-	SummaryResultVersion        = "threadforge.memory-feedback-summary.v2"
-	FailureSummaryResultVersion = "threadforge.memory-feedback-failures.v1"
-	RetrievalReceiptVersion     = "threadforge.memory-retrieval-receipt.v1"
-	RetrievalReceiptVersionV2   = "threadforge.memory-retrieval-receipt.v2"
-	RetrievalReceiptVersionV3   = "threadforge.memory-retrieval-receipt.v3"
-	RetrievalReceiptListVersion = "threadforge.memory-retrieval-receipt-list.v1"
-	EvidenceSelfReported        = "self_reported"
-	MaxProjectRecords           = 100000
-	MaxSummaryRecords           = 10000
-	MaxRetrievalReceiptBatch    = 32
+	SchemaVersion                 = "threadforge.memory-feedback.v1"
+	SchemaVersionV2               = "threadforge.memory-feedback.v2"
+	SchemaVersionV3               = "threadforge.memory-feedback.v3"
+	RecordResultVersion           = "threadforge.memory-feedback-result.v2"
+	RecordResultVersionV3         = "threadforge.memory-feedback-result.v3"
+	ListResultVersion             = "threadforge.memory-feedback-list.v2"
+	ListResultVersionV3           = "threadforge.memory-feedback-list.v3"
+	SummaryResultVersion          = "threadforge.memory-feedback-summary.v2"
+	SummaryResultVersionV3        = "threadforge.memory-feedback-summary.v3"
+	FailureSummaryResultVersion   = "threadforge.memory-feedback-failures.v1"
+	FailureSummaryResultVersionV2 = "threadforge.memory-feedback-failures.v2"
+	RetrievalReceiptVersion       = "threadforge.memory-retrieval-receipt.v1"
+	RetrievalReceiptVersionV2     = "threadforge.memory-retrieval-receipt.v2"
+	RetrievalReceiptVersionV3     = "threadforge.memory-retrieval-receipt.v3"
+	RetrievalReceiptVersionV4     = "threadforge.memory-retrieval-receipt.v4"
+	RetrievalReceiptListVersion   = "threadforge.memory-retrieval-receipt-list.v1"
+	RetrievalReceiptListVersionV2 = "threadforge.memory-retrieval-receipt-list.v2"
+	EvidenceSelfReported          = "self_reported"
+	MaxProjectRecords             = 100000
+	MaxSummaryRecords             = 10000
+	MaxRetrievalReceiptBatch      = 32
 )
 
 type TargetKind string
 
 const (
-	TargetProcedure TargetKind = "procedure"
-	TargetFact      TargetKind = "fact"
-	TargetDecision  TargetKind = "decision"
-	TargetPolicy    TargetKind = "policy"
+	TargetProcedure   TargetKind = "procedure"
+	TargetFact        TargetKind = "fact"
+	TargetDecision    TargetKind = "decision"
+	TargetPolicy      TargetKind = "policy"
+	TargetTaskContext TargetKind = "task_context"
 )
 
 type Exposure string
@@ -91,6 +99,7 @@ type RetrievalReceipt struct {
 	TargetKind          TargetKind `json:"target_kind"`
 	TargetID            string     `json:"target_id"`
 	TargetRevision      int        `json:"target_revision"`
+	TaskRevision        int        `json:"task_revision,omitempty"`
 	Tool                string     `json:"tool"`
 	Host                string     `json:"host,omitempty"`
 	Freshness           string     `json:"freshness"`
@@ -206,7 +215,8 @@ func Validate(value Feedback) error {
 	var problems []string
 	isV1 := value.SchemaVersion == SchemaVersion
 	isV2 := value.SchemaVersion == SchemaVersionV2
-	if !isV1 && !isV2 {
+	isV3 := value.SchemaVersion == SchemaVersionV3
+	if !isV1 && !isV2 && !isV3 {
 		problems = append(problems, "unsupported schema_version")
 	}
 	if isV1 && value.FailureSignatureSHA256 != "" {
@@ -229,8 +239,23 @@ func Validate(value Feedback) error {
 	}
 	switch value.TargetKind {
 	case TargetProcedure, TargetFact, TargetDecision, TargetPolicy:
+	case TargetTaskContext:
+		if !isV3 {
+			problems = append(problems, "task_context feedback requires v3")
+		}
 	default:
-		problems = append(problems, "target_kind must be procedure, fact, decision, or policy")
+		problems = append(problems, "target_kind must be procedure, fact, decision, policy, or task_context")
+	}
+	if value.TargetKind == TargetTaskContext {
+		if value.TargetID != "task-resume-context" {
+			problems = append(problems, "task_context target_id must be task-resume-context")
+		}
+		if value.TargetRevision != 1 {
+			problems = append(problems, "task_context target_revision must be 1")
+		}
+		if value.RetrievalReceiptID == "" {
+			problems = append(problems, "task_context feedback requires a matching retrieval receipt")
+		}
 	}
 	if !stableID.MatchString(value.TargetID) {
 		problems = append(problems, "target_id must be a lowercase stable identifier")
@@ -259,8 +284,8 @@ func Validate(value Feedback) error {
 		problems = append(problems, "task_result must be passed, failed, or inconclusive")
 	}
 	if value.FailureSignatureSHA256 != "" {
-		if !isV2 || !sha256Digest.MatchString(value.FailureSignatureSHA256) {
-			problems = append(problems, "failure_signature_sha256 must be a lowercase SHA-256 digest in v2 feedback")
+		if (!isV2 && !isV3) || !sha256Digest.MatchString(value.FailureSignatureSHA256) {
+			problems = append(problems, "failure_signature_sha256 must be a lowercase SHA-256 digest in v2 or v3 feedback")
 		}
 		if value.TaskResult != "failed" {
 			problems = append(problems, "failure_signature_sha256 is allowed only for failed tasks")
@@ -301,7 +326,8 @@ func ValidateRetrievalReceipt(value RetrievalReceipt) error {
 	isV1 := value.SchemaVersion == RetrievalReceiptVersion
 	isV2 := value.SchemaVersion == RetrievalReceiptVersionV2
 	isV3 := value.SchemaVersion == RetrievalReceiptVersionV3
-	if !isV1 && !isV2 && !isV3 {
+	isV4 := value.SchemaVersion == RetrievalReceiptVersionV4
+	if !isV1 && !isV2 && !isV3 && !isV4 {
 		problems = append(problems, "unsupported schema_version")
 	}
 	if !retrievalReceiptID.MatchString(value.ID) {
@@ -388,8 +414,38 @@ func ValidateRetrievalReceipt(value RetrievalReceipt) error {
 		if value.Freshness == "stale" && value.GuidanceIncluded {
 			problems = append(problems, "stale hook guidance must not be marked included")
 		}
-	} else if value.Host != "" {
-		problems = append(problems, "v1 and v2 receipts do not include host")
+	}
+	if isV4 {
+		if value.TargetKind != TargetTaskContext || value.TargetID != "task-resume-context" || value.TargetRevision != 1 {
+			problems = append(problems, "v4 receipts must identify task-resume-context contract revision 1")
+		}
+		if value.TaskRevision < 1 {
+			problems = append(problems, "v4 receipts must bind a positive task_revision")
+		}
+		if value.Tool != "threadforge_task_resume_context_with_receipt" {
+			problems = append(problems, "v4 receipts must use threadforge_task_resume_context_with_receipt")
+		}
+		if value.Freshness != "snapshot" {
+			problems = append(problems, "v4 freshness must be snapshot")
+		}
+		switch value.ResultStatus {
+		case "available":
+			if !value.GuidanceIncluded {
+				problems = append(problems, "available task context must be marked included")
+			}
+		case "session_selection_required":
+			if value.GuidanceIncluded {
+				problems = append(problems, "ambiguous task context must be marked withheld")
+			}
+		default:
+			problems = append(problems, "v4 result_status must be available or session_selection_required")
+		}
+	}
+	if !isV4 && value.TaskRevision != 0 {
+		problems = append(problems, "task_revision is only supported by v4 task-context receipts")
+	}
+	if !isV3 && value.Host != "" {
+		problems = append(problems, "non-hook receipts do not include host")
 	}
 	if isV3 && value.ObservationBoundary != "hook_response_prepared" {
 		problems = append(problems, "v3 observation_boundary must be hook_response_prepared")
@@ -419,8 +475,8 @@ func ValidateFilter(filter Filter) error {
 		return errors.New("task_id must be a lowercase stable identifier when set")
 	}
 	if filter.TargetKind != "" && filter.TargetKind != TargetProcedure && filter.TargetKind != TargetFact &&
-		filter.TargetKind != TargetDecision && filter.TargetKind != TargetPolicy {
-		return errors.New("target_kind must be procedure, fact, decision, policy, or empty")
+		filter.TargetKind != TargetDecision && filter.TargetKind != TargetPolicy && filter.TargetKind != TargetTaskContext {
+		return errors.New("target_kind must be procedure, fact, decision, policy, task_context, or empty")
 	}
 	if filter.TargetID != "" && !stableID.MatchString(filter.TargetID) {
 		return errors.New("target_id must be a lowercase stable identifier when set")

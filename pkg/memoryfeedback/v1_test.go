@@ -164,6 +164,51 @@ func TestValidateHookRetrievalReceiptV3UsesHostPreparationBoundary(t *testing.T)
 	}
 }
 
+func TestTaskResumeReceiptAndOutcomeFeedbackBindExactTaskRevision(t *testing.T) {
+	receipt := RetrievalReceipt{
+		SchemaVersion: RetrievalReceiptVersionV4, ID: "retrieval-5123456789abcdef0123456789abcdef",
+		ProjectID: "repo:example", TaskID: "task-1", SessionID: "session-1",
+		TargetKind: TargetTaskContext, TargetID: "task-resume-context", TargetRevision: 1, TaskRevision: 4,
+		Tool: "threadforge_task_resume_context_with_receipt", Freshness: "snapshot", ResultStatus: "available",
+		GuidanceIncluded: true, ObservationBoundary: "mcp_handler_result_prepared", CreatedAt: "2026-10-30T12:00:00Z",
+	}
+	if err := ValidateRetrievalReceipt(receipt); err != nil {
+		t.Fatalf("valid task-resume receipt was rejected: %v", err)
+	}
+
+	feedback := validFeedback()
+	feedback.SchemaVersion = SchemaVersionV3
+	feedback.TargetKind = TargetTaskContext
+	feedback.TargetID = "task-resume-context"
+	feedback.TargetRevision = 1
+	feedback.RetrievalReceiptID = receipt.ID
+	if err := Validate(feedback); err != nil {
+		t.Fatalf("valid task-context feedback was rejected: %v", err)
+	}
+
+	invalidFeedback := []Feedback{feedback, feedback, feedback}
+	invalidFeedback[0].SchemaVersion = SchemaVersionV2
+	invalidFeedback[1].RetrievalReceiptID = ""
+	invalidFeedback[2].TargetID = "another-task"
+	for _, invalid := range invalidFeedback {
+		if err := Validate(invalid); err == nil {
+			t.Fatalf("invalid task-context feedback was accepted: %+v", invalid)
+		}
+	}
+
+	withheld := receipt
+	withheld.ID = "retrieval-6123456789abcdef0123456789abcdef"
+	withheld.ResultStatus = "session_selection_required"
+	withheld.GuidanceIncluded = false
+	if err := ValidateRetrievalReceipt(withheld); err != nil {
+		t.Fatalf("withheld ambiguous task context should remain auditable: %v", err)
+	}
+	withheld.GuidanceIncluded = true
+	if err := ValidateRetrievalReceipt(withheld); err == nil {
+		t.Fatal("ambiguous task context claiming included guidance was accepted")
+	}
+}
+
 func TestValidateRetrievalReceiptFilterRequiresExactTaskScope(t *testing.T) {
 	filter := RetrievalReceiptFilter{ProjectID: "repo:example", TaskID: "task-1", Limit: 50}
 	if err := ValidateRetrievalReceiptFilter(filter); err != nil {
@@ -183,6 +228,9 @@ func TestValidateRetrievalReceiptFilterRequiresExactTaskScope(t *testing.T) {
 func TestValidateFilterIsBoundedAndProjectScoped(t *testing.T) {
 	if err := ValidateFilter(Filter{ProjectID: "repo:example", Limit: 50}); err != nil {
 		t.Fatal(err)
+	}
+	if err := ValidateFilter(Filter{ProjectID: "repo:example", TargetKind: TargetTaskContext, Limit: 50}); err != nil {
+		t.Fatalf("task-context feedback filter was rejected: %v", err)
 	}
 	for _, filter := range []Filter{
 		{ProjectID: "", Limit: 50},

@@ -124,7 +124,7 @@ func TestMemoryFeedbackSummarySeparatesReportsFromDistinctTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.SchemaVersion != memoryfeedback.SummaryResultVersion || summary.Records != 3 || len(summary.Groups) != 1 {
+	if summary.SchemaVersion != memoryfeedback.SummaryResultVersionV3 || summary.Records != 3 || len(summary.Groups) != 1 {
 		t.Fatalf("summary=%+v", summary)
 	}
 	group := summary.Groups[0]
@@ -145,7 +145,7 @@ func TestMemoryFeedbackSummarySeparatesReportsFromDistinctTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failures.SchemaVersion != memoryfeedback.FailureSummaryResultVersion || failures.RecordsScanned != 3 ||
+	if failures.SchemaVersion != memoryfeedback.FailureSummaryResultVersionV2 || failures.RecordsScanned != 3 ||
 		failures.SignatureRecords != 3 || len(failures.Groups) != 1 || failures.CutoverEvidenceEligible ||
 		failures.ExecutionAuthorized || failures.EvidenceClass != memoryfeedback.EvidenceSelfReported {
 		t.Fatalf("repeated failure summary=%+v", failures)

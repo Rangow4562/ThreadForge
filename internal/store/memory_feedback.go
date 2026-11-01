@@ -119,7 +119,7 @@ func validateMemoryFeedbackReceipt(ctx context.Context, tx *sql.Tx, feedback mem
 	if receipt.ID != feedback.RetrievalReceiptID || receipt.ProjectID != feedback.ProjectID || receipt.TaskID != feedback.TaskID ||
 		receipt.SessionID != feedback.SessionID || receipt.TargetKind != feedback.TargetKind || receipt.TargetID != feedback.TargetID ||
 		receipt.TargetRevision != feedback.TargetRevision || !receipt.GuidanceIncluded {
-		return errors.New("memory retrieval receipt does not match the reported task, session, and approved memory revision")
+		return errors.New("memory retrieval receipt does not match the reported task, session, and target revision or did not include guidance")
 	}
 	return nil
 }
@@ -317,7 +317,7 @@ func (s *Store) ListMemoryRetrievalReceipts(ctx context.Context, filter memoryfe
 // does not include every project report.
 func (s *Store) SummarizeMemoryFeedback(ctx context.Context, projectID string, maxRecords int) (memoryfeedback.SummaryResult, error) {
 	result := memoryfeedback.SummaryResult{
-		SchemaVersion: memoryfeedback.SummaryResultVersion,
+		SchemaVersion: memoryfeedback.SummaryResultVersionV3,
 		ProjectID:     projectID,
 		Status:        "complete",
 		Groups:        []memoryfeedback.SummaryGroup{},
@@ -454,7 +454,7 @@ func (s *Store) SummarizeMemoryFeedback(ctx context.Context, projectID string, m
 // a benchmark or evidence that memory caused or corrected a failure.
 func (s *Store) SummarizeRepeatedMemoryFailures(ctx context.Context, projectID string, maxRecords int) (memoryfeedback.FailureSummaryResult, error) {
 	result := memoryfeedback.FailureSummaryResult{
-		SchemaVersion: memoryfeedback.FailureSummaryResultVersion,
+		SchemaVersion: memoryfeedback.FailureSummaryResultVersionV2,
 		ProjectID:     projectID,
 		Status:        "complete",
 		Groups:        []memoryfeedback.FailureGroup{},

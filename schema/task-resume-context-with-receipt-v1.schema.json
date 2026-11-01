@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/task-resume-context-with-receipt-v1.schema.json",
+  "title": "Threadforge task resume context with content-free retrieval receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "context", "retrieval_receipt"],
+  "properties": {
+    "schema_version": { "const": "threadforge.task-resume-context-with-receipt.v1" },
+    "context": { "$ref": "task-resume-context-v1.schema.json" },
+    "retrieval_receipt": { "$ref": "memory-retrieval-receipt-v4.schema.json" }
+  }
+}

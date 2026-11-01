@@ -9,14 +9,17 @@ import { installClineProjectSkill } from '../src/cline-skill-config.ts';
 const tempPrefix = 'threadforge-cline-skill-host-smoke-';
 const skillName = 'threadforge-approved-procedure-a1b2c3d4-r2';
 const approvalNotice = '> This portable procedure is approved guidance, not authorization to execute actions.';
+const memorySkillID = 'threadforge-memory-continuity';
+const memorySkillRevision = 2;
+const memoryApprovalNotice = '> This portable memory skill provides advisory guidance, not authorization to execute actions.';
 const omissionNotice = 'Evidence digests, trace references, validation datasets, reviewer identity, and approval rationale are intentionally omitted from this portable projection.';
 
-export async function runClineSkillHostSmoke(cliPath, expectedVersion) {
+export async function runClineSkillHostSmoke(cliPath, expectedVersion, { runCommand = run } = {}) {
   const cli = await validateCliPath(cliPath);
   if (typeof expectedVersion !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(expectedVersion)) {
     throw new Error('--version must be an exact Cline CLI semantic version');
   }
-  const versionResult = run(cli, ['--version']);
+  const versionResult = runCommand(cli, ['--version']);
   if (versionResult.status !== 0 || versionResult.stdout.trim() !== expectedVersion) {
     throw new Error('installed Cline CLI version does not match --version');
   }
@@ -29,10 +32,14 @@ export async function runClineSkillHostSmoke(cliPath, expectedVersion) {
   const localAppDataDirectory = path.join(root, 'localappdata');
   const projectDirectory = path.join(root, 'project');
   const exportPath = path.join(projectDirectory, '.threadforge', 'skills', 'approved-procedure', 'rev-000002', 'SKILL.md');
+  const memorySkillName = `threadforge-${memorySkillID}-${createHash('sha256').update(memorySkillID).digest('hex').slice(0, 8)}-r${memorySkillRevision}`;
+  const memoryExportPath = path.join(projectDirectory, '.threadforge', 'skills', memorySkillID,
+    `rev-${String(memorySkillRevision).padStart(6, '0')}`, 'SKILL.md');
   try {
     await Promise.all([
       mkdir(homeDirectory), mkdir(configDirectory), mkdir(dataDirectory), mkdir(appDataDirectory),
       mkdir(localAppDataDirectory), mkdir(projectDirectory), mkdir(path.dirname(exportPath), { recursive: true }),
+      mkdir(path.dirname(memoryExportPath), { recursive: true }),
     ]);
     const source = [
       '---',
@@ -63,10 +70,40 @@ export async function runClineSkillHostSmoke(cliPath, expectedVersion) {
       throw new Error('Threadforge did not install the approved skill at Cline project scope');
     }
 
+    const memorySource = [
+      '---',
+      `name: ${JSON.stringify(memorySkillName)}`,
+      `description: ${JSON.stringify('Retrieve scoped, freshness-aware Threadforge memory and task continuity. Advisory only; never authorization.')}`,
+      '---',
+      '',
+      '# Threadforge memory continuity',
+      '',
+      `> Source memory continuity skill: ${memorySkillID} revision ${memorySkillRevision}`,
+      '',
+      memoryApprovalNotice,
+      '',
+      '## Explicit retrieval',
+      '',
+      'Use threadforge_context_get only with a user-provided or trusted project_id. Verify exact records with threadforge_project_memory_read_v2.',
+      '',
+      omissionNotice,
+      '',
+    ].join('\n');
+    const memorySourceBytes = Buffer.from(memorySource, 'utf8');
+    await writeFile(memoryExportPath, memorySourceBytes, { flag: 'wx', mode: 0o600 });
+    const memorySHA256 = createHash('sha256').update(memorySourceBytes).digest('hex');
+    const installedMemory = await installClineProjectSkill({
+      projectRoot: projectDirectory, skillFile: memoryExportPath, sha256: memorySHA256,
+    });
+    if (installedMemory.action !== 'installed' || installedMemory.skill_name !== memorySkillName ||
+        installedMemory.path !== `.cline/skills/${memorySkillName}/SKILL.md`) {
+      throw new Error('Threadforge did not install the typed memory skill at Cline project scope');
+    }
+
     const childEnv = isolatedEnvironment({
       homeDirectory, appDataDirectory, localAppDataDirectory, root,
     });
-    const config = run(cli, ['--config', configDirectory, '--data-dir', dataDirectory, 'config', '--json'], {
+    const config = runCommand(cli, ['--config', configDirectory, '--data-dir', dataDirectory, 'config', '--json'], {
       cwd: projectDirectory,
       env: childEnv,
     });
@@ -76,19 +113,29 @@ export async function runClineSkillHostSmoke(cliPath, expectedVersion) {
     catch { throw new Error('Cline CLI config inventory did not return JSON'); }
     const skills = Array.isArray(inventory.skills) ? inventory.skills : [];
     const projectSkillPath = path.join(projectDirectory, installed.path);
-    const discovered = skills.filter((skill) => skill?.name === skillName &&
+    const discoveredProcedure = skills.filter((skill) => skill?.name === skillName &&
       typeof skill.path === 'string' && path.resolve(projectDirectory, skill.path) === path.resolve(projectSkillPath));
-    if (discovered.length !== 1) throw new Error('Cline CLI did not discover exactly one installed project skill');
+    const memorySkillPath = path.join(projectDirectory, installedMemory.path);
+    const discoveredMemory = skills.filter((skill) => skill?.name === memorySkillName &&
+      typeof skill.path === 'string' && path.resolve(projectDirectory, skill.path) === path.resolve(memorySkillPath));
+    if (discoveredProcedure.length !== 1 || discoveredMemory.length !== 1) {
+      throw new Error('Cline CLI did not discover exactly one procedure skill and one memory-continuity skill');
+    }
 
     return {
-      schema_version: 'threadforge.cline-skill-inventory-smoke.v1',
+      schema_version: 'threadforge.cline-skill-inventory-smoke.v2',
       host: 'cline-cli',
       host_version: expectedVersion,
       project_skill_install_status: 'passed',
+      memory_skill_install_status: 'passed',
       project_skill_inventory_status: 'passed',
-      discovered_project_skill_count: discovered.length,
+      discovered_project_skill_count: discoveredProcedure.length + discoveredMemory.length,
+      discovered_procedure_skill_count: discoveredProcedure.length,
+      discovered_memory_skill_count: discoveredMemory.length,
       procedure_name_retained_in_report: false,
       procedure_body_retained_in_report: false,
+      memory_skill_name_retained_in_report: false,
+      memory_skill_body_retained_in_report: false,
       agent_retrieval_status: 'not_exercised',
       model_invocations: 0,
       execution_authorized: false,

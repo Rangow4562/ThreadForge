@@ -69,6 +69,27 @@ def test_memory_feedback_schema_is_typed_and_non_authorizing():
             validator.validate(value)
 
 
+def test_memory_feedback_v2_accepts_only_redacted_failure_digest_on_failed_tasks():
+    validator = _validator("memory-feedback-v2.schema.json")
+    failed = {
+        **_feedback(),
+        "schema_version": "threadforge.memory-feedback.v2",
+        "task_result": "failed",
+        "failure_signature_sha256": "a" * 64,
+    }
+    validator.validate(failed)
+    validator.validate({**failed, "failure_signature_sha256": "b" * 64})
+    for invalid in (
+        {**failed, "task_result": "passed"},
+        {**failed, "failure_signature_sha256": "A" * 64},
+        {**failed, "failure_signature_sha256": "raw failure text"},
+        {**failed, "failure_text": "do not store raw failure text"},
+        {**failed, "cutover_evidence_eligible": True},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_memory_feedback_result_list_and_summary_schemas_validate():
     feedback = _feedback()
     _validator("memory-feedback-result-v1.schema.json").validate(
@@ -119,6 +140,60 @@ def test_memory_feedback_result_list_and_summary_schemas_validate():
     _validator("memory-feedback-summary-v2.schema.json").validate(current_summary)
     with pytest.raises(ValidationError):
         _validator("memory-feedback-summary-v2.schema.json").validate(legacy_summary)
+
+    failed_v2 = {
+        **feedback,
+        "schema_version": "threadforge.memory-feedback.v2",
+        "task_result": "failed",
+        "failure_signature_sha256": "d" * 64,
+    }
+    _validator("memory-feedback-result-v2.schema.json").validate(
+        {
+            "schema_version": "threadforge.memory-feedback-result.v2",
+            "status": "recorded",
+            "sequence": 2,
+            "feedback": failed_v2,
+        }
+    )
+    _validator("memory-feedback-list-v2.schema.json").validate(
+        {
+            "schema_version": "threadforge.memory-feedback-list.v2",
+            "project_id": "repo:example",
+            "total": 2,
+            "limit": 50,
+            "offset": 0,
+            "feedback": [feedback, failed_v2],
+            "evidence_class": "self_reported",
+            "cutover_evidence_eligible": False,
+            "execution_authorized": False,
+        }
+    )
+    _validator("memory-feedback-failures-v1.schema.json").validate(
+        {
+            "schema_version": "threadforge.memory-feedback-failures.v1",
+            "status": "complete",
+            "project_id": "repo:example",
+            "records_scanned": 2,
+            "signature_records": 1,
+            "groups": [
+                {
+                    "target_kind": "procedure",
+                    "target_id": "build-recovery",
+                    "target_revision": 2,
+                    "harness": "codex-cli",
+                    "exposure": "used",
+                    "utility": "helpful",
+                    "failure_signature_sha256": "d" * 64,
+                    "feedback_count": 1,
+                    "distinct_task_count": 1,
+                    "repeated_after_first_task_count": 0,
+                }
+            ],
+            "evidence_class": "self_reported",
+            "cutover_evidence_eligible": False,
+            "execution_authorized": False,
+        }
+    )
 
 
 def test_memory_retrieval_receipt_schema_is_scoped_and_does_not_claim_delivery():

@@ -62,6 +62,10 @@ func TestMemoryFeedbackIsTaskScopedAppendOnlyAndSummarizedAsSelfReported(t *test
 		summary.CutoverEvidenceEligible || summary.ExecutionAuthorized {
 		t.Fatalf("summary=%+v err=%v", summary, err)
 	}
+	failures, err := database.SummarizeRepeatedMemoryFailures(ctx, task.ProjectID, 50)
+	if err != nil || failures.RecordsScanned != 1 || failures.SignatureRecords != 0 || len(failures.Groups) != 0 {
+		t.Fatalf("legacy v1 feedback was not safely included without a failure signature: result=%+v err=%v", failures, err)
+	}
 	if _, err := database.db.ExecContext(ctx, `UPDATE memory_feedback_events SET harness = 'other' WHERE id = ?`, feedback.ID); err == nil {
 		t.Fatal("memory feedback update was allowed")
 	}
@@ -105,10 +109,11 @@ func TestMemoryFeedbackSummarySeparatesReportsFromDistinctTasks(t *testing.T) {
 	feedbackTaskIDs := []string{taskIDs[0], taskIDs[0], taskIDs[1]}
 	for i, feedbackID := range feedbackIDs {
 		feedback := memoryfeedback.Feedback{
-			SchemaVersion: memoryfeedback.SchemaVersion, ID: feedbackID, ProjectID: projectID, TaskID: feedbackTaskIDs[i],
+			SchemaVersion: memoryfeedback.SchemaVersionV2, ID: feedbackID, ProjectID: projectID, TaskID: feedbackTaskIDs[i],
 			TargetKind: memoryfeedback.TargetProcedure, TargetID: "retry-guidance", TargetRevision: 2,
 			Exposure: memoryfeedback.ExposureUsed, Utility: memoryfeedback.UtilityHelpful, TaskResult: "failed",
-			Harness: "codex-cli", Actor: "local-user", EvidenceClass: memoryfeedback.EvidenceSelfReported, CreatedAt: stamp,
+			FailureSignatureSHA256: strings.Repeat("d", 64),
+			Harness:                "codex-cli", Actor: "local-user", EvidenceClass: memoryfeedback.EvidenceSelfReported, CreatedAt: stamp,
 		}
 		if _, err := database.RecordMemoryFeedback(ctx, feedback); err != nil {
 			t.Fatal(err)
@@ -133,6 +138,30 @@ func TestMemoryFeedbackSummarySeparatesReportsFromDistinctTasks(t *testing.T) {
 	for _, taskID := range taskIDs {
 		if strings.Contains(string(payload), taskID) {
 			t.Fatalf("summary exposed task id %q: %s", taskID, payload)
+		}
+	}
+
+	failures, err := database.SummarizeRepeatedMemoryFailures(ctx, projectID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failures.SchemaVersion != memoryfeedback.FailureSummaryResultVersion || failures.RecordsScanned != 3 ||
+		failures.SignatureRecords != 3 || len(failures.Groups) != 1 || failures.CutoverEvidenceEligible ||
+		failures.ExecutionAuthorized || failures.EvidenceClass != memoryfeedback.EvidenceSelfReported {
+		t.Fatalf("repeated failure summary=%+v", failures)
+	}
+	failureGroup := failures.Groups[0]
+	if failureGroup.FeedbackCount != 3 || failureGroup.DistinctTaskCount != 2 || failureGroup.RepeatedAfterFirstTaskCount != 1 ||
+		failureGroup.FailureSignatureSHA256 != strings.Repeat("d", 64) {
+		t.Fatalf("failure group=%+v; want three reports across two distinct tasks", failureGroup)
+	}
+	failurePayload, err := json.Marshal(failures)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, taskID := range taskIDs {
+		if strings.Contains(string(failurePayload), taskID) {
+			t.Fatalf("failure summary exposed task id %q: %s", taskID, failurePayload)
 		}
 	}
 }

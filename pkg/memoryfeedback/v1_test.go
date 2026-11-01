@@ -1,6 +1,7 @@
 package memoryfeedback
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -17,6 +18,34 @@ func validFeedback() Feedback {
 func TestValidateAcceptsSelfReportedFeedback(t *testing.T) {
 	if err := Validate(validFeedback()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestValidateVersionedFailureSignature(t *testing.T) {
+	legacy := validFeedback()
+	legacy.FailureSignatureSHA256 = "a" + strings.Repeat("b", 63)
+	if err := Validate(legacy); err == nil {
+		t.Fatal("v1 feedback accepted the v2 failure-signature field")
+	}
+
+	value := validFeedback()
+	value.SchemaVersion = SchemaVersionV2
+	value.TaskResult = "failed"
+	value.FailureSignatureSHA256 = strings.Repeat("a", 64)
+	if err := Validate(value); err != nil {
+		t.Fatalf("valid v2 failure signature was rejected: %v", err)
+	}
+
+	for _, change := range []func(*Feedback){
+		func(v *Feedback) { v.TaskResult = "passed" },
+		func(v *Feedback) { v.FailureSignatureSHA256 = strings.Repeat("A", 64) },
+		func(v *Feedback) { v.FailureSignatureSHA256 = "raw failure text" },
+	} {
+		invalid := value
+		change(&invalid)
+		if err := Validate(invalid); err == nil {
+			t.Fatalf("invalid failure signature feedback was accepted: %+v", invalid)
+		}
 	}
 }
 

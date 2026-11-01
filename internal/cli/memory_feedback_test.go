@@ -242,7 +242,8 @@ func TestMemoryFeedbackCLIRecordsApprovedSQLiteProcedureTarget(t *testing.T) {
 		"memory", "feedback", "record", "--project-root", projectRoot, "--project-id", task.ProjectID,
 		"--task-id", task.ID, "--target-kind", "procedure", "--target-id", approved.ID,
 		"--target-revision", fmt.Sprint(approved.Revision), "--exposure", "used", "--utility", "harmful",
-		"--task-result", "failed", "--harness", "claude-code", "--retrieval-receipt-id", receipt.ID, "--db", databasePath,
+		"--task-result", "failed", "--failure-signature-sha256", strings.Repeat("e", 64),
+		"--harness", "claude-code", "--retrieval-receipt-id", receipt.ID, "--db", databasePath,
 	}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("record exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -253,8 +254,25 @@ func TestMemoryFeedbackCLIRecordsApprovedSQLiteProcedureTarget(t *testing.T) {
 	}
 	if result.Feedback.TargetKind != memoryfeedback.TargetProcedure || result.Feedback.TargetRevision != approved.Revision ||
 		result.Feedback.Utility != memoryfeedback.UtilityHarmful || result.Feedback.TaskResult != "failed" ||
-		result.Feedback.RetrievalReceiptID != receipt.ID {
+		result.Feedback.RetrievalReceiptID != receipt.ID || result.Feedback.SchemaVersion != memoryfeedback.SchemaVersionV2 ||
+		result.Feedback.FailureSignatureSHA256 != strings.Repeat("e", 64) {
 		t.Fatalf("recorded feedback does not bind the approved procedure: %+v", result)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"memory", "feedback", "repeats", "--project-id", task.ProjectID, "--db", databasePath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("repeats exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var repeated memoryfeedback.FailureSummaryResult
+	if err := json.Unmarshal(stdout.Bytes(), &repeated); err != nil {
+		t.Fatal(err)
+	}
+	if repeated.SchemaVersion != memoryfeedback.FailureSummaryResultVersion || repeated.SignatureRecords != 1 ||
+		len(repeated.Groups) != 1 || repeated.Groups[0].FailureSignatureSHA256 != strings.Repeat("e", 64) ||
+		repeated.Groups[0].RepeatedAfterFirstTaskCount != 0 || repeated.CutoverEvidenceEligible || repeated.ExecutionAuthorized {
+		t.Fatalf("unexpected repeated-failure summary: %s", stdout.String())
 	}
 }
 

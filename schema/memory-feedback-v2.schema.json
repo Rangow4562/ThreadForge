@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/memory-feedback-v2.schema.json",
+  "title": "Threadforge self-reported memory outcome feedback with optional failure digest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "project_id", "task_id", "target_kind", "target_id", "target_revision", "exposure", "utility", "task_result", "harness", "actor", "evidence_class", "cutover_evidence_eligible", "execution_authorized", "created_at"],
+  "properties": {
+    "schema_version": { "const": "threadforge.memory-feedback.v2" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "task_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "session_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "retrieval_receipt_id": { "type": "string", "pattern": "^retrieval-[a-f0-9]{32}$" },
+    "target_kind": { "enum": ["procedure", "fact", "decision", "policy"] },
+    "target_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "target_revision": { "type": "integer", "minimum": 1 },
+    "exposure": { "enum": ["used", "shown_not_used"] },
+    "utility": { "enum": ["helpful", "neutral", "harmful", "not_assessed"] },
+    "task_result": { "enum": ["passed", "failed", "inconclusive"] },
+    "failure_signature_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "harness": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "actor": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "evidence_class": { "const": "self_reported" },
+    "cutover_evidence_eligible": { "const": false },
+    "execution_authorized": { "const": false },
+    "created_at": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "exposure": { "const": "used" } }, "required": ["exposure"] },
+      "then": { "properties": { "utility": { "enum": ["helpful", "neutral", "harmful"] } } }
+    },
+    {
+      "if": { "properties": { "exposure": { "const": "shown_not_used" } }, "required": ["exposure"] },
+      "then": { "properties": { "utility": { "const": "not_assessed" } } }
+    },
+    {
+      "if": { "required": ["failure_signature_sha256"] },
+      "then": { "properties": { "task_result": { "const": "failed" } } }
+    }
+  ]
+}

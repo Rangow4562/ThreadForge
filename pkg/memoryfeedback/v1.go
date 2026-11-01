@@ -13,9 +13,11 @@ import (
 
 const (
 	SchemaVersion               = "threadforge.memory-feedback.v1"
-	RecordResultVersion         = "threadforge.memory-feedback-result.v1"
-	ListResultVersion           = "threadforge.memory-feedback-list.v1"
+	SchemaVersionV2             = "threadforge.memory-feedback.v2"
+	RecordResultVersion         = "threadforge.memory-feedback-result.v2"
+	ListResultVersion           = "threadforge.memory-feedback-list.v2"
 	SummaryResultVersion        = "threadforge.memory-feedback-summary.v2"
+	FailureSummaryResultVersion = "threadforge.memory-feedback-failures.v1"
 	RetrievalReceiptVersion     = "threadforge.memory-retrieval-receipt.v1"
 	RetrievalReceiptVersionV2   = "threadforge.memory-retrieval-receipt.v2"
 	RetrievalReceiptVersionV3   = "threadforge.memory-retrieval-receipt.v3"
@@ -67,6 +69,7 @@ type Feedback struct {
 	Exposure                Exposure   `json:"exposure"`
 	Utility                 Utility    `json:"utility"`
 	TaskResult              string     `json:"task_result"`
+	FailureSignatureSHA256  string     `json:"failure_signature_sha256,omitempty"`
 	Harness                 string     `json:"harness"`
 	Actor                   string     `json:"actor"`
 	EvidenceClass           string     `json:"evidence_class"`
@@ -168,13 +171,46 @@ type SummaryResult struct {
 	ExecutionAuthorized     bool           `json:"execution_authorized"`
 }
 
+// FailureGroup reports repeated opaque failure signatures from local,
+// self-reported feedback. Task identifiers and failure text are never returned.
+type FailureGroup struct {
+	TargetKind                  TargetKind `json:"target_kind"`
+	TargetID                    string     `json:"target_id"`
+	TargetRevision              int        `json:"target_revision"`
+	Harness                     string     `json:"harness"`
+	Exposure                    Exposure   `json:"exposure"`
+	Utility                     Utility    `json:"utility"`
+	FailureSignatureSHA256      string     `json:"failure_signature_sha256"`
+	FeedbackCount               int        `json:"feedback_count"`
+	DistinctTaskCount           int        `json:"distinct_task_count"`
+	RepeatedAfterFirstTaskCount int        `json:"repeated_after_first_task_count"`
+}
+
+type FailureSummaryResult struct {
+	SchemaVersion           string         `json:"schema_version"`
+	Status                  string         `json:"status"`
+	ProjectID               string         `json:"project_id"`
+	RecordsScanned          int            `json:"records_scanned"`
+	SignatureRecords        int            `json:"signature_records"`
+	Groups                  []FailureGroup `json:"groups"`
+	EvidenceClass           string         `json:"evidence_class"`
+	CutoverEvidenceEligible bool           `json:"cutover_evidence_eligible"`
+	ExecutionAuthorized     bool           `json:"execution_authorized"`
+}
+
 var stableID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 var retrievalReceiptID = regexp.MustCompile(`^retrieval-[a-f0-9]{32}$`)
+var sha256Digest = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 func Validate(value Feedback) error {
 	var problems []string
-	if value.SchemaVersion != SchemaVersion {
+	isV1 := value.SchemaVersion == SchemaVersion
+	isV2 := value.SchemaVersion == SchemaVersionV2
+	if !isV1 && !isV2 {
 		problems = append(problems, "unsupported schema_version")
+	}
+	if isV1 && value.FailureSignatureSHA256 != "" {
+		problems = append(problems, "v1 feedback does not include failure_signature_sha256")
 	}
 	if !stableID.MatchString(value.ID) {
 		problems = append(problems, "id must be a lowercase stable identifier")
@@ -221,6 +257,14 @@ func Validate(value Feedback) error {
 	}
 	if value.TaskResult != "passed" && value.TaskResult != "failed" && value.TaskResult != "inconclusive" {
 		problems = append(problems, "task_result must be passed, failed, or inconclusive")
+	}
+	if value.FailureSignatureSHA256 != "" {
+		if !isV2 || !sha256Digest.MatchString(value.FailureSignatureSHA256) {
+			problems = append(problems, "failure_signature_sha256 must be a lowercase SHA-256 digest in v2 feedback")
+		}
+		if value.TaskResult != "failed" {
+			problems = append(problems, "failure_signature_sha256 is allowed only for failed tasks")
+		}
 	}
 	if !stableID.MatchString(value.Harness) {
 		problems = append(problems, "harness must be a lowercase stable identifier")

@@ -22,7 +22,7 @@ import (
 
 func runMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory feedback <record|list|summary|receipts>")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory feedback <record|list|summary|repeats|receipts>")
 		return 2
 	}
 	switch args[0] {
@@ -32,6 +32,8 @@ func runMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 		return listMemoryFeedback(args[1:], stdout, stderr)
 	case "summary":
 		return summarizeMemoryFeedback(args[1:], stdout, stderr)
+	case "repeats":
+		return summarizeRepeatedMemoryFailures(args[1:], stdout, stderr)
 	case "receipts":
 		return listMemoryRetrievalReceipts(args[1:], stdout, stderr)
 	default:
@@ -96,6 +98,7 @@ func recordMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 	exposure := fs.String("exposure", "", "reported exposure: used or shown_not_used")
 	utility := fs.String("utility", "", "reported utility: helpful, neutral, harmful, or not_assessed")
 	taskResult := fs.String("task-result", "", "self-reported result: passed, failed, or inconclusive")
+	failureSignature := fs.String("failure-signature-sha256", "", "optional lowercase SHA-256 of a normalized, redacted failure signature; failed tasks only")
 	harness := fs.String("harness", "", "lowercase harness identifier, for example codex-cli")
 	actor := fs.String("actor", "local-user", "local reporter label; not identity proof")
 	database := fs.String("db", "", "SQLite path (defaults under the local Threadforge data directory)")
@@ -106,7 +109,7 @@ func recordMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 		strings.TrimSpace(*targetKind) == "" || strings.TrimSpace(*targetID) == "" || *targetRevision < 1 ||
 		strings.TrimSpace(*exposure) == "" || strings.TrimSpace(*utility) == "" || strings.TrimSpace(*taskResult) == "" ||
 		strings.TrimSpace(*harness) == "" || strings.TrimSpace(*actor) == "" || fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory feedback record --project-root <absolute-root> --project-id <id> --task-id <id> [--session-id <id>] [--retrieval-receipt-id <id>] --target-kind <procedure|fact|decision|policy> --target-id <id> --target-revision <n> --exposure <used|shown_not_used> --utility <helpful|neutral|harmful|not_assessed> --task-result <passed|failed|inconclusive> --harness <id> [--actor local-user] [--db <path>]")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory feedback record --project-root <absolute-root> --project-id <id> --task-id <id> [--session-id <id>] [--retrieval-receipt-id <id>] --target-kind <procedure|fact|decision|policy> --target-id <id> --target-revision <n> --exposure <used|shown_not_used> --utility <helpful|neutral|harmful|not_assessed> --task-result <passed|failed|inconclusive> [--failure-signature-sha256 <64-lowercase-hex>] --harness <id> [--actor local-user] [--db <path>]")
 		return 2
 	}
 	feedbackID, err := newMemoryFeedbackID()
@@ -115,12 +118,13 @@ func recordMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	feedback := memoryfeedback.Feedback{
-		SchemaVersion: memoryfeedback.SchemaVersion,
+		SchemaVersion: memoryfeedback.SchemaVersionV2,
 		ID:            feedbackID, ProjectID: *projectID, TaskID: *taskID, SessionID: *sessionID,
 		RetrievalReceiptID: *retrievalReceiptID,
 		TargetKind:         memoryfeedback.TargetKind(*targetKind), TargetID: *targetID, TargetRevision: *targetRevision,
 		Exposure: memoryfeedback.Exposure(*exposure), Utility: memoryfeedback.Utility(*utility), TaskResult: *taskResult,
-		Harness: *harness, Actor: *actor, EvidenceClass: memoryfeedback.EvidenceSelfReported,
+		FailureSignatureSHA256: *failureSignature,
+		Harness:                *harness, Actor: *actor, EvidenceClass: memoryfeedback.EvidenceSelfReported,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if err := memoryfeedback.Validate(feedback); err != nil {
@@ -257,6 +261,33 @@ func summarizeMemoryFeedback(args []string, stdout, stderr io.Writer) int {
 	}
 	defer closeStore()
 	result, err := databaseStore.SummarizeMemoryFeedback(context.Background(), *projectID, *maxRecords)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 2
+	}
+	return writeIndentedJSON(stdout, result, stderr)
+}
+
+func summarizeRepeatedMemoryFailures(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("memory feedback repeats", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	projectID := fs.String("project-id", "", "exact project scope to summarize")
+	maxRecords := fs.Int("max-records", memoryfeedback.MaxSummaryRecords, "maximum newest feedback records to inspect (1-10000)")
+	database := fs.String("db", "", "SQLite path (defaults under the local Threadforge data directory)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if strings.TrimSpace(*projectID) == "" || fs.NArg() != 0 {
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory feedback repeats --project-id <id> [--max-records 10000] [--db <path>]")
+		return 2
+	}
+	databaseStore, closeStore, err := openContinuityStore(*database)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	defer closeStore()
+	result, err := databaseStore.SummarizeRepeatedMemoryFailures(context.Background(), *projectID, *maxRecords)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 2

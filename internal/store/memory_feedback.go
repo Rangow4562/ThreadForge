@@ -448,3 +448,140 @@ func (s *Store) SummarizeMemoryFeedback(ctx context.Context, projectID string, m
 	}
 	return result, nil
 }
+
+// SummarizeRepeatedMemoryFailures groups only v2 feedback that carries an
+// opaque failure-signature digest. The report is descriptive self-report, not
+// a benchmark or evidence that memory caused or corrected a failure.
+func (s *Store) SummarizeRepeatedMemoryFailures(ctx context.Context, projectID string, maxRecords int) (memoryfeedback.FailureSummaryResult, error) {
+	result := memoryfeedback.FailureSummaryResult{
+		SchemaVersion: memoryfeedback.FailureSummaryResultVersion,
+		ProjectID:     projectID,
+		Status:        "complete",
+		Groups:        []memoryfeedback.FailureGroup{},
+		EvidenceClass: memoryfeedback.EvidenceSelfReported,
+	}
+	if strings.TrimSpace(projectID) == "" || len(projectID) > 256 || maxRecords < 1 || maxRecords > memoryfeedback.MaxSummaryRecords {
+		return memoryfeedback.FailureSummaryResult{}, errors.New("project_id is required and max_records must be 1-10000")
+	}
+	if err := memoryfeedback.ValidateFilter(memoryfeedback.Filter{ProjectID: projectID, Limit: 1}); err != nil {
+		return memoryfeedback.FailureSummaryResult{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return memoryfeedback.FailureSummaryResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_feedback_events WHERE project_id = ?`, projectID).Scan(&total); err != nil {
+		return memoryfeedback.FailureSummaryResult{}, err
+	}
+	rows, err := tx.QueryContext(ctx,
+		`SELECT sequence, id, project_id, task_id, target_kind, target_id, target_revision, harness, created_at, feedback_json
+		 FROM memory_feedback_events WHERE project_id = ? ORDER BY sequence DESC LIMIT ?`, projectID, maxRecords+1)
+	if err != nil {
+		return memoryfeedback.FailureSummaryResult{}, err
+	}
+	type groupKey struct {
+		kind, id, harness, exposure, utility, signature string
+		revision                                        int
+	}
+	counts := make(map[groupKey]int)
+	tasks := make(map[groupKey]map[string]struct{})
+	truncated := total > maxRecords
+	for rows.Next() {
+		var sequence int64
+		var id, indexedProject, taskID, targetKind, targetID, harness, createdAt, payload string
+		var revision int
+		if err := rows.Scan(&sequence, &id, &indexedProject, &taskID, &targetKind, &targetID, &revision, &harness, &createdAt, &payload); err != nil {
+			_ = rows.Close()
+			return memoryfeedback.FailureSummaryResult{}, err
+		}
+		if result.RecordsScanned == maxRecords {
+			truncated = true
+			break
+		}
+		var feedback memoryfeedback.Feedback
+		if err := decodeStrictJSON(payload, &feedback); err != nil {
+			_ = rows.Close()
+			return memoryfeedback.FailureSummaryResult{}, fmt.Errorf("decode memory feedback sequence %d: %w", sequence, err)
+		}
+		if err := memoryfeedback.Validate(feedback); err != nil || feedback.ID != id || feedback.ProjectID != indexedProject ||
+			feedback.TaskID != taskID || string(feedback.TargetKind) != targetKind || feedback.TargetID != targetID ||
+			feedback.TargetRevision != revision || feedback.Harness != harness || feedback.CreatedAt != createdAt {
+			_ = rows.Close()
+			return memoryfeedback.FailureSummaryResult{}, errors.New("stored memory feedback index does not match its validated payload")
+		}
+		if err := validateMemoryFeedbackReceipt(ctx, tx, feedback); err != nil {
+			_ = rows.Close()
+			return memoryfeedback.FailureSummaryResult{}, fmt.Errorf("validate linked memory retrieval receipt: %w", err)
+		}
+		result.RecordsScanned++
+		if feedback.FailureSignatureSHA256 == "" {
+			continue
+		}
+		result.SignatureRecords++
+		key := groupKey{
+			kind: string(feedback.TargetKind), id: feedback.TargetID, revision: feedback.TargetRevision,
+			harness: feedback.Harness, exposure: string(feedback.Exposure), utility: string(feedback.Utility),
+			signature: feedback.FailureSignatureSHA256,
+		}
+		counts[key]++
+		if tasks[key] == nil {
+			tasks[key] = make(map[string]struct{})
+		}
+		tasks[key][feedback.TaskID] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return memoryfeedback.FailureSummaryResult{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return memoryfeedback.FailureSummaryResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return memoryfeedback.FailureSummaryResult{}, err
+	}
+	if truncated {
+		result.Status = "truncated"
+	}
+	keys := make([]groupKey, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		a, b := keys[i], keys[j]
+		if a.kind != b.kind {
+			return a.kind < b.kind
+		}
+		if a.id != b.id {
+			return a.id < b.id
+		}
+		if a.revision != b.revision {
+			return a.revision < b.revision
+		}
+		if a.harness != b.harness {
+			return a.harness < b.harness
+		}
+		if a.exposure != b.exposure {
+			return a.exposure < b.exposure
+		}
+		if a.utility != b.utility {
+			return a.utility < b.utility
+		}
+		return a.signature < b.signature
+	})
+	for _, key := range keys {
+		distinctTasks := len(tasks[key])
+		repeatedTasks := distinctTasks - 1
+		if repeatedTasks < 0 {
+			repeatedTasks = 0
+		}
+		result.Groups = append(result.Groups, memoryfeedback.FailureGroup{
+			TargetKind: memoryfeedback.TargetKind(key.kind), TargetID: key.id, TargetRevision: key.revision,
+			Harness: key.harness, Exposure: memoryfeedback.Exposure(key.exposure), Utility: memoryfeedback.Utility(key.utility),
+			FailureSignatureSHA256: key.signature, FeedbackCount: counts[key], DistinctTaskCount: distinctTasks,
+			RepeatedAfterFirstTaskCount: repeatedTasks,
+		})
+	}
+	return result, nil
+}

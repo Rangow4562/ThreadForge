@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/memory-feedback-failures-v1.schema.json",
+  "title": "Threadforge descriptive local repeated failure feedback summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "project_id", "records_scanned", "signature_records", "groups", "evidence_class", "cutover_evidence_eligible", "execution_authorized"],
+  "properties": {
+    "schema_version": { "const": "threadforge.memory-feedback-failures.v1" },
+    "status": { "enum": ["complete", "truncated"] },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "records_scanned": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "signature_records": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "groups": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/group" } },
+    "evidence_class": { "const": "self_reported" },
+    "cutover_evidence_eligible": { "const": false },
+    "execution_authorized": { "const": false }
+  },
+  "$defs": {
+    "group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_kind", "target_id", "target_revision", "harness", "exposure", "utility", "failure_signature_sha256", "feedback_count", "distinct_task_count", "repeated_after_first_task_count"],
+      "properties": {
+        "target_kind": { "enum": ["procedure", "fact", "decision", "policy"] },
+        "target_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+        "target_revision": { "type": "integer", "minimum": 1 },
+        "harness": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+        "exposure": { "enum": ["used", "shown_not_used"] },
+        "utility": { "enum": ["helpful", "neutral", "harmful", "not_assessed"] },
+        "failure_signature_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "feedback_count": { "type": "integer", "minimum": 1 },
+        "distinct_task_count": { "type": "integer", "minimum": 1 },
+        "repeated_after_first_task_count": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

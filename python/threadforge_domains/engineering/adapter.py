@@ -127,6 +127,16 @@ def _bounded_number(value: object) -> float | None:
     return result if math.isfinite(result) and 0.0 <= result <= 1.0 else None
 
 
+def _bounded_usd(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        return None
+    try:
+        result = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) and 0.0 <= result <= 1e12 else None
+
+
 def _token_count(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_TOKEN_COUNT:
         return None
@@ -494,6 +504,11 @@ class EngineeringDomain(Domain):
                 "prompt_tokens": result.prompt_tokens,
                 "completion_tokens": result.completion_tokens,
                 "unmeasured_model_calls": result.unmeasured_calls,
+                "reported_cost_usd": result.reported_cost_usd,
+                "cost_usd_records": result.cost_usd_records,
+                "unmeasured_cost_calls": result.unmeasured_cost_calls,
+                "cost_usd_source": result.cost_source,
+                "cost_usd_complete": result.reported_cost_usd is not None,
                 "broker_requests_handled": result.requests_handled,
                 "container_returncode": result.returncode,
                 "container_timed_out": result.timed_out,
@@ -561,6 +576,42 @@ class EngineeringDomain(Domain):
             return None
         if passed and valid != 1.0:
             return None
+        cost_fields = (
+            "reported_cost_usd", "cost_usd_records", "unmeasured_cost_calls",
+            "cost_usd_source", "cost_usd_complete",
+        )
+        cost_fields_present = sum(key in meta for key in cost_fields)
+        reported_cost = None
+        cost_source = None
+        if cost_fields_present:
+            if cost_fields_present != len(cost_fields):
+                return None
+            raw_cost = meta.get("reported_cost_usd")
+            reported_cost = None if raw_cost is None else _bounded_usd(raw_cost)
+            if raw_cost is not None and reported_cost is None:
+                return None
+            records = meta.get("cost_usd_records")
+            unmeasured_cost_calls = meta.get("unmeasured_cost_calls")
+            model_calls = meta.get("model_calls")
+            complete = meta.get("cost_usd_complete")
+            cost_source = meta.get("cost_usd_source")
+            if (isinstance(records, bool) or not isinstance(records, int) or records < 0 or
+                    isinstance(unmeasured_cost_calls, bool) or
+                    not isinstance(unmeasured_cost_calls, int) or unmeasured_cost_calls < 0 or
+                    isinstance(model_calls, bool) or not isinstance(model_calls, int) or model_calls < 0 or
+                    records > model_calls or unmeasured_cost_calls > model_calls or
+                    records + unmeasured_cost_calls != model_calls or not isinstance(complete, bool) or
+                    cost_source not in (None, "openrouter_account_usage_cost_v1")):
+                return None
+            expected_complete = (
+                model_calls > 0 and records == model_calls and unmeasured_cost_calls == 0 and
+                reported_cost is not None and cost_source is not None
+            )
+            if complete != expected_complete or (complete and reported_cost is None) or (
+                    not complete and reported_cost is not None):
+                return None
+            if records > 0 and cost_source is None:
+                return None
         return {
             "status": status,
             "passed": passed if status == "ok" else False,
@@ -568,6 +619,8 @@ class EngineeringDomain(Domain):
             "combined_score": combined_score,
             "no_payload": no_payload,
             "tokens": _token_count(meta.get("total_tokens")),
+            "reported_cost_usd": reported_cost,
+            "cost_source": cost_source,
             # Do not surface unknown metadata, provider labels, error strings,
             # or evaluator detail to the proposer/analyst roles.
             "meta": {"status": meta_status, "no_payload": no_payload,
@@ -582,6 +635,9 @@ class EngineeringDomain(Domain):
         runs_dir = Path(runs_dir)
         per_task = {}
         passes = 0
+        cost_sources = set()
+        measured_costs = 0
+        total_reported_cost = 0.0
         valid_sum = no_payload_sum = combined_sum = 0.0
         for task_id in ids:
             rewards, tokens, combined, valid, no_payload = [], [], [], [], []
@@ -603,6 +659,12 @@ class EngineeringDomain(Domain):
                 combined.append(record["combined_score"])
                 valid.append(record["valid"])
                 no_payload.append(1.0 if record["no_payload"] else 0.0)
+                if record["reported_cost_usd"] is not None:
+                    trial_costs[trial] = record["reported_cost_usd"]
+                    measured_costs += 1
+                    total_reported_cost += record["reported_cost_usd"]
+                if record["cost_source"] is not None:
+                    cost_sources.add(record["cost_source"])
                 passes += int(reward)
             combined_sum += sum(combined)
             valid_sum += sum(valid)
@@ -613,6 +675,10 @@ class EngineeringDomain(Domain):
                        "no_payload": no_payload, "trial_cost_usd": trial_costs},
             )
         total = len(ids) * k
+        cost_source = next(iter(cost_sources)) if len(cost_sources) == 1 else (
+            "mixed" if len(cost_sources) > 1 else None
+        )
+        cost_complete = measured_costs == total
         return per_task, {
             "total_passes": passes,
             "n_trials": total,
@@ -620,10 +686,10 @@ class EngineeringDomain(Domain):
             "mean_combined_score": combined_sum / total,
             "valid_rate": valid_sum / total,
             "no_payload_rate": no_payload_sum / total,
-            # Broker telemetry currently includes tokens, not billed USD.
-            "total_cost_usd": None,
-            "cost_usd_records": 0,
-            "cost_usd_complete": False,
+            "total_cost_usd": total_reported_cost if cost_complete else None,
+            "cost_usd_records": measured_costs,
+            "cost_usd_complete": cost_complete,
+            "cost_usd_source": cost_source,
         }
 
     def guards(self, incumbent, candidate) -> list[str]:

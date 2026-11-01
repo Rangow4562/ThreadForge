@@ -75,6 +75,10 @@ class BrokeredContainerResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     unmeasured_calls: int = 0
+    reported_cost_usd: float | None = None
+    cost_usd_records: int = 0
+    unmeasured_cost_calls: int = 0
+    cost_source: str | None = None
     stderr_sha256: str = ""
     stderr_bytes: int = 0
     stderr_truncated: bool = False
@@ -534,6 +538,13 @@ def run_sandboxed_stdio(
         prompt_tokens=broker.prompt_tokens,
         completion_tokens=broker.completion_tokens,
         unmeasured_calls=broker.unmeasured_calls,
+        reported_cost_usd=broker.reported_cost_usd,
+        cost_usd_records=broker.cost_usd_records,
+        unmeasured_cost_calls=max(
+            broker.unmeasured_cost_calls,
+            broker.calls - broker.cost_usd_records,
+        ),
+        cost_source=broker.cost_source,
         stderr_sha256=stderr_state.get("sha256", ""),
         stderr_bytes=stderr_state.get("bytes", 0),
         stderr_truncated=stderr_state.get("truncated", False),

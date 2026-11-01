@@ -25,6 +25,26 @@ def _response():
     }
 
 
+class _OpenRouterResponse:
+    def __init__(self, cost):
+        self._hidden_params = {
+            "additional_headers": {"llm_provider-x-litellm-response-cost": cost},
+        }
+
+    def model_dump(self, **_kwargs):
+        return _response()
+
+
+class _BrokenOpenRouterMetadataResponse(_OpenRouterResponse):
+    @property
+    def _hidden_params(self):
+        raise RuntimeError("provider metadata unavailable")
+
+    @_hidden_params.setter
+    def _hidden_params(self, _value):
+        pass
+
+
 def test_local_model_broker_forces_configured_model_and_keeps_provider_secret_local():
     calls = []
     broker = ModelBroker(
@@ -86,6 +106,80 @@ def test_remote_model_broker_requires_opt_in_and_never_accepts_caller_provider_s
     assert "api_key" not in calls[0]
     assert "api_base" not in calls[0]
     assert "host-only-provider-secret" not in repr(calls[0])
+
+
+def test_openrouter_reported_account_cost_is_captured_without_exposing_hidden_metadata():
+    response = _OpenRouterResponse(0.0125)
+    broker = ModelBroker(
+        remote_inference_opt_in=True,
+        environ={
+            "THREADFORGE_EVALUATION_BACKEND": "remote",
+            "THREADFORGE_REMOTE_EVALUATION_MODEL": "openrouter/provider/model-v1",
+        },
+        completion=lambda **_kwargs: response,
+    )
+
+    result = broker.dispatch(_request({"messages": [{"role": "user", "content": "task"}]}))
+
+    assert result["choices"]
+    assert "cost" not in result.get("usage", {})
+    assert "_hidden_params" not in result
+    assert broker.cost_source == "openrouter_account_usage_cost_v1"
+    assert broker.cost_usd_records == 1
+    assert broker.unmeasured_cost_calls == 0
+    assert broker.reported_cost_usd == 0.0125
+    assert broker.cost_usd_complete is True
+
+
+@pytest.mark.parametrize("cost", [True, -0.01, float("nan"), float("inf"), 1e12 + 1])
+def test_openrouter_invalid_reported_cost_stays_unknown(cost):
+    broker = ModelBroker(
+        remote_inference_opt_in=True,
+        environ={
+            "THREADFORGE_EVALUATION_BACKEND": "remote",
+            "THREADFORGE_REMOTE_EVALUATION_MODEL": "openrouter/provider/model-v1",
+        },
+        completion=lambda **_kwargs: _OpenRouterResponse(cost),
+    )
+
+    broker.dispatch(_request({"messages": [{"role": "user", "content": "task"}]}))
+
+    assert broker.cost_usd_records == 0
+    assert broker.unmeasured_cost_calls == 1
+    assert broker.reported_cost_usd is None
+    assert broker.cost_usd_complete is False
+
+
+def test_reported_cost_metadata_from_local_models_is_not_treated_as_usd_measurement():
+    broker = ModelBroker(
+        environ={"THREADFORGE_EVALUATION_BACKEND": "local"},
+        completion=lambda **_kwargs: _OpenRouterResponse(0.0125),
+    )
+
+    broker.dispatch(_request({"messages": [{"role": "user", "content": "task"}]}))
+
+    assert broker.cost_source is None
+    assert broker.cost_usd_records == 0
+    assert broker.unmeasured_cost_calls == 1
+    assert broker.reported_cost_usd is None
+
+
+def test_unreadable_openrouter_cost_metadata_does_not_break_model_dispatch():
+    broker = ModelBroker(
+        remote_inference_opt_in=True,
+        environ={
+            "THREADFORGE_EVALUATION_BACKEND": "remote",
+            "THREADFORGE_REMOTE_EVALUATION_MODEL": "openrouter/provider/model-v1",
+        },
+        completion=lambda **_kwargs: _BrokenOpenRouterMetadataResponse(None),
+    )
+
+    result = broker.dispatch(_request({"messages": [{"role": "user", "content": "task"}]}))
+
+    assert result["choices"]
+    assert broker.cost_usd_records == 0
+    assert broker.unmeasured_cost_calls == 1
+    assert broker.reported_cost_usd is None
 
 
 @pytest.mark.parametrize(

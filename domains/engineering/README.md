@@ -47,8 +47,15 @@ FastMCP, model, evaluator, or benchmark run has been verified. A reproducible
 Engineering image recipe is still missing, and no task data or evaluator is
 bundled. Synthetic/imported fixtures are not acceptance evidence.
 
-The current broker records token counts but no trusted billed-USD amount.
-Scored trial records therefore include `trial_cost_usd: [null, ...]`, and the
-job summary reports `total_cost_usd: null`, `cost_usd_records: 0`, and
-`cost_usd_complete: false`. No provider/model price estimate is treated as
-measured spend.
+The host-side broker can preserve OpenRouter's response-reported account charge
+when `THREADFORGE_EVALUATION_BACKEND=remote`, the operator has explicitly
+enabled remote inference and benchmark execution, and the configured model
+begins with `openrouter/`. It reads only LiteLLM's optional raw-response cost metadata;
+missing, malformed, or unsupported metadata remains unknown, and no model-price
+estimate is used. A trial's USD value is complete only when every model call in
+that trial has a valid report. Other providers and local inference continue to
+produce `trial_cost_usd: [null, ...]` and an unknown job total. The OpenRouter
+amount is an account-charge measure, not invoice reconciliation or an all-in
+cost for expenses billed directly outside OpenRouter (including BYOK provider
+invoices). Scored results label the source as
+`openrouter_account_usage_cost_v1`; this remains review-only evaluation data.

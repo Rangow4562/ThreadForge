@@ -548,6 +548,7 @@ class WorkspaceDomain(Domain):
             "total_cost_usd": None,
             "cost_usd_records": 0,
             "cost_usd_complete": False,
+            "cost_usd_source": None,
         }
 
     def load_trial(self, runs_dir, job, task_id, trial):

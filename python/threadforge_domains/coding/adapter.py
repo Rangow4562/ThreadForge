@@ -441,7 +441,8 @@ class CodingDomain(Domain):
         return per, {"total_passes": total_pass, "n_trials": len(ids) * k,
                      "pass_rate": total_pass / max(1, len(ids) * k),
                      "total_cost_usd": total_cost, "cost_usd_records": cost_records,
-                     "cost_usd_complete": cost_complete}
+                     "cost_usd_complete": cost_complete,
+                     "cost_usd_source": "harbor_agent_result_cost_usd_v1"}
 
     # ---- evidence ----------------------------------------------------------
     def load_trial(self, runs_dir, job, task_id, trial):

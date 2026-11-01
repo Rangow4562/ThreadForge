@@ -380,6 +380,10 @@ func normalizeRRSIEvaluation(domain string, value any) (json.RawMessage, error) 
 func normalizeRRSIEvaluationUSDCost(source map[string]any, costVectors, taskCount, costRecords int,
 	totalUSD float64, expected int) (map[string]any, error) {
 	fields := []string{"total_cost_usd", "cost_usd_records", "cost_usd_complete"}
+	costSource, costSourcePresent, err := normalizeRRSIEvaluationCostSource(source)
+	if err != nil {
+		return nil, err
+	}
 	present := 0
 	for _, field := range fields {
 		if _, exists := source[field]; exists {
@@ -397,9 +401,12 @@ func normalizeRRSIEvaluationUSDCost(source map[string]any, costVectors, taskCoun
 		return nil, errors.New("RRSI USD cost summary does not match per-task vectors")
 	}
 	if !reported {
+		if costSourcePresent && costSource != nil {
+			return nil, errors.New("RRSI USD cost source is present without a cost summary")
+		}
 		return map[string]any{
 			"source_reported": false, "total_usd": nil, "records": 0,
-			"expected_records": expected, "complete": false,
+			"expected_records": expected, "complete": false, "source": nil,
 		}, nil
 	}
 	declaredRecords, recordsOK := rrsiInteger(source["cost_usd_records"])
@@ -416,10 +423,37 @@ func normalizeRRSIEvaluationUSDCost(source map[string]any, costVectors, taskCoun
 	} else if hasTotal {
 		return nil, errors.New("RRSI total USD cost must be unknown when trial costs are incomplete")
 	}
+	if costRecords > 0 && costSourcePresent && costSource == nil {
+		return nil, errors.New("RRSI measured USD costs require a declared source")
+	}
+	if costRecords > 0 && !costSourcePresent {
+		costSource = "legacy_unspecified"
+	}
 	return map[string]any{
 		"source_reported": true, "total_usd": nullableRRsiNumber(declaredTotal, hasTotal),
 		"records": declaredRecords, "expected_records": expected, "complete": declaredComplete,
+		"source": costSource,
 	}, nil
+}
+
+func normalizeRRSIEvaluationCostSource(source map[string]any) (any, bool, error) {
+	raw, exists := source["cost_usd_source"]
+	if !exists {
+		return nil, false, nil
+	}
+	if raw == nil {
+		return nil, true, nil
+	}
+	value, ok := raw.(string)
+	if !ok || len(value) > 64 {
+		return nil, true, errors.New("RRSI USD cost source is invalid")
+	}
+	switch value {
+	case "harbor_agent_result_cost_usd_v1", "openrouter_account_usage_cost_v1", "legacy_unspecified", "mixed":
+		return value, true, nil
+	default:
+		return nil, true, errors.New("RRSI USD cost source is unsupported")
+	}
 }
 
 func normalizeRRSIDomainMetrics(domain string, source map[string]any, expected int) (map[string]any, error) {

@@ -197,6 +197,7 @@ def test_coding_score_reconciles_fixture_harbor_results(tmp_path, monkeypatch):
     assert extra["total_cost_usd"] is None
     assert extra["cost_usd_records"] == 0
     assert extra["cost_usd_complete"] is False
+    assert extra["cost_usd_source"] == "harbor_agent_result_cost_usd_v1"
 
 
 def test_coding_score_preserves_measured_per_trial_and_total_usd_cost(tmp_path, monkeypatch):
@@ -222,6 +223,7 @@ def test_coding_score_preserves_measured_per_trial_and_total_usd_cost(tmp_path, 
     assert extra["total_cost_usd"] == 0.5
     assert extra["cost_usd_records"] == 2
     assert extra["cost_usd_complete"] is True
+    assert extra["cost_usd_source"] == "harbor_agent_result_cost_usd_v1"
     persisted = aggregate(job, 2, per_task, extra).to_json()
     assert persisted["extra"]["total_cost_usd"] == 0.5
     assert persisted["per_task"][task_id]["extra"]["trial_cost_usd"] == [0.125, 0.375]
@@ -449,6 +451,7 @@ def test_workspace_scoring_reconciles_criterion_weights_and_tokens(tmp_path, mon
     assert extra["total_cost_usd"] is None
     assert extra["cost_usd_records"] == 0
     assert extra["cost_usd_complete"] is False
+    assert extra["cost_usd_source"] is None
     persisted = aggregate("workspace-score", 1, per_task, extra).to_json()
     assert persisted["extra"]["total_cost_usd"] is None
     assert persisted["per_task"][task_id]["extra"]["trial_cost_usd"] == [None]

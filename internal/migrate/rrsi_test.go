@@ -16,7 +16,8 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 		"coding": map[string]any{
 			"job": "base", "k": 2, "S": 0.5, "C": 150.0, "n_expected": 2, "missing": 0,
 			"extra": map[string]any{"total_passes": 1, "n_trials": 2, "pass_rate": 0.5,
-				"total_cost_usd": 0.375, "cost_usd_records": 2, "cost_usd_complete": true},
+				"total_cost_usd": 0.375, "cost_usd_records": 2, "cost_usd_complete": true,
+				"cost_usd_source": "harbor_agent_result_cost_usd_v1"},
 			"per_task": map[string]any{"extract-elf": map[string]any{
 				"rewards": []any{1.0, 0.0}, "weights": []any{1.0, 1.0}, "tokens": []any{100.0, 200.0}, "missing": 0,
 				"extra": map[string]any{"passes": 1, "trial_dirs": []any{"C:/Users/private/raw-trial"},
@@ -26,7 +27,7 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 		"workspace": map[string]any{
 			"job": "heldout_champ", "k": 2, "S": 5.0 / 6.0, "C": 150.0, "n_expected": 2, "missing": 0,
 			"extra": map[string]any{"criteria_passed": 5, "criteria_total": 6, "all_pass_tasks": 0, "criterion_rate": 5.0 / 6.0,
-				"total_cost_usd": nil, "cost_usd_records": 0, "cost_usd_complete": false},
+				"total_cost_usd": nil, "cost_usd_records": 0, "cost_usd_complete": false, "cost_usd_source": nil},
 			"per_task": map[string]any{"law/task-01": map[string]any{
 				"rewards": []any{0.5, 1.0}, "weights": []any{2.0, 4.0}, "tokens": []any{100.0, 200.0}, "missing": 0,
 				"extra": map[string]any{"trial_cost_usd": []any{nil, nil}},
@@ -106,6 +107,7 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 				Metrics       map[string]float64 `json:"metrics"`
 				USDCost       struct {
 					SourceReported bool     `json:"source_reported"`
+					Source         *string  `json:"source"`
 					TotalUSD       *float64 `json:"total_usd"`
 					Records        int      `json:"records"`
 					Expected       int      `json:"expected_records"`
@@ -137,6 +139,9 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 					payload.USDCost.Records != 2 || payload.USDCost.Expected != 2 || !payload.USDCost.Complete {
 					t.Fatalf("coding benchmark summary changed during conversion: %#v", payload)
 				}
+				if payload.USDCost.Source == nil || *payload.USDCost.Source != "harbor_agent_result_cost_usd_v1" {
+					t.Fatalf("coding USD source was not preserved: %#v", payload.USDCost)
+				}
 				costs := payload.PerTask[singleTask].Metrics.TrialCostUSD
 				if len(costs) != 2 || costs[0] == nil || *costs[0] != 0.125 || costs[1] == nil || *costs[1] != 0.25 {
 					t.Fatalf("coding USD trial costs changed during conversion: %#v", costs)
@@ -146,6 +151,9 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 					!payload.USDCost.SourceReported || payload.USDCost.TotalUSD != nil || payload.USDCost.Records != 0 ||
 					payload.USDCost.Expected != 2 || payload.USDCost.Complete {
 					t.Fatalf("workspace criterion metrics changed during conversion: %#v", payload)
+				}
+				if payload.USDCost.Source != nil {
+					t.Fatalf("workspace invented a USD source: %#v", payload.USDCost)
 				}
 				costs := payload.PerTask[singleTask].Metrics.TrialCostUSD
 				if len(costs) != 2 || costs[0] != nil || costs[1] != nil {
@@ -256,6 +264,7 @@ func TestRRSIEvaluationRejectsInconsistentUSDCostCoverage(t *testing.T) {
 	}
 	validSummary := map[string]any{
 		"total_cost_usd": 0.3, "cost_usd_records": float64(2), "cost_usd_complete": true,
+		"cost_usd_source": "harbor_agent_result_cost_usd_v1",
 	}
 	cases := []struct {
 		name    string
@@ -282,6 +291,14 @@ func TestRRSIEvaluationRejectsInconsistentUSDCostCoverage(t *testing.T) {
 			"total_cost_usd": 0.3, "cost_usd_records": float64(2),
 		}},
 		{name: "cost vector missing", costs: nil, summary: validSummary},
+		{name: "unsupported cost source", costs: []any{0.1, 0.2}, summary: map[string]any{
+			"total_cost_usd": 0.3, "cost_usd_records": float64(2), "cost_usd_complete": true,
+			"cost_usd_source": "model-price-estimate",
+		}},
+		{name: "measured costs with explicit unknown source", costs: []any{0.1, 0.2}, summary: map[string]any{
+			"total_cost_usd": 0.3, "cost_usd_records": float64(2), "cost_usd_complete": true,
+			"cost_usd_source": nil,
+		}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -310,6 +327,7 @@ func TestRRSIEvaluationLegacyMissingCostsRemainExplicitlyUnknown(t *testing.T) {
 	var decoded struct {
 		USDCost struct {
 			SourceReported bool     `json:"source_reported"`
+			Source         *string  `json:"source"`
 			TotalUSD       *float64 `json:"total_usd"`
 			Records        int      `json:"records"`
 			Expected       int      `json:"expected_records"`
@@ -320,7 +338,7 @@ func TestRRSIEvaluationLegacyMissingCostsRemainExplicitlyUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	if decoded.USDCost.SourceReported || decoded.USDCost.TotalUSD != nil || decoded.USDCost.Records != 0 ||
-		decoded.USDCost.Expected != 1 || decoded.USDCost.Complete {
+		decoded.USDCost.Expected != 1 || decoded.USDCost.Complete || decoded.USDCost.Source != nil {
 		t.Fatalf("legacy USD cost absence was not preserved as unknown: %#v", decoded.USDCost)
 	}
 }

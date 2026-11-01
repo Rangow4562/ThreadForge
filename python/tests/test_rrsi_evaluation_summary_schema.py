@@ -41,14 +41,16 @@ def test_rrsi_evaluation_summary_schema_accepts_complete_partial_unknown_and_leg
     validator.validate(result("coding", {"trial_cost_usd": [0.125, 0.25]}, {
         "source_reported": True, "total_usd": 0.375, "records": 2,
         "expected_records": 2, "complete": True,
+        "source": "harbor_agent_result_cost_usd_v1",
     }))
     validator.validate(result("eng", {"trial_cost_usd": [0.125, None]}, {
         "source_reported": True, "total_usd": None, "records": 1,
         "expected_records": 2, "complete": False,
+        "source": "openrouter_account_usage_cost_v1",
     }))
     validator.validate(result("workspace", {"trial_cost_usd": [None, None]}, {
         "source_reported": True, "total_usd": None, "records": 0,
-        "expected_records": 2, "complete": False,
+        "expected_records": 2, "complete": False, "source": None,
     }))
     validator.validate(result("coding", {}))
 
@@ -68,6 +70,11 @@ def test_rrsi_evaluation_summary_schema_accepts_complete_partial_unknown_and_leg
         result("coding", {}, {
             "source_reported": False, "total_usd": 0, "records": 0,
             "expected_records": 2, "complete": False,
+        }),
+        result("eng", {"trial_cost_usd": [0.125, 0.25]}, {
+            "source_reported": True, "total_usd": 0.375, "records": 2,
+            "expected_records": 2, "complete": True,
+            "source": "model-price-estimate",
         }),
     ]
     for payload in invalid:

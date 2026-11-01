@@ -152,6 +152,9 @@ def test_engineering_domain_run_orchestrates_agent_evaluator_and_resume_safely(
             model_calls=1,
             prompt_tokens=12,
             completion_tokens=8,
+            reported_cost_usd=0.025,
+            cost_usd_records=1,
+            cost_source="openrouter_account_usage_cost_v1",
         )
 
     monkeypatch.setattr(module, "run_sandboxed_stdio", fake_run)
@@ -174,6 +177,11 @@ def test_engineering_domain_run_orchestrates_agent_evaluator_and_resume_safely(
     assert (folder / "payload.py").read_text(encoding="utf-8") == "PAYLOAD = {'fixture': True}\n"
     assert meta["status"] == "completed"
     assert meta["total_tokens"] == 20
+    assert meta["reported_cost_usd"] == 0.025
+    assert meta["cost_usd_records"] == 1
+    assert meta["unmeasured_cost_calls"] == 0
+    assert meta["cost_usd_source"] == "openrouter_account_usage_cost_v1"
+    assert meta["cost_usd_complete"] is True
     assert meta["candidate_harness_sha256"] == harness_sha
     assert meta["trajectory_untrusted"] is True
     assert verdict["passed"] is True
@@ -186,8 +194,13 @@ def test_engineering_domain_run_orchestrates_agent_evaluator_and_resume_safely(
     calls.clear()
     domain.run(tmp_path, runs, "integrated-fixture", [task_id], 1)
     assert calls == []
-    per_task, _extra = domain.score(runs, "integrated-fixture", [task_id], 1)
+    per_task, extra = domain.score(runs, "integrated-fixture", [task_id], 1)
     assert per_task[task_id].rewards == [1.0]
+    assert per_task[task_id].extra["trial_cost_usd"] == [0.025]
+    assert extra["total_cost_usd"] == 0.025
+    assert extra["cost_usd_records"] == 1
+    assert extra["cost_usd_complete"] is True
+    assert extra["cost_usd_source"] == "openrouter_account_usage_cost_v1"
 
 
 def test_engineering_domain_run_refuses_partial_trials_before_any_execution(
@@ -289,6 +302,7 @@ def test_engineering_scoring_reconciles_trials_and_counts_missing_as_zero(tmp_pa
         "total_passes": 1, "n_trials": 2, "pass_rate": 0.5,
         "mean_combined_score": 0.41, "valid_rate": 0.5, "no_payload_rate": 0.5,
         "total_cost_usd": None, "cost_usd_records": 0, "cost_usd_complete": False,
+        "cost_usd_source": None,
     }
     persisted = aggregate("engineering-score", 1, per_task, extra).to_json()
     assert persisted["extra"]["total_cost_usd"] is None
@@ -301,6 +315,47 @@ def test_engineering_scoring_reconciles_trials_and_counts_missing_as_zero(tmp_pa
         "status": "ok", "passed": True, "valid": 1.0, "combined_score": 0.82,
     }
     assert domain.render_trace(record).startswith("UNTRUSTED ENGINEERING TRIAL DATA")
+
+
+def test_engineering_partial_provider_cost_stays_unknown_and_tampered_coverage_is_rejected(
+    tmp_path, monkeypatch,
+):
+    domain = _load_engineering_domain(tmp_path, monkeypatch)
+    runs = tmp_path / "runs"
+    job = "partial-cost-fixture"
+    task_ids = domain.evolve_ids()[:2]
+    _write_trial(
+        domain, runs, job, task_ids[0], 0,
+        meta={
+            "status": "completed", "no_payload": False, "total_tokens": 40,
+            "model_calls": 2, "reported_cost_usd": None, "cost_usd_records": 1,
+            "unmeasured_cost_calls": 1,
+            "cost_usd_source": "openrouter_account_usage_cost_v1",
+            "cost_usd_complete": False,
+        },
+        verdict={"status": "ok", "passed": True, "valid": 1.0, "combined_score": 0.8},
+    )
+    _write_trial(
+        domain, runs, job, task_ids[1], 0,
+        meta={
+            "status": "completed", "no_payload": False, "total_tokens": 25,
+            "model_calls": 2, "reported_cost_usd": 0.02, "cost_usd_records": 1,
+            "unmeasured_cost_calls": 0,
+            "cost_usd_source": "openrouter_account_usage_cost_v1",
+            "cost_usd_complete": True,
+        },
+        verdict={"status": "ok", "passed": True, "valid": 1.0, "combined_score": 0.7},
+    )
+
+    per_task, extra = domain.score(runs, job, task_ids, 1)
+
+    assert per_task[task_ids[0]].missing == 0
+    assert per_task[task_ids[0]].extra["trial_cost_usd"] == [None]
+    assert per_task[task_ids[1]].missing == 1
+    assert extra["total_cost_usd"] is None
+    assert extra["cost_usd_records"] == 0
+    assert extra["cost_usd_complete"] is False
+    assert extra["cost_usd_source"] == "openrouter_account_usage_cost_v1"
 
 
 def test_engineering_rejects_inconsistent_or_linked_result_records(tmp_path, monkeypatch):

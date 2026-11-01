@@ -26,7 +26,12 @@
         "criterion_rate": { "type": "number", "minimum": 0, "maximum": 1 },
         "mean_combined_score": { "type": "number", "minimum": 0 },
         "valid_rate": { "type": "number", "minimum": 0, "maximum": 1 },
-        "no_payload_rate": { "type": "number", "minimum": 0, "maximum": 1 }
+        "no_payload_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "cost_usd_source": {
+          "type": ["string", "null"],
+          "enum": ["harbor_agent_result_cost_usd_v1", "openrouter_account_usage_cost_v1", "mixed", null],
+          "description": "Provenance of explicitly reported per-trial USD values; mixed means one evaluation combines incompatible reporting sources. It is not invoice reconciliation."
+        }
       }
     },
     "usd_cost": { "$ref": "#/$defs/usdCost" },
@@ -47,6 +52,10 @@
       "additionalProperties": false,
       "properties": {
         "source_reported": { "type": "boolean" },
+        "source": {
+          "type": ["string", "null"],
+          "enum": ["harbor_agent_result_cost_usd_v1", "openrouter_account_usage_cost_v1", "legacy_unspecified", "mixed", null]
+        },
         "total_usd": { "type": ["number", "null"], "minimum": 0 },
         "records": { "type": "integer", "minimum": 0, "maximum": 10000000 },
         "expected_records": {

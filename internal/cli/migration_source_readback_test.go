@@ -514,9 +514,9 @@ func TestRRSIAnalysisReportMigrationReadback(t *testing.T) {
 func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "rrsi-evaluations")
 	fixtures := map[string]string{
-		"coding":    `{"job":"base","k":2,"S":0.5,"C":150,"n_expected":2,"missing":0,"extra":{"total_passes":1,"n_trials":2,"pass_rate":0.5,"total_cost_usd":0.375,"cost_usd_records":2,"cost_usd_complete":true},"per_task":{"task-01":{"rewards":[1,0],"weights":[1,1],"tokens":[100,200],"missing":0,"extra":{"passes":1,"trial_cost_usd":[0.125,0.25],"trial_dirs":["C:/Users/private/raw-trial"]}}}}`,
+		"coding":    `{"job":"base","k":2,"S":0.5,"C":150,"n_expected":2,"missing":0,"extra":{"total_passes":1,"n_trials":2,"pass_rate":0.5,"total_cost_usd":0.375,"cost_usd_records":2,"cost_usd_complete":true,"cost_usd_source":"harbor_agent_result_cost_usd_v1"},"per_task":{"task-01":{"rewards":[1,0],"weights":[1,1],"tokens":[100,200],"missing":0,"extra":{"passes":1,"trial_cost_usd":[0.125,0.25],"trial_dirs":["C:/Users/private/raw-trial"]}}}}`,
 		"workspace": `{"job":"base","k":2,"S":0.8333333333333334,"C":150,"n_expected":2,"missing":0,"extra":{"criteria_passed":5,"criteria_total":6,"all_pass_tasks":0,"criterion_rate":0.8333333333333334},"per_task":{"task-01":{"rewards":[0.5,1],"weights":[2,4],"tokens":[100,200],"missing":0,"extra":{}}}}`,
-		"eng":       `{"job":"base","k":2,"S":0.5,"C":150,"n_expected":2,"missing":0,"extra":{"total_passes":1,"n_trials":2,"pass_rate":0.5,"mean_combined_score":0.6,"valid_rate":0.95,"no_payload_rate":0,"total_cost_usd":null,"cost_usd_records":1,"cost_usd_complete":false},"per_task":{"task-01":{"rewards":[1,0],"weights":[1,1],"tokens":[100,200],"missing":0,"extra":{"combined_scores":[0.7,0.5],"valid":[1,0.9],"no_payload":[0,0],"trial_cost_usd":[0.125,null]}}}}`,
+		"eng":       `{"job":"base","k":2,"S":0.5,"C":150,"n_expected":2,"missing":0,"extra":{"total_passes":1,"n_trials":2,"pass_rate":0.5,"mean_combined_score":0.6,"valid_rate":0.95,"no_payload_rate":0,"total_cost_usd":null,"cost_usd_records":1,"cost_usd_complete":false,"cost_usd_source":"openrouter_account_usage_cost_v1"},"per_task":{"task-01":{"rewards":[1,0],"weights":[1,1],"tokens":[100,200],"missing":0,"extra":{"combined_scores":[0.7,0.5],"valid":[1,0.9],"no_payload":[0,0],"trial_cost_usd":[0.125,null]}}}}`,
 	}
 	for domain, contents := range fixtures {
 		file := filepath.Join(root, "runs", domain, "jobs", "base", "eval.json")
@@ -550,6 +550,7 @@ func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 		Metrics       map[string]float64 `json:"metrics"`
 		USDCost       struct {
 			SourceReported bool     `json:"source_reported"`
+			Source         *string  `json:"source"`
 			TotalUSD       *float64 `json:"total_usd"`
 			Records        int      `json:"records"`
 			Expected       int      `json:"expected_records"`
@@ -566,15 +567,16 @@ func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 		totalUSD       *float64
 		records        int
 		complete       bool
+		source         *string
 	}
 	want := map[string]struct {
 		score   float64
 		metrics map[string]float64
 		usd     expectedUSD
 	}{
-		"coding":    {0.5, map[string]float64{"pass_rate": 0.5, "total_passes": 1}, expectedUSD{true, floatPtr(0.375), 2, true}},
-		"workspace": {5.0 / 6.0, map[string]float64{"criterion_rate": 5.0 / 6.0, "criteria_passed": 5, "criteria_total": 6}, expectedUSD{false, nil, 0, false}},
-		"eng":       {0.5, map[string]float64{"pass_rate": 0.5, "mean_combined_score": 0.6, "valid_rate": 0.95, "no_payload_rate": 0}, expectedUSD{true, nil, 1, false}},
+		"coding":    {0.5, map[string]float64{"pass_rate": 0.5, "total_passes": 1}, expectedUSD{true, floatPtr(0.375), 2, true, stringPtr("harbor_agent_result_cost_usd_v1")}},
+		"workspace": {5.0 / 6.0, map[string]float64{"criterion_rate": 5.0 / 6.0, "criteria_passed": 5, "criteria_total": 6}, expectedUSD{false, nil, 0, false, nil}},
+		"eng":       {0.5, map[string]float64{"pass_rate": 0.5, "mean_combined_score": 0.6, "valid_rate": 0.95, "no_payload_rate": 0}, expectedUSD{true, nil, 1, false, stringPtr("openrouter_account_usage_cost_v1")}},
 	}
 	seen := map[string]bool{}
 	for _, record := range records {
@@ -592,7 +594,8 @@ func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 		}
 		if payload.USDCost.SourceReported != expected.usd.sourceReported || payload.USDCost.Records != expected.usd.records ||
 			payload.USDCost.Expected != 2 || payload.USDCost.Complete != expected.usd.complete ||
-			!sameOptionalFloat(payload.USDCost.TotalUSD, expected.usd.totalUSD) {
+			!sameOptionalFloat(payload.USDCost.TotalUSD, expected.usd.totalUSD) ||
+			!sameOptionalStringPointer(payload.USDCost.Source, expected.usd.source) {
 			t.Fatalf("RRSI %s USD cost coverage did not reconcile: %#v", payload.Domain, payload.USDCost)
 		}
 		if payload.Domain == "coding" {
@@ -624,11 +627,20 @@ func TestRRSIAggregateEvaluationReportsMigrationReadback(t *testing.T) {
 
 func floatPtr(value float64) *float64 { return &value }
 
+func stringPtr(value string) *string { return &value }
+
 func sameOptionalFloat(left, right *float64) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
 	}
 	return math.Abs(*left-*right) < 1e-12
+}
+
+func sameOptionalStringPointer(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func TestMancodeSyntheticProjectTeamMigrationReadback(t *testing.T) {

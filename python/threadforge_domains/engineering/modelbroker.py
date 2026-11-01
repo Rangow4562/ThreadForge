@@ -23,6 +23,8 @@ MAX_CHAT_COMPLETION_TOKENS = 16_384
 MAX_CHAT_MESSAGES = 512
 MAX_CHAT_TOOLS = 128
 MAX_MODEL_REQUEST_TIMEOUT_SECONDS = 600
+MAX_REPORTED_COST_USD = 1e12
+OPENROUTER_COST_HEADER = "llm_provider-x-litellm-response-cost"
 _CHAT_FIELDS = frozenset({
     "model", "messages", "tools", "tool_choice", "temperature", "top_p",
     "max_tokens", "max_completion_tokens", "stop", "presence_penalty",
@@ -124,6 +126,32 @@ def _usage_value(usage: object, key: str) -> int | None:
     return value
 
 
+def _openrouter_account_cost(response: object) -> float | None:
+    """Read LiteLLM's copy of OpenRouter's returned account charge, if present.
+
+    LiteLLM stores the raw OpenRouter ``usage.cost`` value in
+    ``ModelResponse._hidden_params.additional_headers``. This private field is
+    deliberately treated as an optional capability: if the installed LiteLLM
+    version or response shape changes, USD remains unknown rather than being
+    estimated from a price table.
+    """
+    try:
+        hidden = getattr(response, "_hidden_params", None)
+        headers = hidden.get("additional_headers") if isinstance(hidden, dict) else None
+        value = headers.get(OPENROUTER_COST_HEADER) if isinstance(headers, dict) else None
+    except Exception:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        amount = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    if not math.isfinite(amount) or not 0.0 <= amount <= MAX_REPORTED_COST_USD:
+        return None
+    return amount
+
+
 class ModelBroker:
     """Resolve policy on the host and proxy only bounded chat-completion data.
 
@@ -165,6 +193,28 @@ class ModelBroker:
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.unmeasured_calls = 0
+        self._reports_openrouter_account_cost = (
+            self._remote and self.model.lower().startswith("openrouter/")
+        )
+        self.cost_source = (
+            "openrouter_account_usage_cost_v1"
+            if self._reports_openrouter_account_cost else None
+        )
+        self.cost_usd_total = 0.0
+        self.cost_usd_records = 0
+        self.unmeasured_cost_calls = 0
+
+    @property
+    def reported_cost_usd(self) -> float | None:
+        if (self.calls == 0 or self.cost_usd_records != self.calls or
+                self.unmeasured_cost_calls != 0 or not math.isfinite(self.cost_usd_total) or
+                self.cost_usd_total > MAX_REPORTED_COST_USD):
+            return None
+        return self.cost_usd_total
+
+    @property
+    def cost_usd_complete(self) -> bool:
+        return self.reported_cost_usd is not None
 
     def _completion_callable(self) -> Callable:
         if self._completion is not None:
@@ -210,12 +260,23 @@ class ModelBroker:
         except BrokerOperationError:
             self.failed_calls += 1
             self.unmeasured_calls += 1
+            self.unmeasured_cost_calls += 1
             raise
         except Exception:
             self.failed_calls += 1
             self.unmeasured_calls += 1
+            self.unmeasured_cost_calls += 1
             raise BrokerOperationError("provider_unavailable") from None
 
+        reported_cost = (
+            _openrouter_account_cost(result)
+            if self._reports_openrouter_account_cost else None
+        )
+        if reported_cost is None:
+            self.unmeasured_cost_calls += 1
+        else:
+            self.cost_usd_total += reported_cost
+            self.cost_usd_records += 1
         usage = normalized.get("usage")
         prompt = _usage_value(usage, "prompt_tokens")
         completion = _usage_value(usage, "completion_tokens")

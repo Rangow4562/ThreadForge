@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { installCodexTelemetry } from '../src/codex-telemetry-config.ts';
 import { installCodexProjectPlanGateHook, removeCodexProjectPlanGateHook } from '../src/codex-hooks-config.ts';
+import { findJsonObjectWithSchema } from './mcp-response-utils.mjs';
 
 const fixtureKeyName = 'THREADFORGE_CODEX_FIXTURE_KEY';
 const fixtureKey = 'threadforge-codex-local-fixture-only';
@@ -15,7 +16,7 @@ export async function runCodexAgentMcpRead({
   projectRoot, codexHome, cliPath, databasePath, isolatedEnvironment, procedureID, expectedGuidance,
   toolName = 'threadforge_procedure_get', toolArguments, prompt, expectedFinalResponse,
   requiredResultMarkers = [], requiredPromptContextMarkers = [], enableCodexHooks = false, bypassHookTrust = false,
-  hostVersion = 'unknown', privateTelemetryValues = [],
+  hostVersion = 'unknown', privateTelemetryValues = [], verifyTaskResumeReceipt,
 }) {
   const mcpArguments = toolArguments ?? { procedure_id: procedureID };
   const promptText = prompt ?? `Read approved procedure ${procedureID} using Threadforge MCP, then repeat its first guidance sentence exactly. Do not use shell or modify files.`;
@@ -30,6 +31,7 @@ export async function runCodexAgentMcpRead({
   let promptContextObservedRequests = 0;
   let authorizationSafe = true;
   let fixtureError;
+  let taskResumeReceiptChecks;
   const providerShapes = [];
   const telemetry = { logs: 0, traces: 0, log_records: 0, spans: 0, local_turn_cost_posts: 0 };
   const telemetrySensitiveFields = new Set();
@@ -134,10 +136,52 @@ export async function runCodexAgentMcpRead({
           const compactResultText = resultText.replace(/\s+/g, '');
           const containsGuidance = resultText.includes(expectedGuidance) ||
             resultText.includes(expectedGuidance.replace(/[.!?]+$/u, ''));
-          const markersPresent = requiredResultMarkers.every((marker) => compactResultText.includes(marker.replace(/\s+/g, '')));
+          const resultMarkerChecks = Object.fromEntries(requiredResultMarkers.map((marker) => [
+            marker.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+            compactResultText.includes(marker.replace(/\s+/g, '')),
+          ]));
+          if (toolName === 'threadforge_task_resume_context_with_receipt') {
+            const envelope = findJsonObjectWithSchema(
+              functionOutputs,
+              'threadforge.task-resume-context-with-receipt.v1',
+            );
+            const context = envelope?.context;
+            const task = context?.task;
+            const receipt = envelope?.retrieval_receipt;
+            const receiptContractVerified = context?.schema_version === 'threadforge.task-resume-context.v1' &&
+              context?.status === 'available' && receipt?.schema_version === 'threadforge.memory-retrieval-receipt.v4' &&
+              receipt?.target_kind === 'task_context' && receipt?.target_id === 'task-resume-context' &&
+              receipt?.target_revision === 1 && receipt?.tool === toolName && receipt?.freshness === 'snapshot' &&
+              receipt?.result_status === 'available' && receipt?.guidance_included === true &&
+              receipt?.observation_boundary === 'mcp_handler_result_prepared';
+            const taskRevisionBindingVerified = task?.id === mcpArguments.task_id &&
+              receipt?.task_id === task.id && receipt?.project_id === task.project_id &&
+              Number.isInteger(task?.revision) && task.revision > 0 && receipt?.task_revision === task.revision;
+            let persistence = { persisted: false, content_free: false };
+            if (receiptContractVerified && taskRevisionBindingVerified &&
+                typeof verifyTaskResumeReceipt === 'function' && typeof receipt?.id === 'string') {
+              persistence = verifyTaskResumeReceipt({
+                receiptId: receipt.id,
+                projectId: task.project_id,
+                taskId: task.id,
+                taskRevision: task.revision,
+              }) ?? persistence;
+            }
+            taskResumeReceiptChecks = {
+              receipt_v4_contract_verified: receiptContractVerified,
+              receipt_task_revision_binding_verified: taskRevisionBindingVerified,
+              receipt_persisted_locally: persistence.persisted === true,
+              receipt_list_content_free: persistence.content_free === true,
+            };
+          }
+          const markersPresent = requiredResultMarkers.every((marker) => resultMarkerChecks[
+            marker.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '')
+          ]) && (!taskResumeReceiptChecks || Object.values(taskResumeReceiptChecks).every(Boolean));
           if (!containsGuidance || !markersPresent) {
             fixtureError = toolName === 'threadforge_task_resume_context'
               ? 'Codex task-resume result omitted expected advisory fields'
+              : toolName === 'threadforge_task_resume_context_with_receipt'
+                ? 'Codex task-resume receipt contract or persistence was not verified'
               : 'Codex MCP tool result did not contain the expected approved procedure guidance';
             sendResponse(response, body, { content: 'The Threadforge MCP read did not return the expected content and safety fields.' });
             return;
@@ -260,6 +304,17 @@ export async function runCodexAgentMcpRead({
         action_ready: false,
         guidance_only: true,
         execution_authorized: false,
+      } : {}),
+      ...(toolName === 'threadforge_task_resume_context_with_receipt' ? {
+        schema_version: 'threadforge.codex-task-resume-smoke.v2',
+        host_cli_version: hostVersion,
+        task_context_content_retained_in_report: false,
+        advisory_result_markers_verified: requiredResultMarkers.length > 0 && toolResultObserved,
+        requirements_not_finalized_warning_verified: requiredResultMarkers.includes('requirements_not_finalized') && toolResultObserved,
+        action_ready: false,
+        guidance_only: true,
+        execution_authorized: false,
+        ...taskResumeReceiptChecks,
       } : {}),
       ...(toolName === 'threadforge_task_handoffs' ? {
         host_cli_version: hostVersion,

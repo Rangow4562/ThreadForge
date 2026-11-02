@@ -501,6 +501,56 @@ def test_codex_task_resume_smoke_schema_is_advisory_and_content_free():
         }})
 
 
+def test_codex_task_resume_receipt_smoke_schema_is_persisted_and_content_free():
+    schema = json.loads((SCHEMA_DIRECTORY / "codex-task-resume-smoke-v2.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.codex-task-resume-smoke.v2",
+        "status": "verified",
+        "host_cli_version": "codex-cli 0.166.0",
+        "provider": "deterministic-loopback-fixture",
+        "tool": "threadforge_task_resume_context_with_receipt",
+        "tool_call_count": 1,
+        "tool_result_observed": True,
+        "task_context_content_retained_in_report": False,
+        "advisory_result_markers_verified": True,
+        "requirements_not_finalized_warning_verified": True,
+        "action_ready": False,
+        "guidance_only": True,
+        "execution_authorized": False,
+        "receipt_v4_contract_verified": True,
+        "receipt_task_revision_binding_verified": True,
+        "receipt_persisted_locally": True,
+        "receipt_list_content_free": True,
+        "completion_requests": 3,
+        "auxiliary_completion_requests": 0,
+        "telemetry": {
+            "status": "verified",
+            "endpoint": "loopback-only",
+            "log_batches": 2,
+            "trace_batches": 3,
+            "log_records": 28,
+            "spans": 40,
+            "local_turn_cost_posts": 1,
+            "user_prompt_text_detected": False,
+            "approved_guidance_text_detected": True,
+            "fixture_key_detected": False,
+        },
+        "real_model_invocations": 0,
+    }
+    validator.validate(result)
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "execution_authorized": True})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "receipt_id": "private-receipt-id"})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "receipt_persisted_locally": False})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "task_id": "opencode-mcp-resume-smoke-task"})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "task_context_content_retained_in_report": True})
+
+
 def test_codex_memory_injection_smoke_schema_is_advisory_and_content_free():
     schema = json.loads((SCHEMA_DIRECTORY / "codex-memory-injection-smoke-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

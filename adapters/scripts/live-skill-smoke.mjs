@@ -1234,6 +1234,63 @@ try {
     ],
   });
   assert.equal(codexTaskResumeResult.status, 'verified', 'Codex did not complete the isolated read-only task-resume MCP call');
+  const codexTaskResumeWithReceiptResult = await runCodexAgentMcpRead({
+    projectRoot, codexHome, cliPath, databasePath, isolatedEnvironment,
+    procedureID: openCodeTaskFixture.id,
+    expectedGuidance: openCodeTaskFixture.objective,
+    hostVersion: codexVersion,
+    toolName: 'threadforge_task_resume_context_with_receipt',
+    toolArguments: { task_id: openCodeTaskFixture.id },
+    prompt: 'Read this explicitly selected Threadforge task with its local retrieval receipt and report only its advisory status. Do not use shell or modify files.',
+    expectedFinalResponse: 'The task snapshot and local retrieval receipt were prepared. Requirements are not finalized; execution is not authorized.',
+    requiredResultMarkers: [
+      'threadforge.task-resume-context-with-receipt.v1',
+      'threadforge.task-resume-context.v1',
+      'threadforge.memory-retrieval-receipt.v4',
+      'threadforge_task_resume_context_with_receipt',
+      '"target_kind":"task_context"',
+      '"target_id":"task-resume-context"',
+      '"freshness":"snapshot"',
+      '"result_status":"available"',
+      '"guidance_included":true',
+      'mcp_handler_result_prepared',
+      'requirements_not_finalized',
+      '"action_ready":false',
+      '"guidance_only":true',
+      '"execution_authorized":false',
+    ],
+    verifyTaskResumeReceipt: ({ receiptId, projectId, taskId, taskRevision }) => {
+      const receiptList = JSON.parse(runThreadforge([
+        'memory', 'feedback', 'receipts',
+        '--project-id', projectId,
+        '--task-id', taskId,
+        '--target-id', 'task-resume-context',
+        '--limit', '20',
+        '--db', databasePath,
+      ]));
+      const persistedReceipt = receiptList.receipts?.find((item) => item.id === receiptId);
+      const serializedReceiptList = JSON.stringify(receiptList);
+      return {
+        persisted: receiptList.schema_version === 'threadforge.memory-retrieval-receipt-list.v2' &&
+          projectId === openCodeTaskFixture.projectID && taskId === openCodeTaskFixture.id &&
+          persistedReceipt?.task_revision === taskRevision && persistedReceipt?.guidance_included === true,
+        content_free: ![openCodeTaskFixture.title, openCodeTaskFixture.objective,
+          'Read this explicitly selected Threadforge task with its local retrieval receipt and report only its advisory status. Do not use shell or modify files.'].some(
+          (privateValue) => serializedReceiptList.includes(privateValue)),
+      };
+    },
+  });
+  assert.equal(codexTaskResumeWithReceiptResult.status, 'verified',
+    `Codex task-resume receipt smoke failed safely: ${JSON.stringify({
+      fixture_error: codexTaskResumeWithReceiptResult.fixture_error,
+      provider_shapes: codexTaskResumeWithReceiptResult.provider_shapes,
+      tool_call_count: codexTaskResumeWithReceiptResult.tool_call_count,
+      tool_result_observed: codexTaskResumeWithReceiptResult.tool_result_observed,
+      receipt_v4_contract_verified: codexTaskResumeWithReceiptResult.receipt_v4_contract_verified,
+      receipt_task_revision_binding_verified: codexTaskResumeWithReceiptResult.receipt_task_revision_binding_verified,
+      receipt_persisted_locally: codexTaskResumeWithReceiptResult.receipt_persisted_locally,
+      receipt_list_content_free: codexTaskResumeWithReceiptResult.receipt_list_content_free,
+    })}`);
   const codexMemoryProjectRoot = path.join(isolatedHome, 'codex-memory-project');
   mkdirSync(codexMemoryProjectRoot, { recursive: true, mode: 0o700 });
   assert.equal(await installCodexProjectMcpServer(codexMemoryProjectRoot, cliPath, [
@@ -1475,6 +1532,29 @@ try {
     completion_requests: codexTaskResumeResult.completion_requests,
     auxiliary_completion_requests: codexTaskResumeResult.auxiliary_completion_requests,
     telemetry: codexTaskResumeResult.telemetry,
+    real_model_invocations: 0,
+  };
+  const codexAgentTaskResumeWithReceipt = {
+    schema_version: codexTaskResumeWithReceiptResult.schema_version,
+    status: codexTaskResumeWithReceiptResult.status,
+    host_cli_version: codexVersion,
+    provider: codexTaskResumeWithReceiptResult.provider,
+    tool: codexTaskResumeWithReceiptResult.tool,
+    tool_call_count: codexTaskResumeWithReceiptResult.tool_call_count,
+    tool_result_observed: codexTaskResumeWithReceiptResult.tool_result_observed,
+    task_context_content_retained_in_report: false,
+    advisory_result_markers_verified: codexTaskResumeWithReceiptResult.advisory_result_markers_verified,
+    requirements_not_finalized_warning_verified: codexTaskResumeWithReceiptResult.requirements_not_finalized_warning_verified,
+    action_ready: codexTaskResumeWithReceiptResult.action_ready,
+    guidance_only: codexTaskResumeWithReceiptResult.guidance_only,
+    execution_authorized: codexTaskResumeWithReceiptResult.execution_authorized,
+    receipt_v4_contract_verified: codexTaskResumeWithReceiptResult.receipt_v4_contract_verified,
+    receipt_task_revision_binding_verified: codexTaskResumeWithReceiptResult.receipt_task_revision_binding_verified,
+    receipt_persisted_locally: codexTaskResumeWithReceiptResult.receipt_persisted_locally,
+    receipt_list_content_free: codexTaskResumeWithReceiptResult.receipt_list_content_free,
+    completion_requests: codexTaskResumeWithReceiptResult.completion_requests,
+    auxiliary_completion_requests: codexTaskResumeWithReceiptResult.auxiliary_completion_requests,
+    telemetry: codexTaskResumeWithReceiptResult.telemetry,
     real_model_invocations: 0,
   };
   const geminiVersion = runHost('gemini', ['--version']).trim();
@@ -1962,7 +2042,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v45',
+    schema_version: 'threadforge.installed-skill-smoke.v46',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,
@@ -1999,6 +2079,7 @@ try {
     opencode_agent_task_handoff_read: openCodeAgentTaskHandoffRead,
     codex_agent_mcp_read: codexAgentMcpRead,
     codex_agent_task_resume: codexAgentTaskResume,
+    codex_agent_task_resume_with_receipt: codexAgentTaskResumeWithReceipt,
     codex_agent_memory_injection: codexAgentMemoryInjection,
     codex_agent_task_handoff_read: codexAgentTaskHandoffRead,
     task_handoff_cross_harness: taskHandoffCrossHarnessSmoke,

@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { findJsonObjectWithSchema } from './mcp-response-utils.mjs';
 
 const fixtureKey = 'threadforge-antigravity-local-fixture-only';
 const fixtureModel = 'Gemini 3.8 Flash (Low)';
@@ -133,7 +134,10 @@ export async function runAntigravityAgentMcpRead({
             compactResultText.includes(marker.replace(/\s+/g, '')),
           ]));
           if (toolName === 'threadforge_task_resume_context_with_receipt') {
-            const envelope = findTaskResumeReceiptEnvelope(functionResponses);
+            const envelope = findJsonObjectWithSchema(
+              functionResponses,
+              'threadforge.task-resume-context-with-receipt.v1',
+            );
             const context = envelope?.context;
             const task = context?.task;
             const receipt = envelope?.retrieval_receipt;
@@ -628,62 +632,6 @@ function functionResponseText(value, parts = [], depth = 0) {
     for (const item of Object.values(value).slice(0, 48)) functionResponseText(item, parts, depth + 1);
   }
   return parts.join('\n');
-}
-
-function embeddedJsonValues(value, depth = 0, seen = new Set(), output = []) {
-  if (depth > 8 || value == null || output.length >= 64) return output;
-  if (typeof value === 'string') {
-    if (value.length > 1 << 20) return output;
-    let parsed;
-    try { parsed = JSON.parse(value); } catch { parsed = undefined; }
-    if (parsed !== undefined) embeddedJsonValues(parsed, depth + 1, seen, output);
-    const starts = [];
-    for (let index = 0; index < value.length && starts.length < 16; index++) {
-      if (value[index] === '{') starts.push(index);
-    }
-    for (const start of starts) {
-      const stack = [];
-      let inString = false;
-      let escaped = false;
-      for (let index = start; index < value.length; index++) {
-        const character = value[index];
-        if (inString) {
-          if (escaped) escaped = false;
-          else if (character === '\\') escaped = true;
-          else if (character === '"') inString = false;
-          continue;
-        }
-        if (character === '"') { inString = true; continue; }
-        if (character === '{') stack.push('}');
-        else if (character === '[') stack.push(']');
-        else if (character === '}' || character === ']') {
-          if (stack.pop() !== character) break;
-          if (stack.length === 0) {
-            try {
-              const candidate = JSON.parse(value.slice(start, index + 1));
-              embeddedJsonValues(candidate, depth + 1, seen, output);
-            } catch { /* Ignore non-JSON braces in provider text. */ }
-            break;
-          }
-        }
-      }
-    }
-    return output;
-  }
-  if (typeof value !== 'object' || seen.has(value)) return output;
-  seen.add(value);
-  output.push(value);
-  if (Array.isArray(value)) {
-    for (const item of value.slice(0, 32)) embeddedJsonValues(item, depth + 1, seen, output);
-  } else {
-    for (const item of Object.values(value).slice(0, 48)) embeddedJsonValues(item, depth + 1, seen, output);
-  }
-  return output;
-}
-
-function findTaskResumeReceiptEnvelope(value) {
-  return embeddedJsonValues(value).find((candidate) =>
-    candidate?.schema_version === 'threadforge.task-resume-context-with-receipt.v1');
 }
 
 function summarizeFunctionResponse(item, expectedGuidance) {

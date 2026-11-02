@@ -11,12 +11,15 @@ export async function runAntigravityAgentMcpRead({
   projectRoot, home, cliPath, procedureID, expectedGuidance, isolatedEnvironment,
   toolName = 'threadforge_procedure_get', toolArguments, prompt, expectedFinalResponse,
   requiredResultMarkers = [], hostVersion = 'unknown', scriptedFunctionCall, expectedToolResponseMarker,
+  verifyTaskResumeReceipt,
+  toolAction = 'read',
   sandbox = true, permissionAllowRules, executionMode,
 }) {
   const requestedArguments = toolArguments ?? { procedure_id: procedureID };
   const finalResponse = expectedFinalResponse ?? expectedGuidance;
   const promptText = prompt ??
     `Read the approved procedure ${procedureID} using the Threadforge project MCP tool. Then repeat its first guidance sentence exactly. Do not use or request any other tool.`;
+  if (!['read', 'write'].includes(toolAction)) throw new Error('Antigravity smoke toolAction must be read or write');
   let providerRequests = 0;
   let auxiliaryRequests = 0;
   let toolCalls = 0;
@@ -28,6 +31,7 @@ export async function runAntigravityAgentMcpRead({
   let blockedExternalRequests = 0;
   let expectedContentObserved = false;
   let resultMarkerFlags = {};
+  let taskResumeReceiptChecks;
   const observedTools = new Set();
   const providerTrace = [];
 
@@ -128,13 +132,54 @@ export async function runAntigravityAgentMcpRead({
             marker.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, ''),
             compactResultText.includes(marker.replace(/\s+/g, '')),
           ]));
+          if (toolName === 'threadforge_task_resume_context_with_receipt') {
+            const envelope = findTaskResumeReceiptEnvelope(functionResponses);
+            const context = envelope?.context;
+            const task = context?.task;
+            const receipt = envelope?.retrieval_receipt;
+            const receiptContractVerified = envelope?.schema_version === 'threadforge.task-resume-context-with-receipt.v1' &&
+              context?.schema_version === 'threadforge.task-resume-context.v1' &&
+              context?.status === 'available' && receipt?.schema_version === 'threadforge.memory-retrieval-receipt.v4' &&
+              receipt?.target_kind === 'task_context' && receipt?.target_id === 'task-resume-context' &&
+              receipt?.target_revision === 1 && receipt?.tool === toolName && receipt?.freshness === 'snapshot' &&
+              receipt?.result_status === 'available' && receipt?.guidance_included === true &&
+              receipt?.observation_boundary === 'mcp_handler_result_prepared';
+            const taskRevisionBindingVerified = task?.id === requestedArguments.task_id &&
+              receipt?.task_id === task.id && receipt?.project_id === task.project_id &&
+              Number.isInteger(task?.revision) && task.revision > 0 && receipt?.task_revision === task.revision;
+            let persistence = { persisted: false, content_free: false };
+            if (receiptContractVerified && taskRevisionBindingVerified &&
+                typeof verifyTaskResumeReceipt === 'function' && typeof receipt?.id === 'string') {
+              persistence = verifyTaskResumeReceipt({
+                receiptId: receipt.id,
+                projectId: task.project_id,
+                taskId: task.id,
+                taskRevision: task.revision,
+              }) ?? persistence;
+            }
+            taskResumeReceiptChecks = {
+              receipt_v4_contract_verified: receiptContractVerified,
+              receipt_task_revision_binding_verified: taskRevisionBindingVerified,
+              receipt_persisted_locally: persistence.persisted === true,
+              receipt_list_content_free: persistence.content_free === true,
+            };
+            resultMarkerFlags = { ...resultMarkerFlags, ...taskResumeReceiptChecks };
+          }
           toolResultObserved = expectedContentObserved && Object.values(resultMarkerFlags).every(Boolean);
           if (!toolResultObserved) fixtureReason ??= toolName === 'threadforge_task_resume_context'
             ? 'task_resume_result_missing_advisory_fields'
-            : 'procedure_result_missing_expected_guidance';
+            : toolName === 'threadforge_task_resume_context_with_receipt'
+              ? 'task_resume_receipt_contract_or_persistence_not_verified'
+              : 'procedure_result_missing_expected_guidance';
           sendGemini(response, request.url, {
             text: toolResultObserved ? finalResponse : 'The Threadforge MCP result did not contain the expected content and safety fields.',
           });
+          return;
+        }
+
+        if (toolName === 'threadforge_task_resume_context_with_receipt' && toolCalls > 0) {
+          fixtureReason ??= 'task_resume_receipt_mcp_function_response_not_observed';
+          sendGemini(response, request.url, { text: 'The Threadforge task-resume receipt result was not observed as a tool response.' });
           return;
         }
 
@@ -191,7 +236,7 @@ export async function runAntigravityAgentMcpRead({
 
         const genericMcpTool = declarations.find((item) => /call_mcp_tool|mcp_tool_call/i.test(item.name));
         if (genericMcpTool) {
-          const args = makeGenericMcpArguments(genericMcpTool, toolName, requestedArguments);
+          const args = makeGenericMcpArguments(genericMcpTool, toolName, requestedArguments, toolAction);
           if (args) {
             if (toolCalls !== 0) {
               fixtureReason ??= 'repeated_threadforge_mcp_tool_call';
@@ -331,6 +376,16 @@ export async function runAntigravityAgentMcpRead({
         action_ready: false,
         guidance_only: true,
         execution_authorized: false,
+      } : {}),
+      ...(toolName === 'threadforge_task_resume_context_with_receipt' ? {
+        schema_version: 'threadforge.antigravity-task-resume-smoke.v2',
+        task_context_content_retained_in_report: false,
+        advisory_result_markers_verified: requiredResultMarkers.length > 0 && toolResultObserved,
+        requirements_not_finalized_warning_verified: requiredResultMarkers.includes('requirements_not_finalized') && toolResultObserved,
+        action_ready: false,
+        guidance_only: true,
+        execution_authorized: false,
+        ...taskResumeReceiptChecks,
       } : {}),
       provider_requests: providerRequests,
       auxiliary_provider_requests: auxiliaryRequests,
@@ -575,6 +630,62 @@ function functionResponseText(value, parts = [], depth = 0) {
   return parts.join('\n');
 }
 
+function embeddedJsonValues(value, depth = 0, seen = new Set(), output = []) {
+  if (depth > 8 || value == null || output.length >= 64) return output;
+  if (typeof value === 'string') {
+    if (value.length > 1 << 20) return output;
+    let parsed;
+    try { parsed = JSON.parse(value); } catch { parsed = undefined; }
+    if (parsed !== undefined) embeddedJsonValues(parsed, depth + 1, seen, output);
+    const starts = [];
+    for (let index = 0; index < value.length && starts.length < 16; index++) {
+      if (value[index] === '{') starts.push(index);
+    }
+    for (const start of starts) {
+      const stack = [];
+      let inString = false;
+      let escaped = false;
+      for (let index = start; index < value.length; index++) {
+        const character = value[index];
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (character === '\\') escaped = true;
+          else if (character === '"') inString = false;
+          continue;
+        }
+        if (character === '"') { inString = true; continue; }
+        if (character === '{') stack.push('}');
+        else if (character === '[') stack.push(']');
+        else if (character === '}' || character === ']') {
+          if (stack.pop() !== character) break;
+          if (stack.length === 0) {
+            try {
+              const candidate = JSON.parse(value.slice(start, index + 1));
+              embeddedJsonValues(candidate, depth + 1, seen, output);
+            } catch { /* Ignore non-JSON braces in provider text. */ }
+            break;
+          }
+        }
+      }
+    }
+    return output;
+  }
+  if (typeof value !== 'object' || seen.has(value)) return output;
+  seen.add(value);
+  output.push(value);
+  if (Array.isArray(value)) {
+    for (const item of value.slice(0, 32)) embeddedJsonValues(item, depth + 1, seen, output);
+  } else {
+    for (const item of Object.values(value).slice(0, 48)) embeddedJsonValues(item, depth + 1, seen, output);
+  }
+  return output;
+}
+
+function findTaskResumeReceiptEnvelope(value) {
+  return embeddedJsonValues(value).find((candidate) =>
+    candidate?.schema_version === 'threadforge.task-resume-context-with-receipt.v1');
+}
+
 function summarizeFunctionResponse(item, expectedGuidance) {
   const output = item.response?.output;
   let parsed = output;
@@ -677,7 +788,7 @@ function normalizedText(value) {
   return String(value).replace(/\s+/gu, ' ').trim();
 }
 
-function makeGenericMcpArguments(declaration, toolName, toolArguments) {
+function makeGenericMcpArguments(declaration, toolName, toolArguments, toolAction = 'read') {
   const properties = declaration.schema?.properties;
   if (!properties || typeof properties !== 'object') return undefined;
   const args = {};
@@ -689,8 +800,10 @@ function makeGenericMcpArguments(declaration, toolName, toolArguments) {
     else if (/^(server|server_name|mcp_server|mcp_server_name)$/.test(normalized)) args[key] = 'threadforge';
     else if (/^(tool|tool_name|mcp_tool|mcp_tool_name)$/.test(normalized)) args[key] = toolName;
     else if (/^(arguments|args|input|params)$/.test(normalized)) args[key] = { ...toolArguments };
-    else if (/^(tool_action|action)$/.test(normalized)) args[key] = 'read';
-    else if (/^(tool_summary|summary)$/.test(normalized)) args[key] = `Read ${toolName} as bounded, read-only advisory context.`;
+    else if (/^(tool_action|action)$/.test(normalized)) args[key] = toolAction;
+    else if (/^(tool_summary|summary)$/.test(normalized)) args[key] = toolAction === 'write'
+      ? `Record only the local retrieval receipt for ${toolName}; do not mutate task state or authorize execution.`
+      : `Read ${toolName} as bounded, read-only advisory context.`;
   }
   return Object.keys(args).some((key) => /task_id|procedure_id|arguments|args|input|params/i.test(key)) ? args : undefined;
 }

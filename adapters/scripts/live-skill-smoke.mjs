@@ -1537,6 +1537,70 @@ try {
       function_responses: antigravityTaskResumeResult.provider_trace?.flatMap((trace) => trace.function_responses ?? []).slice(-2),
       external_network_attempts_blocked: antigravityTaskResumeResult.external_network_attempts_blocked,
     })}`);
+  const antigravityTaskResumeWithReceiptResult = await runAntigravityAgentMcpRead({
+    projectRoot, home: isolatedHome, cliPath, procedureID: openCodeTaskFixture.id,
+    expectedGuidance: openCodeTaskFixture.objective,
+    isolatedEnvironment,
+    hostVersion: antigravityVersion,
+    toolName: 'threadforge_task_resume_context_with_receipt',
+    toolAction: 'write',
+    toolArguments: { task_id: openCodeTaskFixture.id },
+    prompt: 'Read this explicitly selected Threadforge task with its local retrieval receipt. Report only its advisory status; do not use any other tool.',
+    expectedFinalResponse: 'The task snapshot and local retrieval receipt were prepared. Requirements are not finalized; execution is not authorized.',
+    requiredResultMarkers: [
+      'threadforge.task-resume-context-with-receipt.v1',
+      'threadforge.task-resume-context.v1',
+      'threadforge.memory-retrieval-receipt.v4',
+      'threadforge_task_resume_context_with_receipt',
+      '"target_kind":"task_context"',
+      '"target_id":"task-resume-context"',
+      '"freshness":"snapshot"',
+      '"result_status":"available"',
+      '"guidance_included":true',
+      'mcp_handler_result_prepared',
+      'requirements_not_finalized',
+      '"action_ready":false',
+      '"guidance_only":true',
+      '"execution_authorized":false',
+    ],
+    verifyTaskResumeReceipt: ({ receiptId, projectId, taskId, taskRevision }) => {
+      const receiptList = JSON.parse(runThreadforge([
+        'memory', 'feedback', 'receipts',
+        '--project-id', projectId,
+        '--task-id', taskId,
+        '--target-id', 'task-resume-context',
+        '--limit', '20',
+        '--db', databasePath,
+      ]));
+      const persistedReceipt = receiptList.receipts?.find((item) => item.id === receiptId);
+      const serializedReceiptList = JSON.stringify(receiptList);
+      return {
+        persisted: receiptList.schema_version === 'threadforge.memory-retrieval-receipt-list.v2' &&
+          projectId === openCodeTaskFixture.projectID && taskId === openCodeTaskFixture.id &&
+          persistedReceipt?.task_revision === taskRevision && persistedReceipt?.guidance_included === true,
+        content_free: ![openCodeTaskFixture.title, openCodeTaskFixture.objective,
+          'Read this explicitly selected Threadforge task with its local retrieval receipt.'].some(
+          (privateValue) => serializedReceiptList.includes(privateValue)),
+      };
+    },
+  });
+  assert.equal(antigravityTaskResumeWithReceiptResult.status, 'verified',
+    `Antigravity task-resume receipt smoke failed safely: ${JSON.stringify({
+      reason: antigravityTaskResumeWithReceiptResult.reason,
+      host_failure_category: antigravityTaskResumeWithReceiptResult.host_failure_category,
+      provider_requests: antigravityTaskResumeWithReceiptResult.provider_requests,
+      tool_call_count: antigravityTaskResumeWithReceiptResult.tool_call_count,
+      tool_result_observed: antigravityTaskResumeWithReceiptResult.tool_result_observed,
+      result_check_diagnostics: antigravityTaskResumeWithReceiptResult.result_check_diagnostics,
+      declared_tool_schemas: antigravityTaskResumeWithReceiptResult.provider_trace?.flatMap((trace) => trace.declared_tool_schemas ?? []).slice(-4),
+      function_calls: antigravityTaskResumeWithReceiptResult.provider_trace?.flatMap((trace) => trace.function_calls ?? []).slice(-2),
+      function_responses: antigravityTaskResumeWithReceiptResult.provider_trace?.flatMap((trace) => trace.function_responses ?? []).slice(-2),
+      external_network_attempts_blocked: antigravityTaskResumeWithReceiptResult.external_network_attempts_blocked,
+    })}`);
+  assert.equal(antigravityTaskResumeWithReceiptResult.receipt_v4_contract_verified, true);
+  assert.equal(antigravityTaskResumeWithReceiptResult.receipt_task_revision_binding_verified, true);
+  assert.equal(antigravityTaskResumeWithReceiptResult.receipt_persisted_locally, true);
+  assert.equal(antigravityTaskResumeWithReceiptResult.receipt_list_content_free, true);
   const antigravityDeniedFile = path.join(projectRoot, 'src', 'threadforge-antigravity-plan-gate-denied.txt');
   const antigravityPlanGateAuditPath = path.join(isolatedHome, 'antigravity-plan-gate-audit.jsonl');
   const antigravityPlanGateObserver = path.join(repositoryRoot, 'adapters', 'scripts', 'antigravity-plan-gate-observer.mjs');
@@ -1632,6 +1696,30 @@ try {
     local_fixture_authentication_validated: antigravityTaskResumeResult.local_fixture_authentication_validated,
     external_network_attempts_blocked: antigravityTaskResumeResult.external_network_attempts_blocked,
     real_model_invocations: antigravityTaskResumeResult.real_model_invocations,
+  };
+  const antigravityAgentTaskResumeWithReceipt = {
+    schema_version: antigravityTaskResumeWithReceiptResult.schema_version,
+    status: antigravityTaskResumeWithReceiptResult.status,
+    host_cli_version: antigravityVersion,
+    provider: antigravityTaskResumeWithReceiptResult.provider,
+    tool: antigravityTaskResumeWithReceiptResult.tool,
+    tool_call_count: antigravityTaskResumeWithReceiptResult.tool_call_count,
+    tool_result_observed: antigravityTaskResumeWithReceiptResult.tool_result_observed,
+    task_context_content_retained_in_report: false,
+    advisory_result_markers_verified: antigravityTaskResumeWithReceiptResult.advisory_result_markers_verified,
+    requirements_not_finalized_warning_verified: antigravityTaskResumeWithReceiptResult.requirements_not_finalized_warning_verified,
+    action_ready: antigravityTaskResumeWithReceiptResult.action_ready,
+    guidance_only: antigravityTaskResumeWithReceiptResult.guidance_only,
+    execution_authorized: antigravityTaskResumeWithReceiptResult.execution_authorized,
+    receipt_v4_contract_verified: antigravityTaskResumeWithReceiptResult.receipt_v4_contract_verified,
+    receipt_task_revision_binding_verified: antigravityTaskResumeWithReceiptResult.receipt_task_revision_binding_verified,
+    receipt_persisted_locally: antigravityTaskResumeWithReceiptResult.receipt_persisted_locally,
+    receipt_list_content_free: antigravityTaskResumeWithReceiptResult.receipt_list_content_free,
+    provider_requests: antigravityTaskResumeWithReceiptResult.provider_requests,
+    auxiliary_provider_requests: antigravityTaskResumeWithReceiptResult.auxiliary_provider_requests,
+    local_fixture_authentication_validated: antigravityTaskResumeWithReceiptResult.local_fixture_authentication_validated,
+    external_network_attempts_blocked: antigravityTaskResumeWithReceiptResult.external_network_attempts_blocked,
+    real_model_invocations: antigravityTaskResumeWithReceiptResult.real_model_invocations,
   };
 
   let commandCodeSkillDiscovered;
@@ -1874,7 +1962,7 @@ try {
   }
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v44',
+    schema_version: 'threadforge.installed-skill-smoke.v45',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,
@@ -1928,6 +2016,7 @@ try {
       cli_list_detected_project_server: antigravityMcpListed,
       agent_run: antigravityAgentMcpRead,
       task_resume: antigravityAgentTaskResume,
+      task_resume_with_receipt: antigravityAgentTaskResumeWithReceipt,
       plan_gate: antigravityPlanGateSmoke,
       real_model_invocations: 0,
     },

@@ -107,6 +107,28 @@ export async function installProjectSkill(options: ProjectSkillOptions): Promise
   }
 }
 
+/** Verify an exact installed export and its host-specific ownership marker without changing it. */
+export async function verifyInstalledProjectSkill(options: ProjectSkillOptions): Promise<ProjectSkillResult> {
+  const host = validateHost(options.host);
+  const { root, skill } = await resolvePortableSkill(options);
+  const skillSegments = skillsDirectorySegments(host);
+  const skillsRoot = await existingDirectories(root, skillSegments);
+  if (!skillsRoot) throw new Error('the digest-verified project skill must be installed before enabling Aider auto-read');
+  const skillDirectory = path.join(skillsRoot, skill.name);
+  const directoryInfo = await lstat(skillDirectory).catch((error: unknown) => isCode(error, 'ENOENT') ? null : Promise.reject(error));
+  if (!directoryInfo?.isDirectory() || directoryInfo.isSymbolicLink()) {
+    throw new Error('the installed project skill directory is missing or unsafe');
+  }
+  const target = path.join(skillDirectory, 'SKILL.md');
+  const markerPath = path.join(skillDirectory, '.threadforge-owner.json');
+  const existing = await readOptionalRegularFile(target, maxSkillBytes);
+  const marker = await readOwnershipMarker(markerPath);
+  if (!existing || !marker) throw new Error('the exact Threadforge-owned project skill is not installed');
+  assertOwned(marker, skill, target, root, host);
+  if (!existing.equals(skill.bytes)) throw new Error('the installed project skill differs from the digest-verified export');
+  return result('unchanged', skill, target, root, host);
+}
+
 /** Remove only the exact exported bytes named by the user's expected digest. */
 export async function uninstallClineProjectSkill(options: {
   projectRoot: string;

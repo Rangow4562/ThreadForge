@@ -17,6 +17,8 @@ adapters/dist/
 
 # Local data and credentials
 .threadforge/local/
+.threadforge/aider-auto-read/
+.threadforge-aider-auto-read.lock
 .env
 .env.*
 !.env.example

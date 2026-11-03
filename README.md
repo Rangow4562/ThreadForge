@@ -92,7 +92,7 @@ Threadforge integrates with over 20 AI coding agent harnesses and runtimes, prov
 
 | Harness / Runtime | Integration Type | Approved Memory Retrieval | Task Continuity / Plan Guard | Local History Poller | Status & Documentation |
 | :--- | :--- | :---: | :---: | :---: | :--- |
-| **Aider** | Portable approved procedure file | Explicit read-only `--read` argument | None | None | Manual retrieval path ([`docs/aider.md`](docs/aider.md)) |
+| **Aider** | Portable approved procedure file | Explicit `--read` or separately opted-in project config | None | None | Fixture-tested config lifecycle; live loading unverified ([`docs/aider.md`](docs/aider.md)) |
 | **Claude Code** | Native Hooks + MCP | `UserPromptSubmit` (local) | Deny-only `PreToolUse` file guard | JSONL Transcript Poller | Verified Local Smoke ([`docs/claude-history.md`](docs/claude-history.md)) |
 | **Codex CLI** | Hooks + OTLP + MCP | `UserPromptSubmit` (local) | Advisory continuity context | Native Session Reader | Verified Loopback OTLP ([`docs/codex-cli-telemetry.md`](docs/codex-cli-telemetry.md)) |
 | **Cursor** | Extension + MCP | `sessionStart` Bootstrap | Deny-only `Write` plan gate | Composer DB & Transcripts | Verified Composer Sync ([`docs/cursor-history.md`](docs/cursor-history.md)) |

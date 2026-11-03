@@ -132,6 +132,31 @@ def test_project_skill_result_schema_accepts_windsurf_and_rejects_unknown_hosts_
         validator.validate({**result, "private_prompt": "not part of this result contract"})
 
 
+def test_aider_auto_read_result_is_project_scoped_guidance_and_never_authorizes_execution():
+    schema = json.loads((SCHEMA_DIRECTORY / "aider-auto-read-result-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.aider-auto-read.v1",
+        "action": "installed",
+        "config_path": ".aider.conf.yml",
+        "skill_path": ".agents/skills/threadforge-approved-procedure-a1b2c3d4-r2/SKILL.md",
+        "skill_sha256": "a" * 64,
+        "automatic_read_enabled": True,
+        "managed": True,
+        "guidance_only": True,
+        "execution_authorized": False,
+    }
+    validator.validate(result)
+    for invalid in (
+        {**result, "execution_authorized": True},
+        {**result, "skill_path": "../outside/SKILL.md"},
+        {**result, "config_path": "C:/Users/private/.aider.conf.yml"},
+        {**result, "absolute_project_root": "C:/Users/private/project"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_qoder_project_command_result_schema_is_bounded_and_content_free():
     schema = json.loads((SCHEMA_DIRECTORY / "qoder-project-command-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

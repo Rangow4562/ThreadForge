@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/aider-auto-read-result-v1.schema.json",
+  "title": "Threadforge Aider project auto-read result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "action", "config_path", "skill_path", "skill_sha256",
+    "automatic_read_enabled", "managed", "guidance_only", "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.aider-auto-read.v1" },
+    "action": { "enum": ["installed", "unchanged", "already_configured", "removed", "absent"] },
+    "config_path": { "const": ".aider.conf.yml" },
+    "skill_path": {
+      "type": "string",
+      "pattern": "^\\.agents/skills/[a-z0-9]+(?:-[a-z0-9]+)*/SKILL\\.md$",
+      "maxLength": 256
+    },
+    "skill_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "automatic_read_enabled": { "type": "boolean" },
+    "managed": { "type": "boolean" },
+    "guidance_only": { "const": true },
+    "execution_authorized": { "const": false }
+  }
+}

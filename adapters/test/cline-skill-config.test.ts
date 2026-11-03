@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Writable } from 'node:stream';
 import { test } from 'node:test';
+import { parseDocument } from 'yaml';
 import { runAdapterCLI } from '../src/cli.ts';
 import { installClaudeCodeProjectSkill, uninstallClaudeCodeProjectSkill } from '../src/claude-skill-config.ts';
 import { installCommandCodeProjectSkill, uninstallCommandCodeProjectSkill } from '../src/command-code-skill-config.ts';
@@ -719,6 +720,150 @@ test('Aider installs a digest-checked read-only skill and prints an explicit loa
     assert.equal(removed.result.host, 'aider');
     assert.equal(removed.result.action, 'removed');
     assert.equal(readFileSync(configPath, 'utf8'), config);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('Aider auto-read is an explicit managed project opt-in that preserves other YAML settings', async () => {
+  const f = fixture();
+  const configPath = path.join(f.root, '.aider.conf.yml');
+  const config = '# user comment\r\nmodel: user-selected-model\r\nread:\r\n  # preserve this user list comment\r\n  - USER_CONVENTIONS.md\r\nweak-model: fallback-model\r\n';
+  writeFileSync(configPath, config);
+  const stderr = writableText();
+  const manualOut = writableText();
+  const base = ['--project-root', f.root, '--skill-file', f.file, '--sha256', f.sha256];
+  try {
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'install', ...base], manualOut.stream, stderr.stream), 0, stderr.text());
+    const skillPath = (JSON.parse(manualOut.text()) as { result: { path: string } }).result.path;
+    const installOut = writableText();
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'auto-read', 'install', ...base], installOut.stream, stderr.stream), 0, stderr.text());
+    const installed = JSON.parse(installOut.text()) as {
+      result: { schema_version: string; action: string; skill_path: string; automatic_read_enabled: boolean; managed: boolean; execution_authorized: boolean };
+    };
+    assert.equal(installed.result.schema_version, 'threadforge.aider-auto-read.v1');
+    assert.equal(installed.result.action, 'installed');
+    assert.equal(installed.result.skill_path, skillPath);
+    assert.equal(installed.result.automatic_read_enabled, true);
+    assert.equal(installed.result.managed, true);
+    assert.equal(installed.result.execution_authorized, false);
+
+    const edited = readFileSync(configPath, 'utf8');
+    const parsed = parseDocument(edited);
+    assert.deepEqual(parsed.toJS(), {
+      model: 'user-selected-model',
+      read: ['USER_CONVENTIONS.md', skillPath],
+      'weak-model': 'fallback-model',
+    });
+    assert.ok(edited.includes('# user comment'));
+    assert.ok(edited.includes('# preserve this user list comment'));
+    assert.ok(edited.includes('\r\n'));
+    assert.equal(edited.includes(f.sha256), false);
+    const skillName = skillPath.split('/')[2]!;
+    const ownerPath = path.join(f.root, '.threadforge', 'aider-auto-read', `${skillName}.json`);
+    const owner = JSON.parse(readFileSync(ownerPath, 'utf8')) as { schema_version: string; skill_path: string; skill_sha256: string; host: string };
+    assert.equal(owner.schema_version, 'threadforge.aider-auto-read-owner.v1');
+    assert.equal(owner.host, 'aider');
+    assert.equal(owner.skill_path, skillPath);
+    assert.equal(owner.skill_sha256, f.sha256);
+
+    const repeatOut = writableText();
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'auto-read', 'install', ...base], repeatOut.stream, stderr.stream), 0, stderr.text());
+    assert.equal((JSON.parse(repeatOut.text()) as { result: { action: string } }).result.action, 'unchanged');
+    assert.equal((parseDocument(readFileSync(configPath, 'utf8')).toJS() as { read: string[] }).read.filter((item) => item === skillPath).length, 1);
+
+    const removeOut = writableText();
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'auto-read', 'uninstall', ...base], removeOut.stream, stderr.stream), 0, stderr.text());
+    assert.equal((JSON.parse(removeOut.text()) as { result: { action: string; automatic_read_enabled: boolean } }).result.action, 'removed');
+    assert.deepEqual(parseDocument(readFileSync(configPath, 'utf8')).toJS(), {
+      model: 'user-selected-model', read: ['USER_CONVENTIONS.md'], 'weak-model': 'fallback-model',
+    });
+    assert.equal(readFileSync(configPath, 'utf8').includes(f.sha256), false);
+    assert.equal(existsSync(ownerPath), false);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('Aider auto-read creates a project config only after opt-in and uninstalls its owned entry', async () => {
+  const f = fixture();
+  const configPath = path.join(f.root, '.aider.conf.yml');
+  const stderr = writableText();
+  const manualOut = writableText();
+  const base = ['--project-root', f.root, '--skill-file', f.file, '--sha256', f.sha256];
+  try {
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'install', ...base], manualOut.stream, stderr.stream), 0, stderr.text());
+    assert.equal(existsSync(configPath), false);
+    const skillPath = (JSON.parse(manualOut.text()) as { result: { path: string } }).result.path;
+    const installOut = writableText();
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'auto-read', 'install', ...base], installOut.stream, stderr.stream), 0, stderr.text());
+    assert.deepEqual(parseDocument(readFileSync(configPath, 'utf8')).toJS(), { read: [skillPath] });
+    const skillRemoveOut = writableText();
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'uninstall', ...base], skillRemoveOut.stream, stderr.stream), 0, stderr.text());
+    assert.equal(existsSync(configPath), false);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('Aider auto-read preserves user-owned entries and does not remove a changed path on uninstall', async () => {
+  const f = fixture();
+  const configPath = path.join(f.root, '.aider.conf.yml');
+  const stderr = writableText();
+  const manualOut = writableText();
+  const base = ['--project-root', f.root, '--skill-file', f.file, '--sha256', f.sha256];
+  try {
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'install', ...base], manualOut.stream, stderr.stream), 0, stderr.text());
+    const skillPath = (JSON.parse(manualOut.text()) as { result: { path: string } }).result.path;
+    const original = `read:\n  - "${skillPath}"\nmodel: user's setting\n`;
+    writeFileSync(configPath, original);
+    const installOut = writableText();
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'auto-read', 'install', ...base], installOut.stream, stderr.stream), 0, stderr.text());
+    assert.equal((JSON.parse(installOut.text()) as { result: { action: string; managed: boolean } }).result.action, 'already_configured');
+    assert.equal((JSON.parse(installOut.text()) as { result: { managed: boolean } }).result.managed, false);
+    const removeUserOut = writableText();
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'auto-read', 'uninstall', ...base], removeUserOut.stream, stderr.stream), 0, stderr.text());
+    assert.equal(readFileSync(configPath, 'utf8'), original);
+
+    writeFileSync(configPath, 'read:\n  - USER_CONVENTIONS.md\nmodel: user-selected-model\n');
+    const ownedOut = writableText();
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'auto-read', 'install', ...base], ownedOut.stream, stderr.stream), 0, stderr.text());
+    const managedConfig = readFileSync(configPath, 'utf8');
+    writeFileSync(configPath, managedConfig.replace(skillPath, '.agents/skills/user-edited/SKILL.md'));
+    const changedConfig = readFileSync(configPath, 'utf8');
+    const removeOut = writableText();
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'auto-read', 'uninstall', ...base], removeOut.stream, stderr.stream), 0, stderr.text());
+    assert.equal((JSON.parse(removeOut.text()) as { result: { action: string } }).result.action, 'absent');
+    assert.equal(readFileSync(configPath, 'utf8'), changedConfig);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('Aider auto-read refuses ambiguous YAML, unsupported read shapes, and concurrent config locks without mutation', async () => {
+  const f = fixture();
+  const configPath = path.join(f.root, '.aider.conf.yml');
+  const lockPath = path.join(f.root, '.threadforge-aider-auto-read.lock');
+  const stderr = writableText();
+  const manualOut = writableText();
+  const base = ['--project-root', f.root, '--skill-file', f.file, '--sha256', f.sha256];
+  try {
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'install', ...base], manualOut.stream, stderr.stream), 0, stderr.text());
+    for (const invalidConfig of [
+      'model: one\nmodel: two\n',
+      'read: USER_CONVENTIONS.md\n',
+      '- this is not a project config mapping\n',
+    ]) {
+      writeFileSync(configPath, invalidConfig);
+      const output = writableText();
+      assert.equal(await runAdapterCLI(['aider', 'skills', 'auto-read', 'install', ...base], output.stream, stderr.stream), 1);
+      assert.equal(readFileSync(configPath, 'utf8'), invalidConfig);
+    }
+    rmSync(configPath);
+    writeFileSync(lockPath, 'held by a concurrent installer\n');
+    const lockedOut = writableText();
+    assert.equal(await runAdapterCLI(['aider', 'skills', 'auto-read', 'install', ...base], lockedOut.stream, stderr.stream), 1);
+    assert.equal(existsSync(configPath), false);
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

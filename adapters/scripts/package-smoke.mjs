@@ -31,6 +31,12 @@ const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'),
 const files = packed[0].files;
 assert.ok(Array.isArray(files), 'npm did not return package file inventory');
 const paths = new Set(files.map((file) => file.path));
+const bundledDependencies = new Set(manifest.bundleDependencies ?? []);
+for (const dependency of bundledDependencies) {
+  assert.ok(manifest.dependencies?.[dependency], `bundled dependency is not declared as a runtime dependency: ${dependency}`);
+  assert.ok(paths.has(`node_modules/${dependency}/package.json`), `bundled dependency manifest is missing: ${dependency}`);
+  assert.ok(paths.has(`node_modules/${dependency}/LICENSE`), `bundled dependency license is missing: ${dependency}`);
+}
 for (const target of Object.values(manifest.exports)) {
   const packagePath = target.replace(/^\.\//, '');
   assert.ok(paths.has(packagePath), `package export target is missing: ${target}`);
@@ -39,10 +45,12 @@ for (const target of Object.values(manifest.exports)) {
   }
 }
 for (const filePath of paths) {
-  assert.equal(/(^|\/)(node_modules|browser-extension|test|scripts)(\/|$)/.test(filePath), false,
+  const isBundledDependency = [...bundledDependencies].some((dependency) => filePath.startsWith(`node_modules/${dependency}/`));
+  assert.equal(/(^|\/)(browser-extension|test|scripts)(\/|$)/.test(filePath) ||
+      (/(^|\/)node_modules(\/|$)/.test(filePath) && !isBundledDependency), false,
     `development or build output leaked into adapter package: ${filePath}`);
 }
-assert.ok(files.length <= 300, `adapter package unexpectedly contains ${files.length} files`);
+assert.ok(files.length <= 600, `adapter package unexpectedly contains ${files.length} files`);
 
 assert.deepEqual(manifest.bin, { 'threadforge-adapter': './dist/bin.js' },
   'the portable adapter command must have one explicit package entry point');

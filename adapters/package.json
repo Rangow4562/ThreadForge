@@ -132,5 +132,8 @@
   },
   "dependencies": {
     "yaml": "2.9.1"
-  }
+  },
+  "bundleDependencies": [
+    "yaml"
+  ]
 }

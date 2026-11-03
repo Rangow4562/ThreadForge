@@ -38,7 +38,7 @@ export async function runClineSkillHostSmoke(cliPath, expectedVersion, { runComm
   try {
     await Promise.all([
       mkdir(homeDirectory), mkdir(configDirectory), mkdir(dataDirectory), mkdir(appDataDirectory),
-      mkdir(localAppDataDirectory), mkdir(projectDirectory), mkdir(path.dirname(exportPath), { recursive: true }),
+      mkdir(localAppDataDirectory), mkdir(path.dirname(exportPath), { recursive: true }),
       mkdir(path.dirname(memoryExportPath), { recursive: true }),
     ]);
     const source = [

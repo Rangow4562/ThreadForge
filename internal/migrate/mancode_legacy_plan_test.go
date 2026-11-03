@@ -151,6 +151,113 @@ func TestMancodeLegacyPlanSemanticCandidatesUseFixedCategoriesAndSectionBoundari
 	}
 }
 
+func TestMancodeLegacyPlanScopeCandidatesAreBoundedReviewOnlyEvidence(t *testing.T) {
+	content := "<!-- mancode:plan-baseline:start -->\n" +
+		"## Implementation Scope\n" +
+		"### Include\n- src/**\n- src/**\n- ../outside/**\n- /absolute/**\n- C:\\private\\**\n" +
+		"```yaml\n- fenced/**\n```\n" +
+		"### Exclude\n- dist/**\n" +
+		"### Modules\n- auth\n- auth\n" +
+		"<!-- mancode:plan-baseline:end -->\n<!-- mancode:delivery-record:start -->\n<!-- mancode:delivery-record:end -->\n"
+	got := extractMancodeLegacyPlanCandidates(content).Scope
+	if got.Status != "candidate_values_found" || got.Truncated || got.OmittedValues != 3 || len(got.Entries) != 5 {
+		t.Fatalf("scope candidates=%+v", got)
+	}
+	wantFields := []string{"include", "include", "exclude", "modules", "modules"}
+	wantValues := []string{"src/**", "src/**", "dist/**", "auth", "auth"}
+	for index, entry := range got.Entries {
+		if entry.Field != wantFields[index] || entry.CandidateText != wantValues[index] ||
+			entry.CandidateTextBytes != len(wantValues[index]) || entry.CandidateTextTruncated ||
+			entry.CandidateTextSHA256 != digest([]byte(wantValues[index])) || entry.SourceLine < 1 {
+			t.Errorf("scope entry[%d]=%+v", index, entry)
+		}
+	}
+	if got.Entries[0].SourceLine == got.Entries[1].SourceLine {
+		t.Fatal("duplicate scope values lost their distinct source lines")
+	}
+
+	credential := extractMancodeLegacyPlanCandidates("<!-- mancode:plan-baseline:start -->\n## Implementation Scope\n### Modules\n- api_key=scope-secret-value\n" +
+		"<!-- mancode:plan-baseline:end -->\n<!-- mancode:delivery-record:start -->\n<!-- mancode:delivery-record:end -->\n").Scope
+	if credential.Status != "fields_without_values" || credential.OmittedValues != 1 || len(credential.Entries) != 0 {
+		t.Fatalf("credential-like scope value was retained: %+v", credential)
+	}
+
+	projection, handled, err := normalizeMancodeItems("", filepath.ToSlash(filepath.Join(
+		".mancode", "workflows", "20261023-scope-review", "plan.md",
+	)), map[string]any{"content": content})
+	if err != nil || !handled || len(projection) != 1 {
+		t.Fatalf("plan normalization failed: records=%#v handled=%v err=%v", projection, handled, err)
+	}
+	var record mancodeLegacyPlanProjection
+	if err := json.Unmarshal(projection[0].Payload, &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.ExecutionAuthorized || record.AutomaticInjectionEligible || !record.HumanReviewRequired ||
+		record.Authority != "local_pending_review" || record.SemanticCandidates.Scope.Status != "candidate_values_found" {
+		t.Fatalf("scope candidates changed plan authority: %+v", record)
+	}
+}
+
+func TestMancodeLegacyPlanScopeCandidateStatusesAndBounds(t *testing.T) {
+	wrap := func(scope string) string {
+		return "<!-- mancode:plan-baseline:start -->\n## Implementation Scope\n" + scope +
+			"\n<!-- mancode:plan-baseline:end -->\n<!-- mancode:delivery-record:start -->\n<!-- mancode:delivery-record:end -->\n"
+	}
+
+	for name, testCase := range map[string]struct {
+		content string
+		status  string
+	}{
+		"no explicit fields":    {content: "Keep the existing behavior.\n", status: "no_explicit_scope_fields"},
+		"fields without values": {content: "include:\n### Modules\n", status: "fields_without_values"},
+	} {
+		got := extractMancodeLegacyPlanCandidates(wrap(testCase.content)).Scope
+		if got.Status != testCase.status || len(got.Entries) != 0 || got.Truncated {
+			t.Errorf("%s: scope candidates=%+v", name, got)
+		}
+	}
+
+	longValue := strings.Repeat("m", maxMancodePlanScopeValueBytes+1)
+	got := extractMancodeLegacyPlanCandidates(wrap("### Modules\n- " + longValue + "\n")).Scope
+	if got.Status != "candidate_values_found" || !got.Truncated || len(got.Entries) != 1 ||
+		len(got.Entries[0].CandidateText) != maxMancodePlanScopeValueBytes ||
+		got.Entries[0].CandidateTextBytes != len(longValue) || !got.Entries[0].CandidateTextTruncated ||
+		got.Entries[0].CandidateTextSHA256 != digest([]byte(longValue)) {
+		t.Fatalf("oversized scope candidate was not disclosed and bounded: %+v", got)
+	}
+
+	var largeValues strings.Builder
+	largeValues.WriteString("### Modules\n")
+	for index := 0; index < maxMancodePlanScopeBytes/maxMancodePlanScopeValueBytes+1; index++ {
+		largeValues.WriteString("- ")
+		largeValues.WriteString(strings.Repeat("v", maxMancodePlanScopeValueBytes))
+		largeValues.WriteByte('\n')
+	}
+	got = extractMancodeLegacyPlanCandidates(wrap(largeValues.String())).Scope
+	if !got.Truncated || len(got.Entries) != maxMancodePlanScopeBytes/maxMancodePlanScopeValueBytes ||
+		got.OmittedValues != 1 {
+		t.Fatalf("aggregate scope text limit was not enforced: entries=%d omitted=%d truncated=%v", len(got.Entries), got.OmittedValues, got.Truncated)
+	}
+
+	var many strings.Builder
+	many.WriteString("### Modules\n")
+	for index := 0; index < maxMancodePlanScopeEntries+1; index++ {
+		many.WriteString("- module-")
+		many.WriteString(strings.Repeat("x", index%3+1))
+		many.WriteByte('\n')
+	}
+	got = extractMancodeLegacyPlanCandidates(wrap(many.String())).Scope
+	if !got.Truncated || len(got.Entries) != maxMancodePlanScopeEntries || got.OmittedValues != 1 {
+		t.Fatalf("scope entry count was not bounded: entries=%d omitted=%d truncated=%v", len(got.Entries), got.OmittedValues, got.Truncated)
+	}
+
+	malformed := "<!-- mancode:plan-baseline:start -->\n## Implementation Scope\n### Include\n- src/**\n"
+	got = extractMancodeLegacyPlanCandidates(malformed).Scope
+	if got.Status != "not_extracted" || len(got.Entries) != 0 {
+		t.Fatalf("malformed baseline produced scope candidates: %+v", got)
+	}
+}
+
 func TestMancodeLegacyPlanStructureIgnoresFencedMarkersAndFlagsMalformedBlocks(t *testing.T) {
 	codeOnly := "```markdown\nREADY_FOR_PLAN\n" +
 		"<!-- mancode:plan-baseline:start -->\n## Domain Matrix\nAC-1\n" +

@@ -1210,6 +1210,46 @@ def test_mancode_legacy_plan_schema_keeps_markdown_untrusted_and_out_of_injectio
         with pytest.raises(ValidationError):
             validator_v3.validate(invalid)
 
+    schema_v4 = json.loads((SCHEMA_DIRECTORY / "mancode-legacy-workflow-plan-v4.schema.json").read_text(encoding="utf-8"))
+    validator_v4 = validator_for(schema_v4)(schema_v4)
+    scope_candidate = {
+        **structured,
+        "schema_version": "threadforge.mancode-legacy-workflow-plan.v4",
+        "semantic_candidates": {
+            **candidate["semantic_candidates"],
+            "scope_candidates": {
+                "status": "candidate_values_found",
+                "truncated": False,
+                "omitted_values": 0,
+                "entries": [{
+                    "field": "include",
+                    "source_line": 5,
+                    "candidate_text": "src/**",
+                    "candidate_text_bytes": 6,
+                    "candidate_text_sha256": "c" * 64,
+                    "candidate_text_truncated": False,
+                }],
+            },
+        },
+    }
+    validator_v4.validate(scope_candidate)
+    for invalid in (
+        {**scope_candidate, "execution_authorized": True},
+        {**scope_candidate, "automatic_injection_eligible": True},
+        {**scope_candidate, "semantic_candidates": {
+            **scope_candidate["semantic_candidates"],
+            "scope_candidates": {**scope_candidate["semantic_candidates"]["scope_candidates"], "authority": "approved"},
+        }},
+        {**scope_candidate, "semantic_candidates": {
+            **scope_candidate["semantic_candidates"],
+            "scope_candidates": {**scope_candidate["semantic_candidates"]["scope_candidates"], "entries": [{
+                **scope_candidate["semantic_candidates"]["scope_candidates"]["entries"][0], "field": "execution_scope",
+            }]},
+        }},
+    ):
+        with pytest.raises(ValidationError):
+            validator_v4.validate(invalid)
+
 
 def test_procedure_list_schema_is_versioned_metadata_only():
     schema = json.loads((SCHEMA_DIRECTORY / "procedure-list-v1.schema.json").read_text(encoding="utf-8"))

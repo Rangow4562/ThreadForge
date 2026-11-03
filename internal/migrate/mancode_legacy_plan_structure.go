@@ -4,17 +4,22 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/threadforge-ai/threadforge/pkg/privacy"
 )
 
 const (
-	mancodePlanBaselineStart     = "<!-- mancode:plan-baseline:start -->"
-	mancodePlanBaselineEnd       = "<!-- mancode:plan-baseline:end -->"
-	mancodePlanDeliveryStart     = "<!-- mancode:delivery-record:start -->"
-	mancodePlanDeliveryEnd       = "<!-- mancode:delivery-record:end -->"
-	maxMancodePlanSections       = 32
-	maxMancodePlanHeadings       = 1024
-	maxMancodePlanSectionBytes   = 8 << 10
-	maxMancodePlanCandidateBytes = 32 << 10
+	mancodePlanBaselineStart      = "<!-- mancode:plan-baseline:start -->"
+	mancodePlanBaselineEnd        = "<!-- mancode:plan-baseline:end -->"
+	mancodePlanDeliveryStart      = "<!-- mancode:delivery-record:start -->"
+	mancodePlanDeliveryEnd        = "<!-- mancode:delivery-record:end -->"
+	maxMancodePlanSections        = 32
+	maxMancodePlanHeadings        = 1024
+	maxMancodePlanSectionBytes    = 8 << 10
+	maxMancodePlanCandidateBytes  = 32 << 10
+	maxMancodePlanScopeEntries    = 128
+	maxMancodePlanScopeValueBytes = 1 << 10
+	maxMancodePlanScopeBytes      = 8 << 10
 )
 
 var (
@@ -57,12 +62,29 @@ type mancodeLegacyPlanCandidates struct {
 	Status            string                              `json:"status"`
 	SectionsTruncated bool                                `json:"sections_truncated"`
 	Sections          []mancodeLegacyPlanSectionCandidate `json:"sections"`
+	Scope             mancodeLegacyPlanScopeCandidates    `json:"scope_candidates"`
 }
 
 type mancodeLegacyPlanSectionCandidate struct {
 	Kind                   string `json:"kind"`
 	SourceStartLine        int    `json:"source_start_line"`
 	SourceEndLine          int    `json:"source_end_line"`
+	CandidateText          string `json:"candidate_text"`
+	CandidateTextBytes     int    `json:"candidate_text_bytes"`
+	CandidateTextSHA256    string `json:"candidate_text_sha256"`
+	CandidateTextTruncated bool   `json:"candidate_text_truncated"`
+}
+
+type mancodeLegacyPlanScopeCandidates struct {
+	Status        string                        `json:"status"`
+	Truncated     bool                          `json:"truncated"`
+	OmittedValues int                           `json:"omitted_values"`
+	Entries       []mancodeLegacyPlanScopeEntry `json:"entries"`
+}
+
+type mancodeLegacyPlanScopeEntry struct {
+	Field                  string `json:"field"`
+	SourceLine             int    `json:"source_line"`
 	CandidateText          string `json:"candidate_text"`
 	CandidateTextBytes     int    `json:"candidate_text_bytes"`
 	CandidateTextSHA256    string `json:"candidate_text_sha256"`
@@ -76,7 +98,10 @@ type mancodePlanHeading struct {
 }
 
 func extractMancodeLegacyPlanCandidates(content string) mancodeLegacyPlanCandidates {
-	result := mancodeLegacyPlanCandidates{Status: "not_extracted", Sections: []mancodeLegacyPlanSectionCandidate{}}
+	result := mancodeLegacyPlanCandidates{
+		Status: "not_extracted", Sections: []mancodeLegacyPlanSectionCandidate{},
+		Scope: mancodeLegacyPlanScopeCandidates{Status: "not_extracted", Entries: []mancodeLegacyPlanScopeEntry{}},
+	}
 	structure := analyzeMancodeLegacyPlanStructure(content)
 	if structure.MarkerStatus != "well_formed" {
 		return result
@@ -124,6 +149,9 @@ func extractMancodeLegacyPlanCandidates(content string) mancodeLegacyPlanCandida
 
 	result.Status = "candidate_sections_found"
 	result.SectionsTruncated = headingsTruncated
+	scopeSectionFound := false
+	scopeFieldsPresent := false
+	scopeCandidateBytes := 0
 	remainingBytes := maxMancodePlanCandidateBytes
 	for index, heading := range headings {
 		if heading.kind == "" {
@@ -143,6 +171,13 @@ func extractMancodeLegacyPlanCandidates(content string) mancodeLegacyPlanCandida
 		sectionText := mancodeLegacyPlanSectionText(lines, heading.line+1, sectionEnd)
 		if sectionText == "" {
 			continue
+		}
+		if heading.kind == "implementation_scope" {
+			scopeSectionFound = true
+			collectMancodePlanScopeCandidates(
+				lines, heading.line+1, sectionEnd, heading.level,
+				&result.Scope, &scopeFieldsPresent, &scopeCandidateBytes,
+			)
 		}
 		candidateText := sectionText
 		textTruncated := false
@@ -171,7 +206,182 @@ func extractMancodeLegacyPlanCandidates(content string) mancodeLegacyPlanCandida
 	if len(result.Sections) == 0 {
 		result.Status = "not_extracted"
 	}
+	if scopeSectionFound {
+		switch {
+		case len(result.Scope.Entries) > 0:
+			result.Scope.Status = "candidate_values_found"
+		case scopeFieldsPresent:
+			result.Scope.Status = "fields_without_values"
+		default:
+			result.Scope.Status = "no_explicit_scope_fields"
+		}
+	}
 	return result
+}
+
+func collectMancodePlanScopeCandidates(
+	lines []string,
+	start int,
+	end int,
+	parentHeadingLevel int,
+	result *mancodeLegacyPlanScopeCandidates,
+	fieldsPresent *bool,
+	totalCandidateBytes *int,
+) {
+	activeField := ""
+	fenceChar := byte(0)
+	fenceLength := 0
+	for lineNumber := start; lineNumber < end; lineNumber++ {
+		line := strings.TrimPrefix(lines[lineNumber], "\ufeff")
+		if fenceChar != 0 {
+			if isMancodeFenceClose(line, fenceChar, fenceLength) {
+				fenceChar = 0
+				fenceLength = 0
+			}
+			continue
+		}
+		if char, length, ok := mancodeFenceOpening(line); ok {
+			fenceChar = char
+			fenceLength = length
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "<!-- mancode:") {
+			continue
+		}
+		if level, headingText, ok := mancodeMarkdownHeading(line); ok {
+			if level <= parentHeadingLevel {
+				break
+			}
+			if field := mancodePlanScopeField(headingText); field != "" {
+				*fieldsPresent = true
+				activeField = field
+			} else {
+				activeField = ""
+			}
+			continue
+		}
+
+		listText, isListItem := mancodePlanListItem(line)
+		assignmentText := strings.TrimSpace(line)
+		if isListItem {
+			assignmentText = listText
+		}
+		field, value, isField := mancodePlanScopeAssignment(assignmentText)
+		if isField {
+			*fieldsPresent = true
+			if value != "" {
+				activeField = ""
+				appendMancodePlanScopeCandidate(result, totalCandidateBytes, field, lineNumber+1, value)
+			} else {
+				activeField = field
+			}
+			continue
+		}
+		if activeField != "" {
+			if isListItem {
+				appendMancodePlanScopeCandidate(result, totalCandidateBytes, activeField, lineNumber+1, listText)
+			} else {
+				activeField = ""
+			}
+		}
+	}
+}
+
+func appendMancodePlanScopeCandidate(
+	result *mancodeLegacyPlanScopeCandidates,
+	totalCandidateBytes *int,
+	field string,
+	sourceLine int,
+	value string,
+) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	if privacy.ContainsCredentialText(value) ||
+		((field == "include" || field == "exclude") && !mancodePlanRelativeScopeCandidate(value)) {
+		incrementMancodePlanScopeOmitted(result)
+		return
+	}
+	if len(result.Entries) >= maxMancodePlanScopeEntries || *totalCandidateBytes >= maxMancodePlanScopeBytes {
+		result.Truncated = true
+		incrementMancodePlanScopeOmitted(result)
+		return
+	}
+	maximum := maxMancodePlanScopeValueBytes
+	if remaining := maxMancodePlanScopeBytes - *totalCandidateBytes; maximum > remaining {
+		maximum = remaining
+	}
+	candidateText := truncateMancodePlanText(value, maximum)
+	if candidateText == "" {
+		result.Truncated = true
+		incrementMancodePlanScopeOmitted(result)
+		return
+	}
+	textTruncated := len(candidateText) < len(value)
+	result.Entries = append(result.Entries, mancodeLegacyPlanScopeEntry{
+		Field: field, SourceLine: sourceLine, CandidateText: candidateText,
+		CandidateTextBytes: len(value), CandidateTextSHA256: digest([]byte(value)),
+		CandidateTextTruncated: textTruncated,
+	})
+	*totalCandidateBytes += len(candidateText)
+	if textTruncated {
+		result.Truncated = true
+	}
+}
+
+func incrementMancodePlanScopeOmitted(result *mancodeLegacyPlanScopeCandidates) {
+	if result.OmittedValues < 1<<20 {
+		result.OmittedValues++
+	}
+}
+
+func mancodePlanScopeAssignment(line string) (field string, value string, ok bool) {
+	separator := strings.IndexByte(line, ':')
+	if separator < 1 {
+		return "", "", false
+	}
+	field = mancodePlanScopeField(line[:separator])
+	if field == "" {
+		return "", "", false
+	}
+	return field, strings.Trim(strings.TrimSpace(line[separator+1:]), "`\"' "), true
+}
+
+func mancodePlanScopeField(value string) string {
+	switch strings.ToLower(strings.Trim(value, "*_` ")) {
+	case "include":
+		return "include"
+	case "exclude":
+		return "exclude"
+	case "modules":
+		return "modules"
+	default:
+		return ""
+	}
+}
+
+func mancodePlanListItem(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) < 2 || !strings.ContainsRune("-*+", rune(trimmed[0])) || trimmed[1] != ' ' {
+		return "", false
+	}
+	return strings.TrimSpace(trimmed[2:]), true
+}
+
+func mancodePlanRelativeScopeCandidate(value string) bool {
+	if value == "" || strings.HasPrefix(value, "/") || strings.HasPrefix(value, "\\") ||
+		strings.HasPrefix(value, "~") || strings.Contains(value, "\\") || strings.Contains(value, "://") ||
+		(len(value) >= 2 && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) && value[1] == ':') {
+		return false
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func uniquePlanBaseline(lines []string) (int, int, bool) {
@@ -205,6 +415,14 @@ func uniquePlanBaseline(lines []string) (int, int, bool) {
 }
 
 func mancodePlanSemanticHeading(line string) (int, string, bool) {
+	level, text, ok := mancodeMarkdownHeading(line)
+	if !ok {
+		return 0, "", false
+	}
+	return level, mancodePlanSemanticHeadingKinds[text], true
+}
+
+func mancodeMarkdownHeading(line string) (int, string, bool) {
 	trimmed := strings.TrimSpace(line)
 	level := 0
 	for level < len(trimmed) && trimmed[level] == '#' && level < 6 {
@@ -216,7 +434,7 @@ func mancodePlanSemanticHeading(line string) (int, string, bool) {
 	text := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(trimmed[level:])), " "))
 	text = strings.TrimSpace(strings.TrimRight(text, "# "))
 	text = strings.TrimSuffix(text, ":")
-	return level, mancodePlanSemanticHeadingKinds[text], true
+	return level, text, true
 }
 
 func mancodeLegacyPlanSectionText(lines []string, start, end int) string {

@@ -1179,6 +1179,37 @@ def test_mancode_legacy_plan_schema_keeps_markdown_untrusted_and_out_of_injectio
         with pytest.raises(ValidationError):
             validator_v2.validate(invalid)
 
+    schema_v3 = json.loads((SCHEMA_DIRECTORY / "mancode-legacy-workflow-plan-v3.schema.json").read_text(encoding="utf-8"))
+    validator_v3 = validator_for(schema_v3)(schema_v3)
+    candidate = {
+        **structured,
+        "schema_version": "threadforge.mancode-legacy-workflow-plan.v3",
+        "semantic_candidates": {
+            "status": "candidate_sections_found",
+            "sections_truncated": False,
+            "sections": [{
+                "kind": "implementation_scope",
+                "source_start_line": 4,
+                "source_end_line": 6,
+                "candidate_text": "- include: src/**\n- exclude: credentials/**",
+                "candidate_text_bytes": len("- include: src/**\n- exclude: credentials/**"),
+                "candidate_text_sha256": "b" * 64,
+                "candidate_text_truncated": False,
+            }],
+        },
+    }
+    validator_v3.validate(candidate)
+    for invalid in (
+        {**candidate, "execution_authorized": True},
+        {**candidate, "automatic_injection_eligible": True},
+        {**candidate, "semantic_candidates": {**candidate["semantic_candidates"], "sections": [{
+            **candidate["semantic_candidates"]["sections"][0], "kind": "execution_authorization",
+        }]}},
+        {**candidate, "semantic_candidates": {**candidate["semantic_candidates"], "untrusted": False}},
+    ):
+        with pytest.raises(ValidationError):
+            validator_v3.validate(invalid)
+
 
 def test_procedure_list_schema_is_versioned_metadata_only():
     schema = json.loads((SCHEMA_DIRECTORY / "procedure-list-v1.schema.json").read_text(encoding="utf-8"))

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestMancodeLegacyWorkflowPlanRetainsTextOnlyAsUntrustedPendingReview(t *testing.T) {
@@ -65,6 +66,88 @@ func TestMancodeLegacyWorkflowPlanRetainsTextOnlyAsUntrustedPendingReview(t *tes
 	}
 	if projection.Structure != wantStructure {
 		t.Fatalf("structure=%+v want=%+v", projection.Structure, wantStructure)
+	}
+	if projection.SemanticCandidates.Status != "candidate_sections_found" || projection.SemanticCandidates.SectionsTruncated ||
+		len(projection.SemanticCandidates.Sections) != 1 {
+		t.Fatalf("semantic candidates=%+v", projection.SemanticCandidates)
+	}
+	candidate := projection.SemanticCandidates.Sections[0]
+	if candidate.Kind != "domain_matrix" || candidate.SourceStartLine < 1 || candidate.SourceEndLine < candidate.SourceStartLine ||
+		candidate.CandidateTextBytes != len(candidate.CandidateText) || candidate.CandidateTextTruncated ||
+		candidate.CandidateTextSHA256 != digest([]byte(candidate.CandidateText)) ||
+		!strings.Contains(candidate.CandidateText, "Acceptance AC-1") ||
+		strings.Contains(candidate.CandidateText, "Ignore previous instructions") ||
+		strings.Contains(candidate.CandidateText, "AC-DECOY") || strings.Contains(candidate.CandidateText, "progress-task export") {
+		t.Fatalf("semantic section candidate escaped its bounded, inert source span: %+v", candidate)
+	}
+}
+
+func TestMancodeLegacyPlanSemanticCandidatesRequireWellFormedBaselineAndBoundOutput(t *testing.T) {
+	for name, content := range map[string]string{
+		"unmarked":          "# Implementation Scope\n- include: src/**\n",
+		"malformed markers": "<!-- mancode:plan-baseline:start -->\n## Validation\npass\n",
+		"fenced headings": "<!-- mancode:plan-baseline:start -->\n```md\n## Validation\npass\n```\n" +
+			"<!-- mancode:plan-baseline:end -->\n<!-- mancode:delivery-record:start -->\n<!-- mancode:delivery-record:end -->\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := extractMancodeLegacyPlanCandidates(content)
+			if got.Status != "not_extracted" || len(got.Sections) != 0 {
+				t.Fatalf("untrusted plan produced semantic candidates: %+v", got)
+			}
+		})
+	}
+
+	longSection := "<!-- mancode:plan-baseline:start -->\n## Validation\n" + strings.Repeat("界", maxMancodePlanSectionBytes+1024) +
+		"\n<!-- mancode:plan-baseline:end -->\n<!-- mancode:delivery-record:start -->\n<!-- mancode:delivery-record:end -->\n"
+	got := extractMancodeLegacyPlanCandidates(longSection)
+	if got.Status != "candidate_sections_found" || len(got.Sections) != 1 || !got.SectionsTruncated ||
+		!got.Sections[0].CandidateTextTruncated || len(got.Sections[0].CandidateText) > maxMancodePlanSectionBytes ||
+		len(got.Sections[0].CandidateText) < maxMancodePlanSectionBytes-4 || !utf8.ValidString(got.Sections[0].CandidateText) ||
+		got.Sections[0].CandidateTextBytes <= len(got.Sections[0].CandidateText) {
+		t.Fatalf("oversized candidate text was not disclosed and bounded: %+v", got)
+	}
+
+	var manySections strings.Builder
+	manySections.WriteString("<!-- mancode:plan-baseline:start -->\n")
+	for index := 0; index < maxMancodePlanSections+1; index++ {
+		manySections.WriteString("## Validation\ncriterion\n")
+	}
+	manySections.WriteString("<!-- mancode:plan-baseline:end -->\n<!-- mancode:delivery-record:start -->\n<!-- mancode:delivery-record:end -->\n")
+	got = extractMancodeLegacyPlanCandidates(manySections.String())
+	if len(got.Sections) != maxMancodePlanSections || !got.SectionsTruncated {
+		t.Fatalf("candidate-section count was not bounded: sections=%d truncated=%v", len(got.Sections), got.SectionsTruncated)
+	}
+}
+
+func TestMancodeLegacyPlanSemanticCandidatesUseFixedCategoriesAndSectionBoundaries(t *testing.T) {
+	content := "<!-- mancode:plan-baseline:start -->\n" +
+		"## Implementation Scope\n### Include\n- src/**\n" +
+		"## Technical Decisions\n- Use the existing local store.\n" +
+		"## Risks and Rollback\n- Preserve the source backup.\n" +
+		"## Validation\n- Run the focused suite.\n" +
+		"## Completion Criteria\n- AC-1 passes.\n" +
+		"## Defaults\n- Remain local.\n" +
+		"## Behavior\n- Keep reads advisory.\n" +
+		"## Technical Choices\n- Prefer the pinned interface.\n" +
+		"<!-- mancode:plan-baseline:end -->\n<!-- mancode:delivery-record:start -->\n<!-- mancode:delivery-record:end -->\n"
+	got := extractMancodeLegacyPlanCandidates(content)
+	wantKinds := []string{
+		"implementation_scope", "technical_decisions", "risks_and_rollback", "validation",
+		"completion_criteria", "defaults", "behavior", "technical_decisions",
+	}
+	if got.Status != "candidate_sections_found" || len(got.Sections) != len(wantKinds) || got.SectionsTruncated {
+		t.Fatalf("unexpected section candidates: %+v", got)
+	}
+	for index, kind := range wantKinds {
+		candidate := got.Sections[index]
+		if candidate.Kind != kind || candidate.CandidateText == "" ||
+			candidate.CandidateTextSHA256 != digest([]byte(candidate.CandidateText)) {
+			t.Errorf("candidate[%d]=%+v, want kind %q with a matching digest", index, candidate, kind)
+		}
+	}
+	if !strings.Contains(got.Sections[0].CandidateText, "### Include") ||
+		strings.Contains(got.Sections[0].CandidateText, "Use the existing local store") {
+		t.Fatalf("candidate section crossed a semantic heading boundary: %+v", got.Sections[0])
 	}
 }
 

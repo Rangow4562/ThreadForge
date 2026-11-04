@@ -33,6 +33,10 @@ Read-only Git checks confirm all four supplied source repositories are clean and
 
 The Mancode and RRSI code repositories are present, but focused checks found no operational data at `mancode/.git/mancode/workspaces`, `mancode/.mancode/runtime/non-git`, `rrsi/runs`, or `rrsi/.rrsi/runs`. Thus current source-code and unit-test evidence does not provide populated Mancode/RRSI migration reconciliation or real benchmark outcomes. No legacy source or operational state was modified by this recheck.
 
+## Migration-root recheck — November 4, 2026
+
+Read-only Git checks reconfirm all four supplied repositories are clean and still at the revisions listed above. Running `go run ./cmd/threadforge migrate inspect --product mancode --root D:\Personal\Memory\mancode` and the corresponding RRSI command against `D:\Personal\Memory\rrsi` returned zero eligible files, zero found/imported/rejected/credential-blocked records, and the empty-set fingerprint `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` for each. No migration snapshot or apply was run. This confirms only that the two supplied code-checkout roots contain no eligible operational migration records; it does not prove that separate authoritative Mancode team/workspace state or RRSI run-result roots do not exist elsewhere. Operators must identify and provide those roots for actual-source reconciliation. The implemented Mancode claim/handoff converters produce inert, review-only summaries; they do not restore authority or replace that source-backed acceptance.
+
 ## Reuse and license disposition
 
 | Input | Threadforge disposition |

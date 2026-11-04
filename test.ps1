@@ -65,6 +65,10 @@ if (Get-Command 'bash' -ErrorAction SilentlyContinue) {
 } else {
     Write-Host 'SKIPPED: Coding runner shell syntax (Bash is unavailable)'
 }
+if ($env:OS -eq 'Windows_NT') {
+    Invoke-Check -Label 'Windows user-local release installer' -Executable 'pwsh' `
+        -Arguments @('-NoProfile', '-File', (Join-Path $RepositoryRoot 'packaging/windows/test-install.ps1')) -WorkingDirectory $RepositoryRoot
+}
 Invoke-Check -Label 'TypeScript adapter type check' -Executable 'npm' -Arguments @('run', 'check') -WorkingDirectory (Join-Path $RepositoryRoot 'adapters')
 Invoke-Check -Label 'TypeScript adapter tests' -Executable 'npm' -Arguments @('test') -WorkingDirectory (Join-Path $RepositoryRoot 'adapters')
 Invoke-Check -Label 'TypeScript adapter package contents' -Executable 'npm' -Arguments @('run', 'test:package') -WorkingDirectory (Join-Path $RepositoryRoot 'adapters')

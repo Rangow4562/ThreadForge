@@ -83,6 +83,11 @@ jobs:
         shell: bash
         run: bash packaging/linux/test-install.sh
 
+      - name: Test the Windows user-local release installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/windows/test-install.ps1
+
       - name: Run Python tests, compile check, and lint
         shell: bash
         working-directory: python

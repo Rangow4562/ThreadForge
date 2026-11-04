@@ -1275,6 +1275,45 @@ def test_mancode_legacy_plan_schema_keeps_markdown_untrusted_and_out_of_injectio
         with pytest.raises(ValidationError):
             validator_v4.validate(invalid)
 
+    schema_v5 = json.loads((SCHEMA_DIRECTORY / "mancode-legacy-workflow-plan-v5.schema.json").read_text(encoding="utf-8"))
+    validator_v5 = validator_for(schema_v5)(schema_v5)
+    acceptance_candidate = {
+        **scope_candidate,
+        "schema_version": "threadforge.mancode-legacy-workflow-plan.v5",
+        "semantic_candidates": {
+            **scope_candidate["semantic_candidates"],
+            "acceptance_candidates": {
+                "status": "candidate_criteria_found",
+                "truncated": False,
+                "omitted_values": 0,
+                "entries": [{
+                    "acceptance_id": "AC-1",
+                    "source_line": 6,
+                    "candidate_text": "The candidate is bounded and review-only.",
+                    "candidate_text_bytes": len("The candidate is bounded and review-only."),
+                    "candidate_text_sha256": "d" * 64,
+                    "candidate_text_truncated": False,
+                }],
+            },
+        },
+    }
+    validator_v5.validate(acceptance_candidate)
+    for invalid in (
+        {**acceptance_candidate, "execution_authorized": True},
+        {**acceptance_candidate, "semantic_candidates": {
+            **acceptance_candidate["semantic_candidates"],
+            "acceptance_candidates": {**acceptance_candidate["semantic_candidates"]["acceptance_candidates"], "status": "approved"},
+        }},
+        {**acceptance_candidate, "semantic_candidates": {
+            **acceptance_candidate["semantic_candidates"],
+            "acceptance_candidates": {**acceptance_candidate["semantic_candidates"]["acceptance_candidates"], "entries": [{
+                **acceptance_candidate["semantic_candidates"]["acceptance_candidates"]["entries"][0], "acceptance_id": "task-42",
+            }]},
+        }},
+    ):
+        with pytest.raises(ValidationError):
+            validator_v5.validate(invalid)
+
 
 def test_procedure_list_schema_is_versioned_metadata_only():
     schema = json.loads((SCHEMA_DIRECTORY / "procedure-list-v1.schema.json").read_text(encoding="utf-8"))

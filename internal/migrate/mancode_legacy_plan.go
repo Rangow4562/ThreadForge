@@ -11,7 +11,8 @@ const (
 	mancodeLegacyPlanSchemaV1 = "threadforge.mancode-legacy-workflow-plan.v1"
 	mancodeLegacyPlanSchemaV2 = "threadforge.mancode-legacy-workflow-plan.v2"
 	mancodeLegacyPlanSchemaV3 = "threadforge.mancode-legacy-workflow-plan.v3"
-	mancodeLegacyPlanSchema   = "threadforge.mancode-legacy-workflow-plan.v4"
+	mancodeLegacyPlanSchemaV4 = "threadforge.mancode-legacy-workflow-plan.v4"
+	mancodeLegacyPlanSchema   = "threadforge.mancode-legacy-workflow-plan.v5"
 	maxMancodeLegacyPlanBytes = 1 << 20
 )
 

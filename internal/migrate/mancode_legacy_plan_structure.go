@@ -20,6 +20,9 @@ const (
 	maxMancodePlanScopeEntries    = 128
 	maxMancodePlanScopeValueBytes = 1 << 10
 	maxMancodePlanScopeBytes      = 8 << 10
+	maxMancodePlanAcceptanceItems = 128
+	maxMancodePlanAcceptanceBytes = 8 << 10
+	maxMancodePlanAcceptanceValue = 1 << 10
 )
 
 var (
@@ -59,10 +62,11 @@ type markerLocation struct {
 }
 
 type mancodeLegacyPlanCandidates struct {
-	Status            string                              `json:"status"`
-	SectionsTruncated bool                                `json:"sections_truncated"`
-	Sections          []mancodeLegacyPlanSectionCandidate `json:"sections"`
-	Scope             mancodeLegacyPlanScopeCandidates    `json:"scope_candidates"`
+	Status            string                                `json:"status"`
+	SectionsTruncated bool                                  `json:"sections_truncated"`
+	Sections          []mancodeLegacyPlanSectionCandidate   `json:"sections"`
+	Scope             mancodeLegacyPlanScopeCandidates      `json:"scope_candidates"`
+	Acceptance        mancodeLegacyPlanAcceptanceCandidates `json:"acceptance_candidates"`
 }
 
 type mancodeLegacyPlanSectionCandidate struct {
@@ -91,6 +95,22 @@ type mancodeLegacyPlanScopeEntry struct {
 	CandidateTextTruncated bool   `json:"candidate_text_truncated"`
 }
 
+type mancodeLegacyPlanAcceptanceCandidates struct {
+	Status        string                             `json:"status"`
+	Truncated     bool                               `json:"truncated"`
+	OmittedValues int                                `json:"omitted_values"`
+	Entries       []mancodeLegacyPlanAcceptanceEntry `json:"entries"`
+}
+
+type mancodeLegacyPlanAcceptanceEntry struct {
+	AcceptanceID           string `json:"acceptance_id"`
+	SourceLine             int    `json:"source_line"`
+	CandidateText          string `json:"candidate_text"`
+	CandidateTextBytes     int    `json:"candidate_text_bytes"`
+	CandidateTextSHA256    string `json:"candidate_text_sha256"`
+	CandidateTextTruncated bool   `json:"candidate_text_truncated"`
+}
+
 type mancodePlanHeading struct {
 	line  int
 	level int
@@ -100,7 +120,8 @@ type mancodePlanHeading struct {
 func extractMancodeLegacyPlanCandidates(content string) mancodeLegacyPlanCandidates {
 	result := mancodeLegacyPlanCandidates{
 		Status: "not_extracted", Sections: []mancodeLegacyPlanSectionCandidate{},
-		Scope: mancodeLegacyPlanScopeCandidates{Status: "not_extracted", Entries: []mancodeLegacyPlanScopeEntry{}},
+		Scope:      mancodeLegacyPlanScopeCandidates{Status: "not_extracted", Entries: []mancodeLegacyPlanScopeEntry{}},
+		Acceptance: mancodeLegacyPlanAcceptanceCandidates{Status: "not_extracted", Entries: []mancodeLegacyPlanAcceptanceEntry{}},
 	}
 	structure := analyzeMancodeLegacyPlanStructure(content)
 	if structure.MarkerStatus != "well_formed" {
@@ -152,6 +173,9 @@ func extractMancodeLegacyPlanCandidates(content string) mancodeLegacyPlanCandida
 	scopeSectionFound := false
 	scopeFieldsPresent := false
 	scopeCandidateBytes := 0
+	acceptanceSectionFound := false
+	acceptanceMarkerPresent := false
+	acceptanceCandidateBytes := 0
 	remainingBytes := maxMancodePlanCandidateBytes
 	for index, heading := range headings {
 		if heading.kind == "" {
@@ -177,6 +201,12 @@ func extractMancodeLegacyPlanCandidates(content string) mancodeLegacyPlanCandida
 			collectMancodePlanScopeCandidates(
 				lines, heading.line+1, sectionEnd, heading.level,
 				&result.Scope, &scopeFieldsPresent, &scopeCandidateBytes,
+			)
+		} else if heading.kind == "completion_criteria" {
+			acceptanceSectionFound = true
+			collectMancodePlanAcceptanceCandidates(
+				lines, heading.line+1, sectionEnd, heading.level,
+				&result.Acceptance, &acceptanceMarkerPresent, &acceptanceCandidateBytes,
 			)
 		}
 		candidateText := sectionText
@@ -216,7 +246,151 @@ func extractMancodeLegacyPlanCandidates(content string) mancodeLegacyPlanCandida
 			result.Scope.Status = "no_explicit_scope_fields"
 		}
 	}
+	if acceptanceSectionFound {
+		switch {
+		case len(result.Acceptance.Entries) > 0:
+			result.Acceptance.Status = "candidate_criteria_found"
+		case acceptanceMarkerPresent:
+			result.Acceptance.Status = "incomplete_criteria"
+		default:
+			result.Acceptance.Status = "no_explicit_criteria"
+		}
+	}
 	return result
+}
+
+func collectMancodePlanAcceptanceCandidates(
+	lines []string,
+	start int,
+	end int,
+	parentHeadingLevel int,
+	result *mancodeLegacyPlanAcceptanceCandidates,
+	markerPresent *bool,
+	totalCandidateBytes *int,
+) {
+	fenceChar := byte(0)
+	fenceLength := 0
+	for lineNumber := start; lineNumber < end; lineNumber++ {
+		line := strings.TrimPrefix(lines[lineNumber], "\ufeff")
+		if fenceChar != 0 {
+			if isMancodeFenceClose(line, fenceChar, fenceLength) {
+				fenceChar = 0
+				fenceLength = 0
+			}
+			continue
+		}
+		if char, length, ok := mancodeFenceOpening(line); ok {
+			fenceChar = char
+			fenceLength = length
+			continue
+		}
+		if level, _, ok := mancodeMarkdownHeading(line); ok {
+			if level <= parentHeadingLevel {
+				break
+			}
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "<!-- mancode:") {
+			continue
+		}
+		candidateLine := mancodePlanAcceptanceCandidateLine(trimmed)
+		id, text, hasID, hasDescription := mancodePlanAcceptanceCandidate(candidateLine)
+		if !hasID {
+			continue
+		}
+		*markerPresent = true
+		if !hasDescription || privacy.ContainsCredentialText(text) ||
+			len(result.Entries) >= maxMancodePlanAcceptanceItems || *totalCandidateBytes >= maxMancodePlanAcceptanceBytes {
+			result.Truncated = result.Truncated || len(result.Entries) >= maxMancodePlanAcceptanceItems || *totalCandidateBytes >= maxMancodePlanAcceptanceBytes
+			incrementMancodePlanAcceptanceOmitted(result)
+			continue
+		}
+		maximum := maxMancodePlanAcceptanceValue
+		if remaining := maxMancodePlanAcceptanceBytes - *totalCandidateBytes; maximum > remaining {
+			maximum = remaining
+		}
+		candidateText := truncateMancodePlanText(text, maximum)
+		if candidateText == "" {
+			result.Truncated = true
+			incrementMancodePlanAcceptanceOmitted(result)
+			continue
+		}
+		textTruncated := len(candidateText) < len(text)
+		result.Entries = append(result.Entries, mancodeLegacyPlanAcceptanceEntry{
+			AcceptanceID: id, SourceLine: lineNumber + 1, CandidateText: candidateText,
+			CandidateTextBytes: len(text), CandidateTextSHA256: digest([]byte(text)),
+			CandidateTextTruncated: textTruncated,
+		})
+		*totalCandidateBytes += len(candidateText)
+		if textTruncated {
+			result.Truncated = true
+		}
+	}
+}
+
+func mancodePlanAcceptanceCandidateLine(line string) string {
+	if item, ok := mancodePlanListItem(line); ok {
+		line = item
+	} else {
+		trimmed := strings.TrimSpace(line)
+		for index := 0; index < len(trimmed) && trimmed[index] >= '0' && trimmed[index] <= '9'; index++ {
+			if index+1 < len(trimmed) && (trimmed[index+1] == '.' || trimmed[index+1] == ')') && trimmed[index+2:] != "" {
+				line = strings.TrimSpace(trimmed[index+2:])
+				break
+			}
+		}
+	}
+	line = strings.TrimSpace(line)
+	if strings.HasPrefix(line, "[ ] ") || strings.HasPrefix(line, "[x] ") || strings.HasPrefix(line, "[X] ") {
+		line = strings.TrimSpace(line[4:])
+	}
+	return strings.TrimSpace(line)
+}
+
+func mancodePlanAcceptanceCandidate(line string) (id, text string, hasID, hasDescription bool) {
+	match := mancodeAcceptanceIDPattern.FindStringIndex(line)
+	if match == nil || match[0] != 0 {
+		return "", "", false, false
+	}
+	id = line[:match[1]]
+	remainder := line[match[1]:]
+	if remainder == "" {
+		return id, "", true, false
+	}
+	if strings.TrimSpace(remainder) == "" {
+		return id, "", true, false
+	}
+	if !strings.HasPrefix(remainder, " ") && !strings.HasPrefix(remainder, "\t") {
+		separator := []string{":", "：", "—", "–", "-"}
+		matched := false
+		for _, prefix := range separator {
+			if strings.HasPrefix(remainder, prefix) {
+				remainder = strings.TrimSpace(strings.TrimPrefix(remainder, prefix))
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return id, "", true, false
+		}
+	} else {
+		remainder = strings.TrimSpace(remainder)
+		for _, separator := range []string{":", "：", "—", "–", "-"} {
+			if strings.HasPrefix(remainder, separator) {
+				remainder = strings.TrimSpace(strings.TrimPrefix(remainder, separator))
+				break
+			}
+		}
+	}
+	text = strings.TrimSpace(remainder)
+	return id, text, true, text != ""
+}
+
+func incrementMancodePlanAcceptanceOmitted(result *mancodeLegacyPlanAcceptanceCandidates) {
+	if result.OmittedValues < 1<<20 {
+		result.OmittedValues++
+	}
 }
 
 func collectMancodePlanScopeCandidates(

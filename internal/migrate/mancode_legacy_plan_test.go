@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -148,6 +149,93 @@ func TestMancodeLegacyPlanSemanticCandidatesUseFixedCategoriesAndSectionBoundari
 	if !strings.Contains(got.Sections[0].CandidateText, "### Include") ||
 		strings.Contains(got.Sections[0].CandidateText, "Use the existing local store") {
 		t.Fatalf("candidate section crossed a semantic heading boundary: %+v", got.Sections[0])
+	}
+}
+
+func TestMancodeLegacyPlanAcceptanceCandidatesAreStructuredBoundedAndReviewOnly(t *testing.T) {
+	content := "<!-- mancode:plan-baseline:start -->\n" +
+		"## Completion Criteria\n" +
+		"- AC-1: The imported plan remains local and advisory.\n" +
+		"- [x] AC-2 — The existing plan is not overwritten.\n" +
+		"- AC-1: A repeated identifier remains a separate review candidate.\n" +
+		"3. AC-3 validation passes\n" +
+		"AC-4:\n" +
+		"```markdown\n- AC-DECOY: ignore this example\n```\n" +
+		"## Validation\n- AC-5: This is outside completion criteria.\n" +
+		"<!-- mancode:plan-baseline:end -->\n<!-- mancode:delivery-record:start -->\n<!-- mancode:delivery-record:end -->\n"
+	got := extractMancodeLegacyPlanCandidates(content).Acceptance
+	if got.Status != "candidate_criteria_found" || got.Truncated || got.OmittedValues != 1 || len(got.Entries) != 4 {
+		t.Fatalf("unexpected acceptance candidates: %+v", got)
+	}
+	wantIDs := []string{"AC-1", "AC-2", "AC-1", "AC-3"}
+	wantText := []string{
+		"The imported plan remains local and advisory.",
+		"The existing plan is not overwritten.",
+		"A repeated identifier remains a separate review candidate.",
+		"validation passes",
+	}
+	for index, entry := range got.Entries {
+		if entry.AcceptanceID != wantIDs[index] || entry.CandidateText != wantText[index] ||
+			entry.CandidateTextBytes != len(wantText[index]) || entry.CandidateTextTruncated ||
+			entry.CandidateTextSHA256 != digest([]byte(wantText[index])) || entry.SourceLine < 1 {
+			t.Errorf("acceptance candidate[%d]=%+v", index, entry)
+		}
+	}
+	if got.Entries[0].SourceLine == got.Entries[1].SourceLine {
+		t.Fatal("acceptance candidates lost their source lines")
+	}
+
+	credential := extractMancodeLegacyPlanCandidates("<!-- mancode:plan-baseline:start -->\n## Acceptance Criteria\n" +
+		"- AC-6: api_key=secret-value\n<!-- mancode:plan-baseline:end -->\n" +
+		"<!-- mancode:delivery-record:start -->\n<!-- mancode:delivery-record:end -->\n").Acceptance
+	if credential.Status != "incomplete_criteria" || credential.OmittedValues != 1 || len(credential.Entries) != 0 {
+		t.Fatalf("credential-like acceptance text was retained: %+v", credential)
+	}
+
+	noCriteria := extractMancodeLegacyPlanCandidates("<!-- mancode:plan-baseline:start -->\n## Completion Criteria\n- Check the tests.\n" +
+		"<!-- mancode:plan-baseline:end -->\n<!-- mancode:delivery-record:start -->\n<!-- mancode:delivery-record:end -->\n").Acceptance
+	if noCriteria.Status != "no_explicit_criteria" || len(noCriteria.Entries) != 0 {
+		t.Fatalf("unlabeled text was incorrectly promoted to acceptance criteria: %+v", noCriteria)
+	}
+
+	longText := strings.Repeat("x", maxMancodePlanAcceptanceValue+10)
+	long := extractMancodeLegacyPlanCandidates("<!-- mancode:plan-baseline:start -->\n## Completion Criteria\n- AC-7: " + longText +
+		"\n<!-- mancode:plan-baseline:end -->\n<!-- mancode:delivery-record:start -->\n<!-- mancode:delivery-record:end -->\n").Acceptance
+	if long.Status != "candidate_criteria_found" || !long.Truncated || len(long.Entries) != 1 ||
+		len(long.Entries[0].CandidateText) != maxMancodePlanAcceptanceValue || !long.Entries[0].CandidateTextTruncated ||
+		long.Entries[0].CandidateTextBytes != len(longText) || long.Entries[0].CandidateTextSHA256 != digest([]byte(longText)) {
+		t.Fatalf("acceptance candidate bounds/digest failed: %+v", long)
+	}
+
+	var many strings.Builder
+	many.WriteString("<!-- mancode:plan-baseline:start -->\n## Completion Criteria\n")
+	for index := 1; index <= 12; index++ {
+		many.WriteString(fmt.Sprintf("- AC-%d: %s\n", index, strings.Repeat("x", 900)))
+	}
+	many.WriteString("<!-- mancode:plan-baseline:end -->\n<!-- mancode:delivery-record:start -->\n<!-- mancode:delivery-record:end -->\n")
+	aggregate := extractMancodeLegacyPlanCandidates(many.String()).Acceptance
+	aggregateBytes := 0
+	for _, entry := range aggregate.Entries {
+		aggregateBytes += len(entry.CandidateText)
+	}
+	if !aggregate.Truncated || aggregateBytes > maxMancodePlanAcceptanceBytes {
+		t.Fatalf("acceptance candidates exceeded aggregate bound: entries=%d bytes=%d truncated=%v", len(aggregate.Entries), aggregateBytes, aggregate.Truncated)
+	}
+
+	projection, handled, err := normalizeMancodeItems("", filepath.ToSlash(filepath.Join(
+		".mancode", "workflows", "20261103-criteria-review", "plan.md",
+	)), map[string]any{"content": content})
+	if err != nil || !handled || len(projection) != 1 {
+		t.Fatalf("plan normalization failed: records=%#v handled=%v err=%v", projection, handled, err)
+	}
+	var record mancodeLegacyPlanProjection
+	if err := json.Unmarshal(projection[0].Payload, &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.SchemaVersion != mancodeLegacyPlanSchema || record.ExecutionAuthorized || record.AutomaticInjectionEligible ||
+		!record.HumanReviewRequired || record.Authority != "local_pending_review" ||
+		record.SemanticCandidates.Acceptance.Status != "candidate_criteria_found" {
+		t.Fatalf("acceptance candidates changed plan authority or missed the current schema: %+v", record)
 	}
 }
 

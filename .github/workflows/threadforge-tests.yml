@@ -72,6 +72,7 @@ jobs:
         run: |
           uv run --project python --locked --extra test --extra decisions --extra workspace go test ./...
           uv run --project python --locked --extra test --extra decisions --extra workspace go vet ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
       - name: Run vendored Beacon contract tests
         shell: bash
@@ -108,6 +109,11 @@ jobs:
         working-directory: adapters
         run: npm ci
 
+      - name: Audit TypeScript adapter dependencies
+        shell: bash
+        working-directory: adapters
+        run: npm audit --audit-level=moderate
+
       - name: Run TypeScript adapter typecheck and tests
         shell: bash
         working-directory: adapters
@@ -124,6 +130,11 @@ jobs:
         shell: bash
         working-directory: adapters/browser-extension
         run: npm ci
+
+      - name: Audit browser extension dependencies
+        shell: bash
+        working-directory: adapters/browser-extension
+        run: npm audit --audit-level=moderate
 
       - name: Install Playwright Chromium and Linux dependencies
         if: runner.os == 'Linux'

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -44,6 +44,13 @@ const isolatedHome = mkdtempSync(path.join(tmpdir(), 'threadforge-installed-skil
 const projectRoot = path.join(isolatedHome, 'project');
 const commandCodeProjectRoot = path.join(isolatedHome, 'command-code-project');
 const databasePath = path.join(isolatedHome, 'threadforge.sqlite');
+const packageLauncherBin = path.join(isolatedHome, 'blocked-package-launchers');
+const packageLauncherAttemptPath = path.join(isolatedHome, 'blocked-package-launcher.txt');
+const packageLaunchers = ['corepack', 'npm', 'npx', 'pnpm', 'yarn', 'bunx'];
+const smokeProbes = [
+  'antigravity', 'claude', 'claude-agent-memory-read', 'claude-doctor', 'claude-version',
+  'codex', 'command-code', 'copilot', 'gemini', 'node', 'opencode', 'unknown',
+];
 const codexHome = path.join(isolatedHome, 'codex-home');
 const claudeConfigDir = path.join(isolatedHome, 'claude-config');
 // Share the disposable default store with the explicit MCP database so the
@@ -69,13 +76,59 @@ Object.assign(isolatedEnvironment, {
   GEMINI_CLI_HOME: isolatedHome,
   CODEX_HOME: codexHome,
   CLAUDE_CONFIG_DIR: claudeConfigDir,
+  // Prevent Claude CLI smoke invocations from updating the global installation.
+  DISABLE_UPDATES: '1',
   THREADFORGE_HOME: threadforgeHome,
   CMD_LOCAL_ONLY: '1',
   // Keep installed-host smoke checks from changing the globally installed CLI.
   AGY_CLI_DISABLE_AUTO_UPDATE: 'true',
   // Trust only the disposable workspace; never edit the user's Gemini trust state.
   GEMINI_CLI_TRUST_WORKSPACE: 'true',
+  NPM_CONFIG_OFFLINE: 'true',
+  npm_config_offline: 'true',
+  npm_config_cache: path.join(isolatedHome, 'empty-npm-cache'),
+  npm_config_userconfig: path.join(isolatedHome, 'empty.npmrc'),
+  npm_config_globalconfig: path.join(isolatedHome, 'empty-global.npmrc'),
+  COREPACK_ENABLE_NETWORK: '0',
+  COREPACK_HOME: path.join(isolatedHome, 'corepack-home'),
+  PIP_NO_INDEX: '1',
+  UV_OFFLINE: '1',
+  THREADFORGE_SMOKE_BLOCKED_PACKAGE_LAUNCHER_FILE: packageLauncherAttemptPath,
 });
+
+// Installed-host probes may read project-scoped configs. Refuse package-manager
+// launchers in the isolated PATH as a second boundary against inherited MCPs or
+// plugins that try to fetch/execute external code during a deterministic smoke.
+mkdirSync(packageLauncherBin, { recursive: true });
+writeFileSync(isolatedEnvironment.npm_config_userconfig, '', { mode: 0o600 });
+writeFileSync(isolatedEnvironment.npm_config_globalconfig, '', { mode: 0o600 });
+for (const launcher of packageLaunchers) {
+  if (process.platform === 'win32') {
+    const launcherPath = path.join(packageLauncherBin, `${launcher}.cmd`);
+    writeFileSync(launcherPath,
+      `@echo off\r\n>>"%THREADFORGE_SMOKE_BLOCKED_PACKAGE_LAUNCHER_FILE%" echo ${launcher}:%THREADFORGE_SMOKE_PROBE%\r\n>&2 echo Threadforge smoke blocked package launcher: ${launcher}\r\nexit /b 86\r\n`,
+      { mode: 0o600 });
+  } else {
+    const launcherPath = path.join(packageLauncherBin, launcher);
+    writeFileSync(launcherPath,
+      `#!/bin/sh\nprintf '%s:%s\\n' '${launcher}' "\${THREADFORGE_SMOKE_PROBE:-unknown}" >> "$THREADFORGE_SMOKE_BLOCKED_PACKAGE_LAUNCHER_FILE"\nprintf '%s\\n' 'Threadforge smoke blocked package launcher: ${launcher}' >&2\nexit 86\n`,
+      { mode: 0o700 });
+    chmodSync(launcherPath, 0o700);
+  }
+}
+isolatedEnvironment.PATH = `${packageLauncherBin}${path.delimiter}${isolatedEnvironment.PATH ?? ''}`;
+
+function blockedPackageLauncherError() {
+  if (!existsSync(packageLauncherAttemptPath)) return undefined;
+  const attempted = [...new Set(readFileSync(packageLauncherAttemptPath, 'utf8').split(/\r?\n/)
+    .map((entry) => {
+      const [launcher, probe] = entry.split(':');
+      return packageLaunchers.includes(launcher)
+        ? `${launcher}${smokeProbes.includes(probe) ? ` via ${probe}` : ''}`
+        : undefined;
+    }).filter(Boolean))].sort();
+  return new Error(`Installed-host smoke blocked package-manager execution${attempted.length ? `: ${attempted.join(', ')}` : ''}`);
+}
 
 function run(command, args, { cwd = repositoryRoot, env = process.env, timeout = 120_000, includeStderr = false } = {}) {
   const result = spawnSync(command, args, {
@@ -117,15 +170,16 @@ function runCommandCode(args, { cwd = commandCodeProjectRoot, env = isolatedEnvi
 }
 
 function runHost(command, args, { cwd = projectRoot, env = isolatedEnvironment, timeout = 30_000, includeStderr = false } = {}) {
+  const hostEnvironment = { ...env, THREADFORGE_SMOKE_PROBE: env.THREADFORGE_SMOKE_PROBE ?? command };
   if (process.platform === 'win32' && command === 'cmdc') {
-    return runCommandCode(args, { cwd, env, timeout, includeStderr });
+    return runCommandCode(args, { cwd, env: hostEnvironment, timeout, includeStderr });
   }
   const windowsPowerShellShim = process.platform === 'win32' && ['gemini', 'codex', 'command-code', 'copilot'].includes(command);
   const executable = windowsPowerShellShim ? 'pwsh.exe' : command;
   const executableArgs = windowsPowerShellShim
     ? ['-NoProfile', '-NonInteractive', '-Command', `& ${[command, ...args].map(quotePowerShellArgument).join(' ')}`]
     : args;
-  return run(executable, executableArgs, { cwd, env, timeout, includeStderr });
+  return run(executable, executableArgs, { cwd, env: hostEnvironment, timeout, includeStderr });
 }
 
 function runGeminiCliAsync(args, { cwd = projectRoot, env = isolatedEnvironment, timeout = 90_000, includeStderr = false, stdin } = {}) {
@@ -842,13 +896,17 @@ function quoteBashArgument(value) {
 }
 
 async function runCopilotAgent(args, options) {
-  if (process.platform !== 'win32') return runAsync('copilot', args, options);
-  const shimPath = run('where.exe', ['copilot.ps1'], { cwd: options.cwd, env: options.env, timeout: 10_000 })
+  const agentOptions = {
+    ...options,
+    env: { ...options.env, THREADFORGE_SMOKE_PROBE: 'copilot' },
+  };
+  if (process.platform !== 'win32') return runAsync('copilot', args, agentOptions);
+  const shimPath = run('where.exe', ['copilot.ps1'], { cwd: options.cwd, env: agentOptions.env, timeout: 10_000 })
     .split(/\r?\n/).map((entry) => entry.trim()).find(Boolean);
   if (!shimPath) throw new Error('Could not resolve the installed Copilot CLI PowerShell shim');
   const entrypoint = path.join(path.dirname(shimPath), 'node_modules', '@github', 'copilot', 'npm-loader.js');
   if (!existsSync(entrypoint)) throw new Error('Could not resolve the Copilot CLI Node entrypoint next to copilot.ps1');
-  return runAsync(process.execPath, [entrypoint, ...args], options);
+  return runAsync(process.execPath, [entrypoint, ...args], agentOptions);
 }
 
 let smokeFailure;
@@ -923,7 +981,7 @@ try {
     status: 'passed',
   })}\n`, { flag: 'wx', mode: 0o600 });
 
-  const goEnvironment = { ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'local' };
+  const goEnvironment = { ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'auto' };
   run('go', ['build', '-mod=readonly', '-o', cliPath, './cmd/threadforge'], {
     cwd: repositoryRoot, env: goEnvironment, timeout: 180_000,
   });
@@ -1977,7 +2035,9 @@ try {
     'does not authorize commands, tools, or execution',
     'does not override current user instructions',
   ];
-  const claudeVersion = runHost('claude', ['--version']).trim();
+  const claudeVersion = runHost('claude', ['--version'], {
+    env: { ...isolatedEnvironment, THREADFORGE_SMOKE_PROBE: 'claude-version' },
+  }).trim();
   const claudeMemoryCommand = `${JSON.stringify(cliPath)} memory inject --project-id cross-harness-smoke --threadforge-managed-claude-memory=v1 --threadforge-memory=claude-v1`;
   const claudeMemoryInstall = JSON.parse(runAdapterCLI([
     'claude-code', 'memory', 'install', '--project-root', projectRoot, '--command', claudeMemoryCommand,
@@ -2021,7 +2081,7 @@ try {
     settingsPath: path.join(projectRoot, '.claude', 'settings.json'),
     claudeConfigDir,
     threadforgeHome,
-    isolatedEnvironment,
+    isolatedEnvironment: { ...isolatedEnvironment, THREADFORGE_SMOKE_PROBE: 'claude-agent-memory-read' },
     expectedGuidance: claudeGuidance,
     hostVersion: claudeVersion,
     expectedTaskResumeMarkers: claudeTaskResumeMarkers,
@@ -2031,7 +2091,8 @@ try {
   const codexPromptInputs = runHost('codex', ['debug', 'prompt-input']);
   const geminiDiscovery = tryGeminiSkillDiscovery();
   const commandCodeVersion = runHost('cmdc', ['--no-auto-update', '--version']).trim();
-  runHost('claude', ['doctor']);
+  // `claude doctor` invokes npm on this installed host. Keep it out of the
+  // hermetic smoke rather than weakening the package-manager execution block.
   assert.ok(openCodeSkills.includes(skillName), 'OpenCode did not discover the exported approved procedure');
   assert.ok(openCodeSkills.includes(decodedMemorySkillName), 'OpenCode did not discover the portable memory continuity skill');
   assert.ok(codexPromptInputs.includes(skillName), 'Codex CLI prompt inputs did not include the exported approved procedure');
@@ -2040,6 +2101,9 @@ try {
     assert.ok(geminiDiscovery.output.includes(skillName), 'Gemini CLI did not discover the exported approved procedure');
     assert.ok(geminiDiscovery.output.includes(decodedMemorySkillName), 'Gemini CLI did not discover the portable memory continuity skill');
   }
+
+  const blockedLauncherError = blockedPackageLauncherError();
+  if (blockedLauncherError) throw blockedLauncherError;
 
   console.log(JSON.stringify({
     schema_version: 'threadforge.installed-skill-smoke.v46',
@@ -2113,7 +2177,11 @@ try {
     github_copilot_project_memory_read: copilotProjectMemoryReadSmoke,
     github_copilot_plan_gate: copilotPlanGateSmoke,
     diagnostics: {
-      claude_code: { version: claudeVersion, doctor_completed: true },
+      claude_code: {
+        version: claudeVersion,
+        doctor_status: 'skipped',
+        doctor_skip_reason: 'claude doctor invokes npm; package managers are blocked in the hermetic smoke',
+      },
     },
     discovery: {
       opencode: { version: openCodeVersion, skill_discovered: true, threadforge_mcp_connected: true },
@@ -2122,8 +2190,8 @@ try {
     },
   }));
 } catch (error) {
-  smokeFailure = error;
-  throw error;
+  smokeFailure = blockedPackageLauncherError() ?? error;
+  throw smokeFailure;
 } finally {
   try {
     await removeIsolatedHomeWithRetry();
@@ -2604,7 +2672,11 @@ function sendFixtureCompletion(request, response, body, result) {
 
 function runAsync(command, args, { cwd = repositoryRoot, env = process.env, timeout = 120_000, includeStderr = false, stdin } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, env, stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+    const probe = env.THREADFORGE_SMOKE_PROBE ?? path.basename(command).replace(/\.[^.]+$/, '');
+    const child = spawn(command, args, {
+      cwd, env: { ...env, THREADFORGE_SMOKE_PROBE: smokeProbes.includes(probe) ? probe : 'unknown' },
+      stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    });
     const stdout = [];
     const stderr = [];
     let outputBytes = 0;

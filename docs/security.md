@@ -1,5 +1,13 @@
 # Local threat-rule scan
 
+## Dependency vulnerability gate
+
+The cross-platform GitHub workflow also runs `govulncheck` v1.9.0 against the Go packages and `npm audit --audit-level=moderate` against both checked-in npm lockfiles after installation. The Go build toolchain is pinned by `go.mod`; these checks block on known moderate-or-higher advisories in the locked dependency graphs and reachable Go code. They do not replace code review, runtime penetration testing, license review, privacy review, or the all-or-nothing cutover assessment. The npm audit includes development dependencies because the build, test, and packaging toolchain executes in CI.
+
+### Scan snapshot — November 4, 2026
+
+After updating the Go toolchain to 1.27.3, `golang.org/x/net` to 0.62.0, `google.golang.org/grpc` to 1.85.0, and `github.com/klauspost/compress` to 1.18.7, `govulncheck` v1.9.0 reported no reachable or module-graph findings. Both npm lockfiles pass `npm audit --audit-level=moderate`. The browser-extension development graph still reports three low-severity advisory entries for `deepmerge@4.3.1` through `addons-linter`/`web-ext`; npm's current registry has no newer `deepmerge` release, and its forced remediation proposes downgrading `web-ext` to 3.2.1 outside the project's supported `^10.7.0` range. The lock instead pins compatible `minimatch`, `multimatch`, and ESLint config-array releases; Firefox extension lint passes with these overrides. The low-severity `deepmerge` issue remains visible for independent security review; the moderate audit threshold is not a waiver or release clearance.
+
 `threadforge security scan` runs the vendored, MIT-licensed Beacon threat-rule engine against a local canonical event JSONL file. It is read-only and never makes a network call or executes a rule action. The default corpus is the small frozen baseline embedded by the upstream rule-store package. Additional installed rules default to `<THREADFORGE_HOME>/rules`; `--rules-dir` selects an explicit external corpus and replaces the active corpus for that scan.
 
 Manage the local active corpus with `threadforge security rules list`, `security rules install --source <rule-file|directory> [--force]`, and `security rules remove --id <rule-id>`. Installation snapshots bounded source files, rejects symbolic links and credential-bearing rule content, and validates every rule and its fixtures before any rule is installed. Replacement is explicit with `--force`. Installed rules form the active corpus instead of being merged with the embedded baseline; removing the last installed rule returns scans to the baseline.

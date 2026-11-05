@@ -318,6 +318,17 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
 
+      - name: Reconcile SPDX packages with embedded Go build metadata
+        shell: bash
+        env:
+          BINARY_PATH: ${{ steps.package.outputs.binary_path }}
+          SBOM_PATH: ${{ steps.package.outputs.sbom_path }}
+        run: >-
+          python3 scripts/verify_release_sbom.py
+          --binary "$BINARY_PATH"
+          --sbom "$SBOM_PATH"
+          --main-module github.com/threadforge-ai/threadforge
+
       - name: Attest archive build provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:

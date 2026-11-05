@@ -18,7 +18,10 @@ def test_optional_inference_profiles_keep_setuptools_on_patched_versions():
     assert "torch>=2.3; python_version < '3.12'" in hf_requirements
     assert "torch>=2.15; python_version >= '3.12'" in hf_requirements
     serving_requirements = pyproject["project"]["optional-dependencies"]["serving"]
-    assert "vllm>=0.32,<1; python_version < '3.12'" in serving_requirements
+    assert (
+        "vllm>=0.32,<1; python_version < '3.12' and sys_platform == 'linux'"
+        in serving_requirements
+    )
 
     setuptools_versions = {
         package["version"] for package in lock["package"] if package["name"] == "setuptools"
@@ -43,4 +46,4 @@ def test_optional_inference_profiles_keep_setuptools_on_patched_versions():
 
     serving_edges = project["optional-dependencies"]["serving"]
     vllm_profiles = [edge.get("marker") for edge in serving_edges if edge["name"] == "vllm"]
-    assert vllm_profiles == ["python_full_version < '3.12'"]
+    assert vllm_profiles == ["python_full_version < '3.12' and sys_platform == 'linux'"]

@@ -19,7 +19,7 @@ hf = [
     "transformers>=4.53",
     "safetensors>=0.4",
 ]
-serving = ["vllm>=0.32,<1; python_version < '3.12'", "transformers>=4.53"]
+serving = ["vllm>=0.32,<1; python_version < '3.12' and sys_platform == 'linux'", "transformers>=4.53"]
 typed-data = ["datasets>=2.20"]
 evolution = ["anthropic[vertex]>=0.40", "litellm>=1.50", "pydantic>=2.0"]
 workspace = [

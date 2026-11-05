@@ -66,6 +66,12 @@ Invoke-Check -Label 'Go tests' -Executable 'go' -Arguments @('test', './...') -W
 Invoke-Check -Label 'Go vet' -Executable 'go' -Arguments @('vet', './...') -WorkingDirectory $RepositoryRoot
 if (Get-Command 'uv' -ErrorAction SilentlyContinue) {
     Invoke-Check -Label 'Python dependency lock freshness' -Executable 'uv' -Arguments @('lock', '--check') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
+    $PythonProjectDirectory = Join-Path $RepositoryRoot 'python'
+    foreach ($platform in @('linux', 'windows', 'macos')) {
+        Invoke-Check -Label "Python serving extra resolution ($platform, Python 3.11)" -Executable 'uv' `
+            -Arguments @('sync', '--quiet', '--locked', '--dry-run', '--python', '3.11', '--python-platform', $platform, '--extra', 'serving') `
+            -WorkingDirectory $PythonProjectDirectory
+    }
 } else {
     Write-Host 'SKIPPED: Python dependency lock freshness (uv is unavailable; hosted CI enforces the lock)'
 }

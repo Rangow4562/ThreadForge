@@ -124,16 +124,17 @@ func TestGitHubCompositeActionSmokeWorkflowContract(t *testing.T) {
 	if workflow.Permissions["contents"] != "read" || len(workflow.Jobs) != 1 {
 		t.Fatalf("smoke workflow must use read-only repository permission and one job: %#v", workflow)
 	}
+	const threadforgeAction = "$/.github/actions/threadforge-ci"
 	var starts, finishes, codexStarts, codexFinish, fixture, codexFixture, claudeUpload, codexUpload, claudeGate, codexGate bool
 	for _, job := range workflow.Jobs {
 		for _, step := range job.Steps {
-			if step.Uses == "./.github/actions/threadforge-ci" && step.With["mode"] == "start" {
+			if step.Uses == threadforgeAction && step.With["mode"] == "start" {
 				starts = true
 				if step.With["harness"] == "codex-cli" {
 					codexStarts = true
 				}
 			}
-			if step.Uses == "./.github/actions/threadforge-ci" && step.With["mode"] == "finish" && strings.Contains(step.If, "always()") {
+			if step.Uses == threadforgeAction && step.With["mode"] == "finish" && strings.Contains(step.If, "always()") {
 				finishes = true
 				if codexStarts {
 					codexFinish = true

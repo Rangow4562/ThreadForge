@@ -13,7 +13,7 @@ dependencies = []
 [project.optional-dependencies]
 decisions = ["numpy>=1.24"]
 hf = ["numpy>=1.24", "torch>=2.3", "transformers>=4.53", "safetensors>=0.4"]
-serving = ["vllm>=0.7,<1", "transformers>=4.53"]
+serving = ["vllm>=0.32,<1", "transformers>=4.53"]
 typed-data = ["datasets>=2.20"]
 evolution = ["anthropic[vertex]>=0.40", "litellm>=1.50", "pydantic>=2.0"]
 workspace = [

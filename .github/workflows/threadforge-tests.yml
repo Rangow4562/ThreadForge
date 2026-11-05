@@ -206,12 +206,135 @@ jobs:
         shell: bash
         run: bash scripts/test-elasticsearch-stack.sh "$RUNNER_TEMP/threadforge" "$RUNNER_TEMP/threadforge-elasticsearch-pack"
 
+  python-license-evidence:
+    name: Python license evidence (${{ matrix.target_os }}, Python ${{ matrix.python }})
+    if: >-
+      (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
+      || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
+    needs: [test, elasticsearch-local-stack]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target_os: linux
+            python: '3.11'
+          - runner: ubuntu-latest
+            target_os: linux
+            python: '3.12'
+          - runner: windows-latest
+            target_os: windows
+            python: '3.11'
+          - runner: windows-latest
+            target_os: windows
+            python: '3.12'
+          - runner: macos-latest
+            target_os: darwin
+            python: '3.11'
+          - runner: macos-latest
+            target_os: darwin
+            python: '3.12'
+    steps:
+      - name: Check out Threadforge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag and source commit
+        id: release
+        shell: bash
+        env:
+          RELEASE_VERSION_INPUT: ${{ inputs.release_version }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_TYPE" == tag ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Release candidate tags must be stable vMAJOR.MINOR.PATCH tags." >&2
+              exit 1
+            fi
+            version="${GITHUB_REF_NAME#v}"
+            if [[ "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" != "$GITHUB_SHA" ]]; then
+              echo "The tag does not resolve to the workflow source commit." >&2
+              exit 1
+            fi
+          elif [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF_NAME" == main ]]; then
+            version="$RELEASE_VERSION_INPUT"
+            if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Manual release rehearsals require a stable MAJOR.MINOR.PATCH version." >&2
+              exit 1
+            fi
+          else
+            echo "Release candidates require a stable tag or a manual dispatch from main." >&2
+            exit 1
+          fi
+          git fetch origin refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "Release source must be reachable from origin/main." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "source_date_epoch=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Set up locked Python evidence environment
+        shell: bash
+        working-directory: python
+        run: |
+          python -m pip install uv==0.11.7
+          uv --version
+          uv lock --check
+          uv sync --locked --extra test --extra decisions --extra workspace
+
+      - name: Collect locked Python license and notice evidence
+        shell: bash
+        working-directory: python
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          SOURCE_DATE_EPOCH: ${{ steps.release.outputs.source_date_epoch }}
+          TARGET_OS: ${{ matrix.target_os }}
+          PYTHON_VERSION: ${{ matrix.python }}
+          LICENSE_EVIDENCE_PATH: dist/threadforge_${{ steps.release.outputs.version }}_python_${{ matrix.target_os }}_py${{ matrix.python }}.license-evidence.tar.gz
+        run: >-
+          mkdir -p dist &&
+          uv run --locked --extra test --extra decisions --extra workspace
+          python ../scripts/build_python_license_evidence.py
+          --source-commit "$SOURCE_COMMIT"
+          --release-version "$RELEASE_VERSION"
+          --target-os "$TARGET_OS"
+          --python-version "$PYTHON_VERSION"
+          --extra test --extra decisions --extra workspace
+          --source-date-epoch "$SOURCE_DATE_EPOCH"
+          --output "$LICENSE_EVIDENCE_PATH"
+
+      - name: Attest Python license evidence provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: python/dist/threadforge_${{ steps.release.outputs.version }}_python_${{ matrix.target_os }}_py${{ matrix.python }}.license-evidence.tar.gz
+
+      - name: Upload Python license evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: threadforge-python-license-evidence-${{ steps.release.outputs.version }}-${{ matrix.target_os }}-py${{ matrix.python }}
+          path: python/dist/threadforge_${{ steps.release.outputs.version }}_python_${{ matrix.target_os }}_py${{ matrix.python }}.license-evidence.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
   release-candidate:
     name: Build and attest release candidates (${{ matrix.goos }}/${{ matrix.goarch }})
     if: >-
       (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
       || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
-    needs: [test, elasticsearch-local-stack]
+    needs: [test, elasticsearch-local-stack, python-license-evidence]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -392,7 +515,7 @@ jobs:
     if: >-
       (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
       || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
-    needs: release-candidate
+    needs: [release-candidate, python-license-evidence]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -424,6 +547,13 @@ jobs:
           merge-multiple: true
           path: dist
 
+      - name: Download Python license evidence files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: threadforge-python-license-evidence-${{ steps.release.outputs.version }}-*
+          merge-multiple: true
+          path: dist
+
       - name: Validate candidate set and create checksums
         shell: bash
         env:
@@ -443,6 +573,14 @@ jobs:
             "dist/threadforge_${RELEASE_VERSION}_darwin_arm64.go-licenses.tar.gz"
             "dist/threadforge_${RELEASE_VERSION}_windows_amd64.go-licenses.tar.gz"
           )
+          python_license_evidence=(
+            "dist/threadforge_${RELEASE_VERSION}_python_linux_py3.11.license-evidence.tar.gz"
+            "dist/threadforge_${RELEASE_VERSION}_python_linux_py3.12.license-evidence.tar.gz"
+            "dist/threadforge_${RELEASE_VERSION}_python_windows_py3.11.license-evidence.tar.gz"
+            "dist/threadforge_${RELEASE_VERSION}_python_windows_py3.12.license-evidence.tar.gz"
+            "dist/threadforge_${RELEASE_VERSION}_python_darwin_py3.11.license-evidence.tar.gz"
+            "dist/threadforge_${RELEASE_VERSION}_python_darwin_py3.12.license-evidence.tar.gz"
+          )
           for archive in "${archives[@]}"; do
             if [[ ! -f "$archive" ]]; then
               echo "Missing supported CLI archive: $archive" >&2
@@ -455,15 +593,27 @@ jobs:
               exit 1
             fi
           done
+          for evidence in "${python_license_evidence[@]}"; do
+            if [[ ! -f "$evidence" ]]; then
+              echo "Missing target Python license-evidence bundle: $evidence" >&2
+              exit 1
+            fi
+          done
           if [[ ${#sboms[@]} -ne 4 ]]; then
             echo "Expected four SPDX SBOMs." >&2
+            find dist -maxdepth 1 -type f -printf '%f\n' >&2
+            exit 1
+          fi
+          candidate_payloads=(dist/threadforge_${RELEASE_VERSION}_*)
+          if [[ ${#candidate_payloads[@]} -ne 18 ]]; then
+            echo "Expected exactly 18 versioned candidate payload files, found ${#candidate_payloads[@]}." >&2
             find dist -maxdepth 1 -type f -printf '%f\n' >&2
             exit 1
           fi
           (
             cd dist
             {
-              for file in threadforge_*.tar.gz threadforge_*.zip threadforge_*.spdx.json; do
+              for file in "threadforge_${RELEASE_VERSION}_"*.tar.gz "threadforge_${RELEASE_VERSION}_"*.zip "threadforge_${RELEASE_VERSION}_"*.spdx.json; do
                 [[ -f "$file" ]] || continue
                 sha256sum "$file"
               done

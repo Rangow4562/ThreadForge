@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/python-license-evidence-v1.schema.json",
+  "title": "Threadforge Python License Evidence v1",
+  "description": "Unreviewed metadata and notice-file evidence collected from one locked Python environment; never grants license approval or release clearance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "source_commit",
+    "release_version",
+    "target",
+    "scope",
+    "environment",
+    "input_hashes",
+    "locked_package_count",
+    "installed_distribution_count",
+    "unlocked_distribution_count",
+    "license_summary",
+    "license_review_status",
+    "license_review_required",
+    "release_clearance",
+    "project_declared_license",
+    "distributions",
+    "collector_sha256"
+  ],
+  "properties": {
+    "schema": {"const": "threadforge.python-license-evidence.v1"},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "release_version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "python_version"],
+      "properties": {
+        "os": {"enum": ["linux", "windows", "darwin"]},
+        "python_version": {"enum": ["3.11", "3.12"]}
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project", "project_version", "extras"],
+      "properties": {
+        "project": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$"},
+        "project_version": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.!+_-]{0,254}$"},
+        "extras": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["implementation", "runtime_version", "platform_system"],
+      "properties": {
+        "implementation": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$"},
+        "runtime_version": {"type": "string", "pattern": "^3\\.(11|12)\\.[0-9]+$"},
+        "platform_system": {"enum": ["Linux", "Windows", "Darwin"]}
+      }
+    },
+    "input_hashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uv_lock_sha256", "pyproject_sha256"],
+      "properties": {
+        "uv_lock_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "pyproject_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "locked_package_count": {"type": "integer", "minimum": 1, "maximum": 10000},
+    "installed_distribution_count": {"type": "integer", "minimum": 1, "maximum": 10000},
+    "unlocked_distribution_count": {"type": "integer", "minimum": 0, "maximum": 10000},
+    "license_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["distributions_without_license_metadata", "distributions_without_license_files", "license_file_count", "license_file_bytes", "malformed_license_metadata_count"],
+      "properties": {
+        "distributions_without_license_metadata": {"type": "integer", "minimum": 0, "maximum": 10000},
+        "distributions_without_license_files": {"type": "integer", "minimum": 0, "maximum": 10000},
+        "license_file_count": {"type": "integer", "minimum": 0, "maximum": 20000},
+        "license_file_bytes": {"type": "integer", "minimum": 0, "maximum": 134217728},
+        "malformed_license_metadata_count": {"type": "integer", "minimum": 0, "maximum": 10000}
+      }
+    },
+    "license_review_status": {"const": "unreviewed"},
+    "license_review_required": {"const": true},
+    "release_clearance": {"const": false},
+    "project_declared_license": {"type": ["string", "null"], "maxLength": 1024},
+    "collector_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "distributions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "normalized_name",
+          "version",
+          "locked",
+          "metadata_file_sha256",
+          "license_expression",
+          "license_expression_status",
+          "license_expression_byte_count",
+          "license_expression_sha256",
+          "license_classifiers",
+          "license_classifier_count",
+          "license_classifier_metadata_malformed",
+          "legacy_license_field_byte_count",
+          "legacy_license_field_sha256",
+          "legacy_license_field_truncated_for_digest",
+          "license_metadata_malformed",
+          "license_files"
+        ],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$"},
+          "normalized_name": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "version": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.!+_-]{0,254}$"},
+          "locked": {"type": "boolean"},
+          "metadata_file_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "license_expression": {"type": ["string", "null"], "maxLength": 1024},
+          "license_expression_status": {"enum": ["missing", "captured_unreviewed", "omitted_unsafe_metadata"]},
+          "license_expression_byte_count": {"type": "integer", "minimum": 0, "maximum": 4194304},
+          "license_expression_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "license_classifiers": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^License :: [A-Za-z0-9 .:/()+_-]{1,240}$"}, "uniqueItems": true},
+          "license_classifier_count": {"type": "integer", "minimum": 0, "maximum": 1000},
+          "license_classifier_metadata_malformed": {"type": "boolean"},
+          "legacy_license_field_byte_count": {"type": "integer", "minimum": 0, "maximum": 4194304},
+          "legacy_license_field_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "legacy_license_field_truncated_for_digest": {"type": "boolean"},
+          "license_metadata_malformed": {"type": "boolean"},
+          "license_files": {
+            "type": "array",
+            "maxItems": 20000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "archive_path", "size_bytes", "sha256"],
+              "properties": {
+                "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+                "archive_path": {"type": "string", "pattern": "^licenses/[a-z0-9-]+/[A-Za-z0-9.!+_-]+/.+", "maxLength": 8192},
+                "size_bytes": {"type": "integer", "minimum": 0, "maximum": 16777216},
+                "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

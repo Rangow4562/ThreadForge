@@ -293,6 +293,32 @@ jobs:
           TARGET_ARCH: ${{ matrix.goarch }}
         run: bash scripts/build-release-artifact.sh "$RELEASE_VERSION" "$TARGET_OS" "$TARGET_ARCH" dist
 
+      - name: Install pinned Go license evidence scanner
+        shell: bash
+        env:
+          GOBIN: ${{ runner.temp }}/threadforge-tools
+        run: |
+          mkdir -p "$GOBIN"
+          go install github.com/google/go-licenses/v2@v2.0.1
+
+      - name: Collect target-specific Go license evidence
+        shell: bash
+        env:
+          GO_LICENSES: ${{ runner.temp }}/threadforge-tools/go-licenses
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+          LICENSE_EVIDENCE_PATH: dist/threadforge_${{ steps.release.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.go-licenses.tar.gz
+        run: >-
+          python3 scripts/build_go_license_evidence.py
+          --go-licenses "$GO_LICENSES"
+          --go "$(command -v go)"
+          --goos "$TARGET_OS"
+          --goarch "$TARGET_ARCH"
+          --source-commit "$GITHUB_SHA"
+          --source-date-epoch "$SOURCE_DATE_EPOCH"
+          --output "$LICENSE_EVIDENCE_PATH"
+
       - name: Generate SPDX SBOM from the built CLI
         id: sbom_first_attempt
         continue-on-error: true
@@ -345,6 +371,11 @@ jobs:
         with:
           subject-path: ${{ steps.package.outputs.sbom_path }}
 
+      - name: Attest Go license evidence provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/threadforge_${{ steps.release.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.go-licenses.tar.gz
+
       - name: Upload architecture-specific candidate files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -352,6 +383,7 @@ jobs:
           path: |
             ${{ steps.package.outputs.archive_path }}
             ${{ steps.package.outputs.sbom_path }}
+            dist/threadforge_${{ steps.release.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.go-licenses.tar.gz
           if-no-files-found: error
           retention-days: 14
 
@@ -394,12 +426,37 @@ jobs:
 
       - name: Validate candidate set and create checksums
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
           shopt -s nullglob
-          archives=(dist/threadforge_*.tar.gz dist/threadforge_*.zip)
-          sboms=(dist/threadforge_*.spdx.json)
-          if [[ ${#archives[@]} -ne 4 || ${#sboms[@]} -ne 4 ]]; then
-            echo "Expected four supported CLI archives and four SPDX SBOMs." >&2
+          archives=(
+            "dist/threadforge_${RELEASE_VERSION}_linux_amd64.tar.gz"
+            "dist/threadforge_${RELEASE_VERSION}_darwin_amd64.tar.gz"
+            "dist/threadforge_${RELEASE_VERSION}_darwin_arm64.tar.gz"
+            "dist/threadforge_${RELEASE_VERSION}_windows_amd64.zip"
+          )
+          sboms=(dist/threadforge_${RELEASE_VERSION}_*.spdx.json)
+          license_evidence=(
+            "dist/threadforge_${RELEASE_VERSION}_linux_amd64.go-licenses.tar.gz"
+            "dist/threadforge_${RELEASE_VERSION}_darwin_amd64.go-licenses.tar.gz"
+            "dist/threadforge_${RELEASE_VERSION}_darwin_arm64.go-licenses.tar.gz"
+            "dist/threadforge_${RELEASE_VERSION}_windows_amd64.go-licenses.tar.gz"
+          )
+          for archive in "${archives[@]}"; do
+            if [[ ! -f "$archive" ]]; then
+              echo "Missing supported CLI archive: $archive" >&2
+              exit 1
+            fi
+          done
+          for evidence in "${license_evidence[@]}"; do
+            if [[ ! -f "$evidence" ]]; then
+              echo "Missing target Go license-evidence bundle: $evidence" >&2
+              exit 1
+            fi
+          done
+          if [[ ${#sboms[@]} -ne 4 ]]; then
+            echo "Expected four SPDX SBOMs." >&2
             find dist -maxdepth 1 -type f -printf '%f\n' >&2
             exit 1
           fi

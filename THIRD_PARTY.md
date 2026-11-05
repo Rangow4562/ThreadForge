@@ -2,6 +2,8 @@
 
 This file is the source-of-truth reuse ledger. A component is not copied until its exact upstream revision, file scope, license, and required notices have been recorded here. The separate [dependency/license audit workpaper](docs/license-audit.md) tracks transitive inventory coverage and the remaining release review; it is not legal clearance.
 
+The nested Beacon Go module at `third_party/agent-beacon/pkg/asymptoteobserve` retains the same MIT license text beside its `go.mod` as `third_party/agent-beacon/LICENSE`. This ensures module-scoped license scanners can discover the notice; `python/tests/test_go_license_notices.py` checks that the two texts remain synchronized. It does not change the dependency inventory's unreviewed status or grant redistribution clearance.
+
 | Component | Intended use | Declared license | Current status |
 |---|---|---|---|
 | Threadforge native session scan budget (`third_party/beacon-sessionreaders/internal/sessionlimits/`) | Shared bounded filesystem/metadata accounting for native session discovery | Apache-2.0; Copyright (c) 2026 Asymptote Labs | Threadforge-authored code; per-store defaults are 10,000 entries, per-directory 10,000 entries, depth 24, 1 MiB per metadata file, and 64 MiB aggregate metadata. This package is separate from the MIT-licensed Beacon reader files in the containing nested module. |

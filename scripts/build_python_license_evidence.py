@@ -52,14 +52,28 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _sha256_file(path: Path) -> str:
+def _sha256_source_file(path: Path) -> str:
     digest = hashlib.sha256()
+    pending = b""
+    total_bytes = 0
     try:
         with path.open("rb") as stream:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(chunk)
+                total_bytes += len(chunk)
+                if total_bytes > MAX_METADATA_BYTES:
+                    raise LicenseEvidenceError("Python evidence collector source exceeds the 4 MiB limit")
+                chunk = pending + chunk
+                pending = b""
+                if chunk.endswith(b"\r"):
+                    pending = b"\r"
+                    chunk = chunk[:-1]
+                digest.update(chunk.replace(b"\r\n", b"\n"))
+        if pending:
+            digest.update(pending)
+    except LicenseEvidenceError:
+        raise
     except OSError as error:
-        raise LicenseEvidenceError("cannot hash a Python evidence input") from error
+        raise LicenseEvidenceError("cannot hash the Python evidence collector source") from error
     return digest.hexdigest()
 
 
@@ -525,7 +539,7 @@ def build_python_license_evidence(
         "python-license-evidence/report.csv": report_bytes,
     }
     entries.update({f"python-license-evidence/{name}": data for name, data in license_payloads.items()})
-    evidence["collector_sha256"] = _sha256_file(collector_path)
+    evidence["collector_sha256"] = _sha256_source_file(collector_path)
     evidence_bytes = json.dumps(evidence, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
     entries["python-license-evidence/evidence.json"] = evidence_bytes
     _write_deterministic_archive(output_path, entries, source_date_epoch)

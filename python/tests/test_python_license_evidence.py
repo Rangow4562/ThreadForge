@@ -137,6 +137,7 @@ def test_archive_is_deterministic_path_free_and_never_clears_review(tmp_path):
     assert evidence == second_evidence
     assert evidence["schema"] == "threadforge.python-license-evidence.v1"
     assert evidence["source_commit"] == SOURCE_COMMIT
+    assert evidence["collector_sha256"] == EVIDENCE._sha256_source_file(SCRIPT_PATH)
     assert evidence["input_hashes"]["uv_lock_sha256"] == hashlib.sha256((tmp_path / "uv.lock").read_bytes()).hexdigest()
     assert evidence["installed_distribution_count"] == 2
     assert evidence["unlocked_distribution_count"] == 0
@@ -238,6 +239,17 @@ def test_deterministic_archive_writer_accepts_relative_output_in_existing_direct
     assert output.is_file()
     with tarfile.open(output, "r:gz") as archive:
         assert archive.extractfile("evidence.txt").read() == b"bounded\n"
+
+
+def test_collector_digest_is_stable_across_lf_and_crlf_checkouts(tmp_path):
+    source = tmp_path / "collector.py"
+    prefix = b"a" * ((1024 * 1024) - 1)
+    source.write_bytes(prefix + b"\nsecond line\n")
+    lf_digest = EVIDENCE._sha256_source_file(source)
+    source.write_bytes(prefix + b"\r\nsecond line\r\n")
+    crlf_digest = EVIDENCE._sha256_source_file(source)
+
+    assert lf_digest == crlf_digest
 
 
 def test_rejects_target_mismatch_invalid_scope_and_existing_output(tmp_path):

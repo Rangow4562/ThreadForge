@@ -85,7 +85,11 @@
     "license_review_required": {"const": true},
     "release_clearance": {"const": false},
     "project_declared_license": {"type": ["string", "null"], "maxLength": 1024},
-    "collector_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "collector_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the collector source with CRLF sequences normalized to LF so Windows checkouts match Unix checkouts."
+    },
     "distributions": {
       "type": "array",
       "minItems": 1,

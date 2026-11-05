@@ -39,6 +39,14 @@ import (
 
 const approvedFixture = `{"schema_version":"threadforge.procedure-graph.v1","id":"tiny-flow","project_id":"demo","title":"Tiny flow","revision":1,"status":"approved","applicability":{"paths":["src/**"]},"nodes":[{"id":"start","kind":"trigger","instruction":"Inspect the task."}],"edges":[],"evidence":[],"validation":{"dataset_fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","held_out":true,"baseline_runs":1,"baseline_score":0.8,"candidate_score":0.8,"noise_floor":0,"cost_unit":"tokens","baseline_cost":10,"candidate_cost":10,"max_cost_increase":0,"status":"passed"},"approval":{"approved_by":"reviewer","approved_at":"2026-09-24T10:00:00Z","reason":"checked","privacy_reviewed":true}}`
 
+func TestVersionCommandReportsBuildVersion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"version"}, &stdout, &stderr); code != 0 ||
+		stdout.String() != "threadforge "+version+"\n" || stderr.Len() != 0 {
+		t.Fatalf("version command code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestDecisionModelFingerprintCommandOmitsLocalPath(t *testing.T) {
 	modelPath := filepath.Join(t.TempDir(), "local-model")
 	if err := os.Mkdir(modelPath, 0o700); err != nil {

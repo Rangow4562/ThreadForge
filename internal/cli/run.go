@@ -42,7 +42,9 @@ import (
 	"github.com/threadforge-ai/threadforge/pkg/teamauth"
 )
 
-const version = "0.4.6"
+// version is replaced by the tagged release build through -ldflags. Keep the
+// checked-in value aligned with the most recently published CLI release.
+var version = "0.4.6"
 const maxGraphBytes = 2 << 20
 
 func Run(args []string, stdout, stderr io.Writer) int {

@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: Stable version for a non-tag release-pipeline rehearsal from main
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -200,3 +205,194 @@ jobs:
       - name: Start ephemeral stack and verify synthetic ingestion
         shell: bash
         run: bash scripts/test-elasticsearch-stack.sh "$RUNNER_TEMP/threadforge" "$RUNNER_TEMP/threadforge-elasticsearch-pack"
+
+  release-candidate:
+    name: Build and attest release candidates (${{ matrix.goos }}/${{ matrix.goarch }})
+    if: >-
+      (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
+      || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
+    needs: [test, elasticsearch-local-stack]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Python for normalized Windows ZIP packaging
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Validate release tag and source commit
+        id: release
+        shell: bash
+        env:
+          RELEASE_VERSION_INPUT: ${{ inputs.release_version }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_TYPE" == tag ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Release candidate tags must be stable vMAJOR.MINOR.PATCH tags." >&2
+              exit 1
+            fi
+            version="${GITHUB_REF_NAME#v}"
+            if [[ "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" != "$GITHUB_SHA" ]]; then
+              echo "The tag does not resolve to the workflow source commit." >&2
+              exit 1
+            fi
+          elif [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF_NAME" == main ]]; then
+            version="$RELEASE_VERSION_INPUT"
+            if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Manual release rehearsals require a stable MAJOR.MINOR.PATCH version." >&2
+              exit 1
+            fi
+          else
+            echo "Release candidates require a stable tag or a manual dispatch from main." >&2
+            exit 1
+          fi
+          git fetch origin refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "Release source must be reachable from origin/main." >&2
+            exit 1
+          fi
+          source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "SOURCE_DATE_EPOCH=$source_date_epoch" >> "$GITHUB_ENV"
+
+      - name: Build normalized CLI archive
+        id: package
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+        run: bash scripts/build-release-artifact.sh "$RELEASE_VERSION" "$TARGET_OS" "$TARGET_ARCH" dist
+
+      - name: Generate SPDX SBOM from the built CLI
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          file: ${{ steps.package.outputs.binary_path }}
+          format: spdx-json
+          output-file: ${{ steps.package.outputs.sbom_path }}
+          syft-version: v1.56.0
+          dependency-snapshot: false
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Validate SBOM and attest archive plus SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.package.outputs.archive_path }}
+          sbom-path: ${{ steps.package.outputs.sbom_path }}
+
+      - name: Attest SPDX SBOM file provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.package.outputs.sbom_path }}
+
+      - name: Upload architecture-specific candidate files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: threadforge-release-${{ steps.release.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            ${{ steps.package.outputs.archive_path }}
+            ${{ steps.package.outputs.sbom_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release-candidate-bundle:
+    name: Assemble, checksum, and attest release-candidate bundle
+    if: >-
+      (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
+      || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
+    needs: release-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Validate candidate version
+        id: release
+        shell: bash
+        env:
+          RELEASE_VERSION_INPUT: ${{ inputs.release_version }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_TYPE" == tag ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$RELEASE_VERSION_INPUT"
+          fi
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Invalid release candidate version." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download architecture-specific candidate files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: threadforge-release-${{ steps.release.outputs.version }}-*
+          merge-multiple: true
+          path: dist
+
+      - name: Validate candidate set and create checksums
+        shell: bash
+        run: |
+          shopt -s nullglob
+          archives=(dist/threadforge_*.tar.gz dist/threadforge_*.zip)
+          sboms=(dist/threadforge_*.spdx.json)
+          if [[ ${#archives[@]} -ne 4 || ${#sboms[@]} -ne 4 ]]; then
+            echo "Expected four supported CLI archives and four SPDX SBOMs." >&2
+            find dist -maxdepth 1 -type f -printf '%f\n' >&2
+            exit 1
+          fi
+          (
+            cd dist
+            {
+              for file in threadforge_*.tar.gz threadforge_*.zip threadforge_*.spdx.json; do
+                [[ -f "$file" ]] || continue
+                sha256sum "$file"
+              done
+            } > checksums.txt
+            sha256sum --check checksums.txt
+          )
+
+      - name: Attest combined checksum file
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/checksums.txt
+
+      - name: Upload complete release-candidate bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: threadforge-release-candidate-${{ steps.release.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

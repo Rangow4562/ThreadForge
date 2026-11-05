@@ -1,7 +1,7 @@
 # Windows CLI installation
 
 > [!WARNING]
-> The latest downloadable CLI is `v0.4.6` and is not production/cutover-approved. Review the [public release status](release-status.md) before installing; this binary does not authorize replacing or retiring legacy systems.
+> The latest downloadable CLI is `v0.5.0` and is not production/cutover-approved. Review the [public release status](release-status.md) before installing; this binary does not authorize replacing or retiring legacy systems.
 
 Threadforge publishes a Windows `amd64` CLI ZIP. From a Threadforge checkout, run the user-local installer in PowerShell 7:
 
@@ -10,10 +10,10 @@ Threadforge publishes a Windows `amd64` CLI ZIP. From a Threadforge checkout, ru
 pwsh -NoProfile -File .\packaging\windows\install.ps1
 
 # Pin a reviewed release when reproducibility matters.
-pwsh -NoProfile -File .\packaging\windows\install.ps1 -Version 0.4.6
+pwsh -NoProfile -File .\packaging\windows\install.ps1 -Version 0.5.0
 
 # Optional absolute destination instead of %LOCALAPPDATA%\Programs\Threadforge.
-pwsh -NoProfile -File .\packaging\windows\install.ps1 -Version 0.4.6 -InstallDir 'D:\Tools\Threadforge'
+pwsh -NoProfile -File .\packaging\windows\install.ps1 -Version 0.5.0 -InstallDir 'D:\Tools\Threadforge'
 ```
 
 The installer requires `curl.exe`, supports Windows `amd64`, and makes no administrator, account-login, PATH, credential, or host-configuration changes. It downloads only from GitHub over HTTPS, verifies the archive against the release's `checksums.txt`, rejects extra, oversized, link, and reparse-point ZIP entries, runs the staged CLI's exact version command, and only then atomically replaces `threadforge.exe`. If verification fails, an existing installation is left in place. Add the chosen install directory to PATH yourself if desired.

@@ -11,7 +11,7 @@ function ConvertTo-ThreadforgeReleaseVersion {
         $normalized = $normalized.Substring(1)
     }
     if ($normalized -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$') {
-        throw 'Version must be a release version such as 0.4.6 or v0.4.6.'
+        throw 'Version must be a release version such as 0.5.0 or v0.5.0.'
     }
     return $normalized
 }

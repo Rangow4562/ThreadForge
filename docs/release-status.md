@@ -1,8 +1,10 @@
 # Public release status
 
-Status checked **November 5, 2026**: GitHub's latest public stable release is `v0.4.6`, published October 30 from tag commit `a5b9e73436876038fb7d3e40268eece298af4c7b`. The current `main` source has advanced beyond that tag; installers that select the latest release install the `v0.4.6` binary, not current `main`.
+Status checked **November 5, 2026**: GitHub's latest public stable release is `v0.4.6`, published October 30, 2026 from tag commit `a5b9e73436876038fb7d3e40268eece298af4c7b`. The current `main` source has advanced beyond that tag; installers that select the latest release install the `v0.4.6` binary, not current `main`.
 
 GitHub marks `v0.4.6` as a stable release, but Threadforge has **not** passed the all-or-nothing production/cutover acceptance gate. Its publication is not evidence that Beacon, Mancode, AnyJev, or RRSI can be retired or replaced. Do not use this release as authorization to cut over or delete legacy data.
+
+The current checkout contains an uncommitted `0.5.0` version bump. Its local test suite passed on November 5, 2026, but it has not been pushed or published; public badges and install instructions must continue to identify `v0.4.6` until an actual release exists. The version bump is not production or cutover approval.
 
 The `v0.4.6` release includes `checksums.txt`, but that checksum was published alongside the archives and is not a publisher signature or independent build-provenance attestation. The existing `v0.4.6` assets have not been retroactively attested. New version tags now run the release-candidate job in the main test workflow only after all six OS/Python suites and the Elasticsearch synthetic-ingestion job pass. That job builds the four supported CLI archives with the tag version embedded, generates an SPDX SBOM for each binary, reconciles its module inventory with that binary's embedded Go build information, creates build-provenance attestations for each archive and SBOM file, binds each archive to its SBOM with a separate SBOM attestation, and attests the combined checksum file. It uploads a 14-day workflow artifact and deliberately does not create or modify a public GitHub Release. See the [release-candidate process](release-process.md).
 

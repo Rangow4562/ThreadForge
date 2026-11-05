@@ -98,57 +98,57 @@ try {
     $goodBinary = Join-Path $temporaryRoot 'good.exe'
     $wrongBinary = Join-Path $temporaryRoot 'wrong.exe'
     $failingBinary = Join-Path $temporaryRoot 'failing.exe'
-    New-TestBinary -OutputPath $goodBinary -ReportedVersion '0.4.6'
+    New-TestBinary -OutputPath $goodBinary -ReportedVersion '0.5.0'
     New-TestBinary -OutputPath $wrongBinary -ReportedVersion '9.9.9'
-    New-TestBinary -OutputPath $failingBinary -ReportedVersion '0.4.6' -ExitCode 9
+    New-TestBinary -OutputPath $failingBinary -ReportedVersion '0.5.0' -ExitCode 9
 
     $goodArchive = Join-Path $temporaryRoot 'good.zip'
     New-TestArchive -ArchivePath $goodArchive -BinaryPath $goodBinary
     $goodHash = (Get-FileHash -LiteralPath $goodArchive -Algorithm SHA256).Hash.ToLowerInvariant()
-    $assetName = 'threadforge_0.4.6_windows_amd64.zip'
+    $assetName = 'threadforge_0.5.0_windows_amd64.zip'
     $goodChecksums = "$goodHash  $assetName`r`n$('{0}' -f ('0' * 64))  unrelated.txt`r`n"
 
     $pinnedDir = Join-Path $temporaryRoot 'pinned'
-    $pinnedDownloader = New-TestDownloader -ArchivePath $goodArchive -ChecksumText $goodChecksums -ReleaseVersion '0.4.6'
-    $pinnedOutput = @(Install-Threadforge -Version 'v0.4.6' -InstallDir $pinnedDir -Downloader $pinnedDownloader) -join "`n"
+    $pinnedDownloader = New-TestDownloader -ArchivePath $goodArchive -ChecksumText $goodChecksums -ReleaseVersion '0.5.0'
+    $pinnedOutput = @(Install-Threadforge -Version 'v0.5.0' -InstallDir $pinnedDir -Downloader $pinnedDownloader) -join "`n"
     Assert-TestCondition ([System.IO.File]::Exists((Join-Path $pinnedDir 'threadforge.exe'))) 'Pinned install did not create threadforge.exe.'
-    Assert-TestCondition ($pinnedOutput.Contains('threadforge 0.4.6')) 'Pinned install output did not report the verified version.'
+    Assert-TestCondition ($pinnedOutput.Contains('threadforge 0.5.0')) 'Pinned install output did not report the verified version.'
 
     $latestDir = Join-Path $temporaryRoot 'latest'
-    $latestDownloader = New-TestDownloader -ArchivePath $goodArchive -ChecksumText $goodChecksums -ReleaseVersion '0.4.6'
+    $latestDownloader = New-TestDownloader -ArchivePath $goodArchive -ChecksumText $goodChecksums -ReleaseVersion '0.5.0'
     $null = Install-Threadforge -InstallDir $latestDir -Downloader $latestDownloader
     Assert-TestCondition ([System.IO.File]::Exists((Join-Path $latestDir 'threadforge.exe'))) 'Latest install did not create threadforge.exe.'
 
     $replacementDir = Join-Path $temporaryRoot 'replacement'
     [void][System.IO.Directory]::CreateDirectory($replacementDir)
     [System.IO.File]::Copy($wrongBinary, (Join-Path $replacementDir 'threadforge.exe'))
-    $replacementDownloader = New-TestDownloader -ArchivePath $goodArchive -ChecksumText $goodChecksums -ReleaseVersion '0.4.6'
-    $null = Install-Threadforge -Version '0.4.6' -InstallDir $replacementDir -Downloader $replacementDownloader
+    $replacementDownloader = New-TestDownloader -ArchivePath $goodArchive -ChecksumText $goodChecksums -ReleaseVersion '0.5.0'
+    $null = Install-Threadforge -Version '0.5.0' -InstallDir $replacementDir -Downloader $replacementDownloader
     Assert-TestCondition ((Get-FileHash -LiteralPath (Join-Path $replacementDir 'threadforge.exe') -Algorithm SHA256).Hash -ceq (Get-FileHash -LiteralPath $goodBinary -Algorithm SHA256).Hash) 'Verified installation did not atomically replace the prior binary.'
 
     $invalidDir = Join-Path $temporaryRoot 'invalid-version'
-    Assert-TestThrows { Install-Threadforge -Version '../0.4.6' -InstallDir $invalidDir -Downloader $pinnedDownloader } 'Installer accepted a path-like version.'
+    Assert-TestThrows { Install-Threadforge -Version '../0.5.0' -InstallDir $invalidDir -Downloader $pinnedDownloader } 'Installer accepted a path-like version.'
     Assert-TestCondition (-not [System.IO.Directory]::Exists($invalidDir)) 'Invalid version created an install directory.'
 
     $badChecksumDir = Join-Path $temporaryRoot 'bad-checksum'
-    $badChecksumDownloader = New-TestDownloader -ArchivePath $goodArchive -ChecksumText ("$('0' * 64)  $assetName`n") -ReleaseVersion '0.4.6'
-    Assert-TestThrows { Install-Threadforge -Version '0.4.6' -InstallDir $badChecksumDir -Downloader $badChecksumDownloader } 'Installer accepted a checksum mismatch.'
+    $badChecksumDownloader = New-TestDownloader -ArchivePath $goodArchive -ChecksumText ("$('0' * 64)  $assetName`n") -ReleaseVersion '0.5.0'
+    Assert-TestThrows { Install-Threadforge -Version '0.5.0' -InstallDir $badChecksumDir -Downloader $badChecksumDownloader } 'Installer accepted a checksum mismatch.'
     Assert-TestCondition (-not [System.IO.Directory]::Exists($badChecksumDir)) 'Checksum mismatch created an install directory.'
 
     $extraArchive = Join-Path $temporaryRoot 'extra.zip'
     New-TestArchive -ArchivePath $extraArchive -BinaryPath $goodBinary -AddExtraEntry
     $extraHash = (Get-FileHash -LiteralPath $extraArchive -Algorithm SHA256).Hash.ToLowerInvariant()
-    $extraDownloader = New-TestDownloader -ArchivePath $extraArchive -ChecksumText "$extraHash  $assetName`n" -ReleaseVersion '0.4.6'
+    $extraDownloader = New-TestDownloader -ArchivePath $extraArchive -ChecksumText "$extraHash  $assetName`n" -ReleaseVersion '0.5.0'
     $extraDir = Join-Path $temporaryRoot 'extra-entry'
-    Assert-TestThrows { Install-Threadforge -Version '0.4.6' -InstallDir $extraDir -Downloader $extraDownloader } 'Installer accepted an unexpected ZIP member.'
+    Assert-TestThrows { Install-Threadforge -Version '0.5.0' -InstallDir $extraDir -Downloader $extraDownloader } 'Installer accepted an unexpected ZIP member.'
     Assert-TestCondition (-not [System.IO.Directory]::Exists($extraDir)) 'Unexpected archive member created an install directory.'
 
     $symlinkArchive = Join-Path $temporaryRoot 'symlink.zip'
     New-TestArchive -ArchivePath $symlinkArchive -BinaryPath $goodBinary -SymlinkEntry
     $symlinkHash = (Get-FileHash -LiteralPath $symlinkArchive -Algorithm SHA256).Hash.ToLowerInvariant()
-    $symlinkDownloader = New-TestDownloader -ArchivePath $symlinkArchive -ChecksumText "$symlinkHash  $assetName`n" -ReleaseVersion '0.4.6'
+    $symlinkDownloader = New-TestDownloader -ArchivePath $symlinkArchive -ChecksumText "$symlinkHash  $assetName`n" -ReleaseVersion '0.5.0'
     $symlinkDir = Join-Path $temporaryRoot 'symlink-entry'
-    Assert-TestThrows { Install-Threadforge -Version '0.4.6' -InstallDir $symlinkDir -Downloader $symlinkDownloader } 'Installer accepted a ZIP link entry.'
+    Assert-TestThrows { Install-Threadforge -Version '0.5.0' -InstallDir $symlinkDir -Downloader $symlinkDownloader } 'Installer accepted a ZIP link entry.'
     Assert-TestCondition (-not [System.IO.Directory]::Exists($symlinkDir)) 'ZIP link entry created an install directory.'
 
     $rollbackDir = Join-Path $temporaryRoot 'rollback'
@@ -159,15 +159,15 @@ try {
     $wrongArchive = Join-Path $temporaryRoot 'wrong.zip'
     New-TestArchive -ArchivePath $wrongArchive -BinaryPath $wrongBinary
     $wrongHash = (Get-FileHash -LiteralPath $wrongArchive -Algorithm SHA256).Hash.ToLowerInvariant()
-    $wrongDownloader = New-TestDownloader -ArchivePath $wrongArchive -ChecksumText "$wrongHash  $assetName`n" -ReleaseVersion '0.4.6'
-    Assert-TestThrows { Install-Threadforge -Version '0.4.6' -InstallDir $rollbackDir -Downloader $wrongDownloader } 'Installer accepted a binary reporting the wrong version.'
+    $wrongDownloader = New-TestDownloader -ArchivePath $wrongArchive -ChecksumText "$wrongHash  $assetName`n" -ReleaseVersion '0.5.0'
+    Assert-TestThrows { Install-Threadforge -Version '0.5.0' -InstallDir $rollbackDir -Downloader $wrongDownloader } 'Installer accepted a binary reporting the wrong version.'
     Assert-TestCondition ((Get-FileHash -LiteralPath $existingPath -Algorithm SHA256).Hash -ceq $existingHash) 'Failed version check changed the prior installation.'
 
     $failedSmokeArchive = Join-Path $temporaryRoot 'failed-smoke.zip'
     New-TestArchive -ArchivePath $failedSmokeArchive -BinaryPath $failingBinary
     $failedSmokeHash = (Get-FileHash -LiteralPath $failedSmokeArchive -Algorithm SHA256).Hash.ToLowerInvariant()
-    $failedSmokeDownloader = New-TestDownloader -ArchivePath $failedSmokeArchive -ChecksumText "$failedSmokeHash  $assetName`n" -ReleaseVersion '0.4.6'
-    Assert-TestThrows { Install-Threadforge -Version '0.4.6' -InstallDir $rollbackDir -Downloader $failedSmokeDownloader } 'Installer accepted a non-zero CLI version check.'
+    $failedSmokeDownloader = New-TestDownloader -ArchivePath $failedSmokeArchive -ChecksumText "$failedSmokeHash  $assetName`n" -ReleaseVersion '0.5.0'
+    Assert-TestThrows { Install-Threadforge -Version '0.5.0' -InstallDir $rollbackDir -Downloader $failedSmokeDownloader } 'Installer accepted a non-zero CLI version check.'
     Assert-TestCondition ((Get-FileHash -LiteralPath $existingPath -Algorithm SHA256).Hash -ceq $existingHash) 'Failed process check changed the prior installation.'
 
     Write-Output 'Windows installer fixture tests passed (pinned/latest install, HTTPS selection, checksum, archive shape/link rejection, version validation, and rollback).'

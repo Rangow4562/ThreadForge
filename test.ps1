@@ -51,7 +51,7 @@ if (Get-Command 'uv' -ErrorAction SilentlyContinue) {
     Write-Host 'SKIPPED: Python dependency lock freshness (uv is unavailable; hosted CI enforces the lock)'
 }
 Invoke-Check -Label 'Python tests' -Executable 'python' -Arguments @('-m', 'pytest', '-q') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
-Invoke-Check -Label 'Python compile check' -Executable 'python' -Arguments @('-m', 'compileall', '-q', '.', '..\third_party\harbor_terminus2', '..\third_party\archipelago', '..\domains\coding', '..\domains\workspace') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
+Invoke-Check -Label 'Python compile check' -Executable 'python' -Arguments @('-m', 'compileall', '-q', 'threadforge_py', 'threadforge_domains', 'anyjev', 'rrsi', 'scripts', 'tests', 'setup.py', '..\third_party\harbor_terminus2', '..\third_party\archipelago', '..\domains\coding', '..\domains\workspace') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
 Invoke-Check -Label 'Python sdist/wheel build, content audit, and installed protocol smoke' -Executable 'python' -Arguments @('scripts/verify_distribution.py') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
 $DependencyInventoryOutput = Join-Path ([System.IO.Path]::GetTempPath()) ("threadforge-dependency-inventory-" + [guid]::NewGuid().ToString('N') + '.json')
 Invoke-Check -Label 'Dependency manifest inventory (not legal clearance)' -Executable 'python' -Arguments @('scripts/generate_dependency_inventory.py', '--repo-root', $RepositoryRoot, '--output', $DependencyInventoryOutput) -WorkingDirectory $RepositoryRoot

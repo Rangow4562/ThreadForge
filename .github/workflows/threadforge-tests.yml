@@ -97,7 +97,7 @@ jobs:
           THREADFORGE_REQUIRE_ENGINEERING_GATEWAY_HTTP: "1"
         run: |
           uv run --locked --extra test --extra decisions --extra workspace python -m pytest -q
-          uv run --locked --extra test --extra decisions --extra workspace python -m compileall -q .
+          uv run --locked --extra test --extra decisions --extra workspace python -m compileall -q threadforge_py threadforge_domains anyjev rrsi scripts tests setup.py ../third_party/harbor_terminus2 ../third_party/archipelago ../domains/coding ../domains/workspace
           uv run --locked --extra test --extra decisions --extra workspace ruff check threadforge_py tests
 
       - name: Build, inspect, and install Python distributions

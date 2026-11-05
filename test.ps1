@@ -43,6 +43,25 @@ function Invoke-Check {
     }
 }
 
+function Invoke-PythonCheck {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory
+    )
+
+    if (Get-Command 'uv' -ErrorAction SilentlyContinue) {
+        $uvArguments = @(
+            'run', '--project', (Join-Path $RepositoryRoot 'python'), '--locked',
+            '--extra', 'test', '--extra', 'decisions', '--extra', 'workspace', 'python'
+        ) + $Arguments
+        Invoke-Check -Label $Label -Executable 'uv' -Arguments $uvArguments -WorkingDirectory $WorkingDirectory
+        return
+    }
+
+    Invoke-Check -Label $Label -Executable 'python' -Arguments $Arguments -WorkingDirectory $WorkingDirectory
+}
+
 Invoke-Check -Label 'Go tests' -Executable 'go' -Arguments @('test', './...') -WorkingDirectory $RepositoryRoot
 Invoke-Check -Label 'Go vet' -Executable 'go' -Arguments @('vet', './...') -WorkingDirectory $RepositoryRoot
 if (Get-Command 'uv' -ErrorAction SilentlyContinue) {
@@ -50,11 +69,12 @@ if (Get-Command 'uv' -ErrorAction SilentlyContinue) {
 } else {
     Write-Host 'SKIPPED: Python dependency lock freshness (uv is unavailable; hosted CI enforces the lock)'
 }
-Invoke-Check -Label 'Python tests' -Executable 'python' -Arguments @('-m', 'pytest', '-q') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
-Invoke-Check -Label 'Python compile check' -Executable 'python' -Arguments @('-m', 'compileall', '-q', 'threadforge_py', 'threadforge_domains', 'anyjev', 'rrsi', 'scripts', 'tests', 'setup.py', '..\third_party\harbor_terminus2', '..\third_party\archipelago', '..\domains\coding', '..\domains\workspace') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
-Invoke-Check -Label 'Python sdist/wheel build, content audit, and installed protocol smoke' -Executable 'python' -Arguments @('scripts/verify_distribution.py') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
+$PythonWorkingDirectory = Join-Path $RepositoryRoot 'python'
+Invoke-PythonCheck -Label 'Python tests' -Arguments @('-m', 'pytest', '-q') -WorkingDirectory $PythonWorkingDirectory
+Invoke-PythonCheck -Label 'Python compile check' -Arguments @('-m', 'compileall', '-q', 'threadforge_py', 'threadforge_domains', 'anyjev', 'rrsi', 'scripts', 'tests', 'setup.py', '..\third_party\harbor_terminus2', '..\third_party\archipelago', '..\domains\coding', '..\domains\workspace') -WorkingDirectory $PythonWorkingDirectory
+Invoke-PythonCheck -Label 'Python sdist/wheel build, content audit, and installed protocol smoke' -Arguments @('scripts/verify_distribution.py') -WorkingDirectory $PythonWorkingDirectory
 $DependencyInventoryOutput = Join-Path ([System.IO.Path]::GetTempPath()) ("threadforge-dependency-inventory-" + [guid]::NewGuid().ToString('N') + '.json')
-Invoke-Check -Label 'Dependency manifest inventory (not legal clearance)' -Executable 'python' -Arguments @('scripts/generate_dependency_inventory.py', '--repo-root', $RepositoryRoot, '--output', $DependencyInventoryOutput) -WorkingDirectory $RepositoryRoot
+Invoke-PythonCheck -Label 'Dependency manifest inventory (not legal clearance)' -Arguments @('scripts/generate_dependency_inventory.py', '--repo-root', $RepositoryRoot, '--output', $DependencyInventoryOutput) -WorkingDirectory $RepositoryRoot
 if (Get-Command 'bash' -ErrorAction SilentlyContinue) {
     Invoke-Check -Label 'Coding runner shell syntax' -Executable 'bash' `
         -Arguments @('-n', 'domains/coding/scripts/run_eval.sh') -WorkingDirectory $RepositoryRoot

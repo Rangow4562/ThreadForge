@@ -294,6 +294,20 @@ jobs:
         run: bash scripts/build-release-artifact.sh "$RELEASE_VERSION" "$TARGET_OS" "$TARGET_ARCH" dist
 
       - name: Generate SPDX SBOM from the built CLI
+        id: sbom_first_attempt
+        continue-on-error: true
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          file: ${{ steps.package.outputs.binary_path }}
+          format: spdx-json
+          output-file: ${{ steps.package.outputs.sbom_path }}
+          syft-version: v1.56.0
+          dependency-snapshot: false
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Retry SPDX SBOM generation once after an installer or network error
+        if: steps.sbom_first_attempt.outcome == 'failure'
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           file: ${{ steps.package.outputs.binary_path }}

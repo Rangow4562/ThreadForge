@@ -304,7 +304,12 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
 
-      - name: Validate SBOM and attest archive plus SBOM
+      - name: Attest archive build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.package.outputs.archive_path }}
+
+      - name: Attest archive to its SPDX SBOM
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ steps.package.outputs.archive_path }}

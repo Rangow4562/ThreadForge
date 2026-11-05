@@ -27,6 +27,9 @@
 
 ---
 
+> [!WARNING]
+> The latest downloadable CLI is the published `v0.4.6` release, which predates current `main`. Threadforge has **not** passed production/cutover acceptance; do not use this release to replace or retire Beacon, Mancode, AnyJev, or RRSI. See [public release status](docs/release-status.md) and the [cutover gate](docs/cutover.md).
+
 ## Overview
 
 **Threadforge** is the local-first successor architecture unifying and advancing the capabilities of **Beacon**, **Mancode**, **AnyJev**, and **RRSI**. Its core objective is to prevent repeated failure modes across disparate AI coding agent harnesses by enforcing strict source-freshness checking, cryptographic procedure provenance, revision-controlled task state, calibrated typed decisions, and verifiable evolution loops.

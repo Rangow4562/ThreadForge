@@ -31,6 +31,19 @@ Release-candidate builds add separate per-target Go license-evidence archives us
 
 The release-candidate workflow collects Python license evidence from six locked environments: Linux, Windows, and macOS on Python 3.11 and 3.12, each installing all seven extras declared in `python/pyproject.toml`. `scripts/build_python_license_evidence.py` records the source commit, candidate version, platform/runtime, selected extras, `uv.lock`/`pyproject.toml` hashes, installed package metadata hashes, safe license-expression/classifier fields, and hashes plus copies of discovered license/notice files. The collector source hash normalizes CRLF to LF so its identity is consistent across Windows and Unix checkouts. It rejects installed distributions absent from the lock and unsafe/oversized paths or payloads. Missing metadata/files stay explicitly missing; it does not infer a license. Each deterministic archive is provenance-attested and included in the combined candidate checksums. The collector remains `license_review_status=unreviewed`, `license_review_required=true`, and `release_clearance=false`.
 
+Verified November 6, 2026: non-publishing version `0.5.2` rehearsal run `42189214107` completed successfully from source commit `94c178b5a986f6e9fc44c613f9b312c24a718c2c`. All six Python evidence bundles include all seven extras and report zero unlocked distributions and zero malformed license metadata. The per-environment readback still found distributions without captured license metadata or without a discovered license file:
+
+| Target | Installed distributions | Without captured license metadata | Without discovered license files |
+|---|---:|---:|---:|
+| Linux, Python 3.11 | 253 | 6 | 14 |
+| Linux, Python 3.12 | 161 | 3 | 7 |
+| Windows, Python 3.11 | 146 | 2 | 7 |
+| Windows, Python 3.12 | 146 | 2 | 7 |
+| macOS, Python 3.11 | 142 | 2 | 6 |
+| macOS, Python 3.12 | 142 | 2 | 6 |
+
+“Without captured license metadata” means the installed distribution has no license expression, license classifier, or legacy license field; “without discovered license files” means the collector found no matching license/notice file in that distribution. Neither count proves that a package is unlicensed. Independent verification confirmed all 18 payload hashes in `checksums.txt`, all 19 SLSA provenance attestations (18 payloads plus the checksum file), and all four archive-to-SPDX attestations against the expected repository, workflow, branch, and source commit. The workflow created no public release. This candidate evidence does not populate the source inventory's missing metadata, classify license compatibility, or change `release_clearance=false`.
+
 This Python evidence is a readback of only those six installed environments; it does **not** populate the lockfile inventory's missing Python metadata entries, establish the license of a package from its notice text, or cover the Engineering container/runtime or benchmark datasets/evaluators. Successful installation of the `serving` extra on Linux/Python 3.11 is not evidence that vLLM inference or GPU/runtime behavior works. Neither the Go nor Python collectors review compatibility or grant legal approval.
 
 ## Release gate

@@ -16,7 +16,7 @@ pwsh -NoProfile -File .\packaging\windows\install.ps1 -Version 0.5.0
 pwsh -NoProfile -File .\packaging\windows\install.ps1 -Version 0.5.0 -InstallDir 'D:\Tools\Threadforge'
 ```
 
-The installer requires `curl.exe`, supports Windows `amd64`, and makes no administrator, account-login, PATH, credential, or host-configuration changes. It downloads only from GitHub over HTTPS, verifies the archive against the release's `checksums.txt`, rejects extra, oversized, link, and reparse-point ZIP entries, runs the staged CLI's exact version command, and only then atomically replaces `threadforge.exe`. If verification fails, an existing installation is left in place. Add the chosen install directory to PATH yourself if desired.
+The installer requires `curl.exe`, supports Windows `amd64`, and makes no administrator, account-login, PATH, credential, or host-configuration changes. New candidate ZIPs contain `threadforge.exe`, `LICENSE`, `NOTICE`, `THIRD_PARTY.md`, and `THIRD_PARTY_LICENSES.tar.gz`; the installer also accepts the historical binary-only and published-v0.5.0 layouts. It downloads only from GitHub over HTTPS, verifies the archive against the release's `checksums.txt`, rejects unknown, oversized, link, and reparse-point ZIP entries, runs the staged CLI's exact version command, and only then atomically replaces `threadforge.exe`. If verification fails, an existing installation is left in place. Add the chosen install directory to PATH yourself if desired.
 
 The checksum is downloaded from the same GitHub release as the archive. It detects transfer/corruption errors, but is not a publisher signature or independent proof of release provenance. Review and pin a release version when that distinction matters.
 

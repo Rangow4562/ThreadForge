@@ -3,7 +3,7 @@
 > [!WARNING]
 > The latest downloadable CLI is `v0.5.0` and is not production/cutover-approved. Review the [public release status](release-status.md) before installing; this binary does not authorize replacing or retiring legacy systems.
 
-Threadforge publishes a Linux `amd64` CLI archive. The user-local installer downloads the selected GitHub release, verifies the archive against that release's `checksums.txt`, rejects archives that contain anything except the single top-level `threadforge` binary, and installs it under `$HOME/.local/bin` without `sudo` or account login.
+Threadforge publishes a Linux `amd64` CLI archive. New candidate archives contain the top-level `threadforge` binary, `LICENSE`, `NOTICE`, `THIRD_PARTY.md`, and `THIRD_PARTY_LICENSES.tar.gz`. The user-local installer verifies the archive against that release's `checksums.txt`, accepts only that exact legal-payload layout or the historical binary-only format, extracts only the CLI, and installs it under `$HOME/.local/bin` without `sudo` or account login.
 
 From a Threadforge checkout:
 

@@ -4,16 +4,17 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: build-release-artifact.sh VERSION GOOS GOARCH OUTPUT_DIR" >&2
+  echo "usage: build-release-artifact.sh VERSION GOOS GOARCH OUTPUT_DIR GO_LICENSE_EVIDENCE" >&2
   exit 2
 }
 
-[[ $# -eq 4 ]] || usage
+[[ $# -eq 5 ]] || usage
 
 version="$1"
 goos="$2"
 goarch="$3"
 output_dir="$4"
+go_license_evidence="$5"
 [[ -n "$output_dir" && "$output_dir" != "/" ]] || usage
 
 if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
@@ -37,6 +38,16 @@ fi
 
 mkdir -p "$output_dir/.staging"
 output_dir="$(cd "$output_dir" && pwd -P)"
+repo_root="$(git rev-parse --show-toplevel)"
+if [[ "$go_license_evidence" != /* ]]; then
+  go_license_evidence="${repo_root}/${go_license_evidence}"
+fi
+expected_evidence_name="threadforge_${version}_${goos}_${goarch}.go-licenses.tar.gz"
+if [[ "$(basename "$go_license_evidence")" != "$expected_evidence_name" ||
+      ! -f "$go_license_evidence" || -L "$go_license_evidence" || ! -s "$go_license_evidence" ]]; then
+  echo "missing, unsafe, or mismatched target Go license evidence: ${expected_evidence_name}" >&2
+  exit 1
+fi
 binary_name=threadforge
 archive_extension=tar.gz
 if [[ "$goos" == windows ]]; then
@@ -46,9 +57,11 @@ fi
 
 stem="threadforge_${version}_${goos}_${goarch}"
 binary_path="$output_dir/.staging/${goos}-${goarch}/${binary_name}"
+legal_path="$output_dir/.staging/${goos}-${goarch}/legal"
 archive_path="$output_dir/${stem}.${archive_extension}"
 sbom_path="$output_dir/${stem}.spdx.json"
 mkdir -p "$(dirname "$binary_path")"
+mkdir -p "$legal_path"
 
 env CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOFLAGS= GOTOOLCHAIN=local GOWORK=off \
   go build -trimpath -buildvcs=false \
@@ -58,17 +71,34 @@ chmod 0755 "$binary_path"
 
 touch -d "@${source_date_epoch}" "$binary_path"
 
+for legal_name in LICENSE NOTICE THIRD_PARTY.md; do
+  source_path="${repo_root}/${legal_name}"
+  if [[ ! -f "$source_path" || -L "$source_path" ]]; then
+    echo "required release legal file is missing or unsafe: ${legal_name}" >&2
+    exit 1
+  fi
+  install -m 0644 -- "$source_path" "${legal_path}/${legal_name}"
+  touch -d "@${source_date_epoch}" "${legal_path}/${legal_name}"
+done
+install -m 0644 -- "$go_license_evidence" "${legal_path}/THIRD_PARTY_LICENSES.tar.gz"
+touch -d "@${source_date_epoch}" "${legal_path}/THIRD_PARTY_LICENSES.tar.gz"
+
 if [[ "$archive_extension" == tar.gz ]]; then
   tar --sort=name --mtime="@${source_date_epoch}" --owner=0 --group=0 --numeric-owner \
-    --format=gnu -cf - -C "$(dirname "$binary_path")" "$binary_name" |
+    --format=gnu -cf - -C "$legal_path" LICENSE NOTICE THIRD_PARTY.md THIRD_PARTY_LICENSES.tar.gz \
+    -C "$(dirname "$binary_path")" "$binary_name" |
     gzip -n -9 > "$archive_path"
   archive_entries="$(tar -tzf "$archive_path")"
-  if [[ "$archive_entries" != "$binary_name" ]]; then
-    echo "release archive must contain exactly ${binary_name}" >&2
+  expected_entries=$'LICENSE\nNOTICE\nTHIRD_PARTY.md\nTHIRD_PARTY_LICENSES.tar.gz\n'"${binary_name}"
+  if [[ "$archive_entries" != "$expected_entries" ]]; then
+    echo "release archive is missing, duplicating, or adding legal/binary members" >&2
     exit 1
   fi
 else
-  python3 scripts/package_release_zip.py "$archive_path" "$binary_path" "$binary_name" "$source_date_epoch"
+  python3 scripts/package_release_zip.py \
+    "$archive_path" "$binary_path" "$binary_name" \
+    "${legal_path}/LICENSE" "${legal_path}/NOTICE" "${legal_path}/THIRD_PARTY.md" \
+    "${legal_path}/THIRD_PARTY_LICENSES.tar.gz" "$source_date_epoch"
 fi
 
 if [[ "$goos/$goarch" == "linux/amd64" && "$(go env GOOS)/$(go env GOARCH)" == "linux/amd64" ]]; then
@@ -88,4 +118,5 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   } >> "$GITHUB_OUTPUT"
 fi
 
-printf 'Built %s (embedded version %s)\n' "$archive_path" "$version"
+printf 'Built %s with Apache and target-specific third-party notices (embedded version %s)\n' \
+  "$archive_path" "$version"

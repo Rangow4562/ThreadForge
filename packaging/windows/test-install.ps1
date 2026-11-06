@@ -42,7 +42,16 @@ func main() {
 }
 
 function New-TestArchive {
-    param([string]$ArchivePath, [string]$BinaryPath, [switch]$AddExtraEntry, [switch]$SymlinkEntry)
+    param(
+        [string]$ArchivePath,
+        [string]$BinaryPath,
+        [switch]$AddExtraEntry,
+        [switch]$SymlinkEntry,
+        [switch]$LegacyPublishedV050,
+        [switch]$LegacyBinaryOnly
+    )
+
+    if ($LegacyPublishedV050 -and $LegacyBinaryOnly) { throw 'Test archive legacy layouts are mutually exclusive.' }
 
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -53,6 +62,21 @@ function New-TestArchive {
         $inputStream = [System.IO.File]::OpenRead($BinaryPath)
         $outputStream = $entry.Open()
         try { $inputStream.CopyTo($outputStream) } finally { $inputStream.Dispose(); $outputStream.Dispose() }
+        if (-not $LegacyBinaryOnly) {
+            $legalMembers = @('LICENSE', 'NOTICE')
+            if (-not $LegacyPublishedV050) {
+                $legalMembers += @('THIRD_PARTY.md', 'THIRD_PARTY_LICENSES.tar.gz')
+            }
+            foreach ($name in $legalMembers) {
+                $legalEntry = $archive.CreateEntry($name, [System.IO.Compression.CompressionLevel]::Optimal)
+                $legalStream = $legalEntry.Open()
+                try {
+                    $bytes = [System.Text.Encoding]::UTF8.GetBytes("synthetic $name legal payload`n")
+                    $legalStream.Write($bytes, 0, $bytes.Length)
+                }
+                finally { $legalStream.Dispose() }
+            }
+        }
         if ($AddExtraEntry) {
             $extra = $archive.CreateEntry('unexpected.txt')
             $extraStream = $extra.Open()
@@ -98,9 +122,11 @@ try {
     $goodBinary = Join-Path $temporaryRoot 'good.exe'
     $wrongBinary = Join-Path $temporaryRoot 'wrong.exe'
     $failingBinary = Join-Path $temporaryRoot 'failing.exe'
+    $legacyBinary = Join-Path $temporaryRoot 'legacy.exe'
     New-TestBinary -OutputPath $goodBinary -ReportedVersion '0.5.0'
     New-TestBinary -OutputPath $wrongBinary -ReportedVersion '9.9.9'
     New-TestBinary -OutputPath $failingBinary -ReportedVersion '0.5.0' -ExitCode 9
+    New-TestBinary -OutputPath $legacyBinary -ReportedVersion '0.4.6'
 
     $goodArchive = Join-Path $temporaryRoot 'good.zip'
     New-TestArchive -ArchivePath $goodArchive -BinaryPath $goodBinary
@@ -118,6 +144,23 @@ try {
     $latestDownloader = New-TestDownloader -ArchivePath $goodArchive -ChecksumText $goodChecksums -ReleaseVersion '0.5.0'
     $null = Install-Threadforge -InstallDir $latestDir -Downloader $latestDownloader
     Assert-TestCondition ([System.IO.File]::Exists((Join-Path $latestDir 'threadforge.exe'))) 'Latest install did not create threadforge.exe.'
+
+    $publishedLegacyArchive = Join-Path $temporaryRoot 'published-v050.zip'
+    New-TestArchive -ArchivePath $publishedLegacyArchive -BinaryPath $goodBinary -LegacyPublishedV050
+    $publishedLegacyHash = (Get-FileHash -LiteralPath $publishedLegacyArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+    $publishedLegacyDownloader = New-TestDownloader -ArchivePath $publishedLegacyArchive -ChecksumText "$publishedLegacyHash  $assetName`n" -ReleaseVersion '0.5.0'
+    $publishedLegacyDir = Join-Path $temporaryRoot 'published-v050'
+    $publishedLegacyOutput = @(Install-Threadforge -Version '0.5.0' -InstallDir $publishedLegacyDir -Downloader $publishedLegacyDownloader) -join "`n"
+    Assert-TestCondition ($publishedLegacyOutput.Contains('threadforge 0.5.0')) 'Published v0.5.0 ZIP layout was not accepted.'
+
+    $legacyArchive = Join-Path $temporaryRoot 'legacy-binary-only.zip'
+    New-TestArchive -ArchivePath $legacyArchive -BinaryPath $legacyBinary -LegacyBinaryOnly
+    $legacyHash = (Get-FileHash -LiteralPath $legacyArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+    $legacyAssetName = 'threadforge_0.4.6_windows_amd64.zip'
+    $legacyDownloader = New-TestDownloader -ArchivePath $legacyArchive -ChecksumText "$legacyHash  $legacyAssetName`n" -ReleaseVersion '0.4.6'
+    $legacyDir = Join-Path $temporaryRoot 'legacy-binary-only'
+    $legacyOutput = @(Install-Threadforge -Version '0.4.6' -InstallDir $legacyDir -Downloader $legacyDownloader) -join "`n"
+    Assert-TestCondition ($legacyOutput.Contains('threadforge 0.4.6')) 'Historical binary-only ZIP layout was not accepted.'
 
     $replacementDir = Join-Path $temporaryRoot 'replacement'
     [void][System.IO.Directory]::CreateDirectory($replacementDir)

@@ -407,15 +407,6 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "SOURCE_DATE_EPOCH=$source_date_epoch" >> "$GITHUB_ENV"
 
-      - name: Build normalized CLI archive
-        id: package
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-          TARGET_OS: ${{ matrix.goos }}
-          TARGET_ARCH: ${{ matrix.goarch }}
-        run: bash scripts/build-release-artifact.sh "$RELEASE_VERSION" "$TARGET_OS" "$TARGET_ARCH" dist
-
       - name: Install pinned Go license evidence scanner
         shell: bash
         env:
@@ -441,6 +432,16 @@ jobs:
           --source-commit "$GITHUB_SHA"
           --source-date-epoch "$SOURCE_DATE_EPOCH"
           --output "$LICENSE_EVIDENCE_PATH"
+
+      - name: Build normalized CLI archive with legal payload
+        id: package
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+          LICENSE_EVIDENCE_PATH: dist/threadforge_${{ steps.release.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.go-licenses.tar.gz
+        run: bash scripts/build-release-artifact.sh "$RELEASE_VERSION" "$TARGET_OS" "$TARGET_ARCH" dist "$LICENSE_EVIDENCE_PATH"
 
       - name: Generate SPDX SBOM from the built CLI
         id: sbom_first_attempt

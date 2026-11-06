@@ -28,7 +28,7 @@ case "$url" in
   https://github.com/Rangow4562/ThreadForge/releases/latest)
     printf '%s' "$THREADFORGE_TEST_LATEST_URL"
     ;;
-  */threadforge_0.4.0_linux_amd64.tar.gz)
+  */threadforge_0.5.0_linux_amd64.tar.gz)
     [[ -n "$output" ]] || exit 2
     cp "${THREADFORGE_TEST_FIXTURE_DIR}/archive.tar.gz" "$output"
     ;;

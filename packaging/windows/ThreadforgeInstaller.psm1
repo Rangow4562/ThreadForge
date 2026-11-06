@@ -125,18 +125,42 @@ function Expand-ThreadforgeArchive {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [System.IO.Compression.ZipFile]::OpenRead($ArchivePath)
     try {
-        if ($archive.Entries.Count -ne 1) {
-            throw 'The release ZIP must contain exactly one entry.'
+        $memberNames = [string[]]@($archive.Entries | ForEach-Object { $_.FullName })
+        [Array]::Sort($memberNames, [System.StringComparer]::Ordinal)
+        $memberSignature = [string]::Join("`n", $memberNames)
+        $legacyBinaryLayout = 'threadforge.exe'
+        $publishedV050Layout = "LICENSE`nNOTICE`nthreadforge.exe"
+        $completeLegalLayout = "LICENSE`nNOTICE`nTHIRD_PARTY.md`nTHIRD_PARTY_LICENSES.tar.gz`nthreadforge.exe"
+        if ($memberSignature -cnotin @($legacyBinaryLayout, $publishedV050Layout, $completeLegalLayout)) {
+            throw 'The release ZIP must match a known legacy layout or the exact complete legal-payload layout.'
         }
-        $entry = $archive.Entries[0]
-        if ($entry.FullName -cne 'threadforge.exe' -or $entry.Length -le 0 -or $entry.Length -gt 134217728) {
+
+        [long]$totalExpandedBytes = 0
+        foreach ($archiveEntry in $archive.Entries) {
+            $name = $archiveEntry.FullName
+            $entryLimit = switch -CaseSensitive ($name) {
+                'threadforge.exe' { 134217728; break }
+                'THIRD_PARTY_LICENSES.tar.gz' { 100663296; break }
+                default { 16777216 }
+            }
+            if ($archiveEntry.Length -le 0 -or $archiveEntry.Length -gt $entryLimit) {
+                throw "The release ZIP contains an empty or oversized member: $name"
+            }
+            $totalExpandedBytes += $archiveEntry.Length
+            if ($totalExpandedBytes -gt 268435456) {
+                throw 'The release ZIP exceeds its total expanded-size limit.'
+            }
+            $externalAttributes = [int]$archiveEntry.ExternalAttributes
+            $unixType = ($externalAttributes -shr 16) -band 0xF000
+            $dosAttributes = $externalAttributes -band 0xFFFF
+            if (($unixType -ne 0 -and $unixType -ne 0x8000) -or ($dosAttributes -band 0x400) -ne 0) {
+                throw "The release ZIP member must be a regular file, not a link or reparse point: $name"
+            }
+        }
+
+        $entry = $archive.GetEntry('threadforge.exe')
+        if ($null -eq $entry -or $entry.Length -gt 134217728) {
             throw 'The release ZIP must contain one bounded, non-empty top-level threadforge.exe.'
-        }
-        $externalAttributes = [int]$entry.ExternalAttributes
-        $unixType = ($externalAttributes -shr 16) -band 0xF000
-        $dosAttributes = $externalAttributes -band 0xFFFF
-        if ($unixType -eq 0xA000 -or ($dosAttributes -band 0x400) -ne 0) {
-            throw 'The release ZIP entry must be a regular file, not a link or reparse point.'
         }
 
         $inputStream = $entry.Open()

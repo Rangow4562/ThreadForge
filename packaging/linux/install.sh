@@ -67,8 +67,14 @@ printf '%s  %s\n' "$checksum" "$archive" |
   (cd "$tmp" && sha256sum --check --status -) || fail "SHA-256 verification failed for ${archive}."
 
 mapfile -t members < <(tar -tzf "${tmp}/${archive}")
-[[ "${#members[@]}" -eq 1 && "${members[0]}" == threadforge ]] ||
-  fail 'release archive must contain exactly one top-level threadforge binary.'
+if [[ "${#members[@]}" -eq 1 && "${members[0]}" == threadforge ]]; then
+  : # Accept the historical binary-only archive format for existing releases.
+else
+  sorted_members="$(printf '%s\n' "${members[@]}" | LC_ALL=C sort)"
+  expected_members=$'LICENSE\nNOTICE\nTHIRD_PARTY.md\nTHIRD_PARTY_LICENSES.tar.gz\nthreadforge'
+  [[ "$sorted_members" == "$expected_members" ]] ||
+    fail 'release archive must be a legacy binary-only package or contain the exact verified legal payload.'
+fi
 tar -xzf "${tmp}/${archive}" -C "$tmp" --no-same-owner -- threadforge ||
   fail 'could not extract the verified CLI binary.'
 [[ -f "${tmp}/threadforge" && ! -L "${tmp}/threadforge" ]] || fail 'release did not contain a regular CLI binary.'

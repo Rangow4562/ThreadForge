@@ -11,11 +11,21 @@ import pytest
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "build_go_license_evidence.py"
+WORKFLOW_PATH = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "threadforge-tests.yml"
 SCRIPT_SPEC = importlib.util.spec_from_file_location("threadforge_go_license_evidence", SCRIPT_PATH)
 if SCRIPT_SPEC is None or SCRIPT_SPEC.loader is None:
     raise RuntimeError("could not load the Go license evidence builder")
 EVIDENCE = importlib.util.module_from_spec(SCRIPT_SPEC)
 SCRIPT_SPEC.loader.exec_module(EVIDENCE)
+
+
+def test_release_workflow_creates_go_license_evidence_output_directory():
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    marker = "      - name: Collect target-specific Go license evidence\n"
+    assert marker in workflow
+    step = workflow.split(marker, 1)[1].split("      - name:", 1)[0]
+    assert "LICENSE_EVIDENCE_PATH: dist/" in step
+    assert "run: >-\n          mkdir -p dist &&\n" in step
 
 
 REPORT = (

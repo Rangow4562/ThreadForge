@@ -424,6 +424,7 @@ jobs:
           TARGET_ARCH: ${{ matrix.goarch }}
           LICENSE_EVIDENCE_PATH: dist/threadforge_${{ steps.release.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.go-licenses.tar.gz
         run: >-
+          mkdir -p dist &&
           python3 scripts/build_go_license_evidence.py
           --go-licenses "$GO_LICENSES"
           --go "$(command -v go)"

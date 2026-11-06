@@ -31,7 +31,7 @@ Release-candidate builds add separate per-target Go license-evidence archives us
 
 The release-candidate workflow collects Python license evidence from six locked environments: Linux, Windows, and macOS on Python 3.11 and 3.12, each installing all seven extras declared in `python/pyproject.toml`. New candidates emit `threadforge.python-license-evidence.v2`; the v1 schema remains unchanged for older raw-byte input hashes. `scripts/build_python_license_evidence.py` records the source commit, candidate version, platform/runtime, selected extras, `uv.lock`/`pyproject.toml` hashes, installed package metadata hashes, safe license-expression/classifier fields, and hashes plus copies of discovered license/notice files. The collector-source and v2 input-manifest hashes normalize CRLF to LF so their identities are consistent across Windows and Unix checkouts; the source commit still binds them to the committed files. It rejects installed distributions absent from the lock and unsafe/oversized paths or payloads. Missing metadata/files stay explicitly missing; it does not infer a license. Each deterministic archive is provenance-attested and included in the combined candidate checksums. The collector remains `license_review_status=unreviewed`, `license_review_required=true`, and `release_clearance=false`.
 
-Verified November 6, 2026: non-publishing version `0.5.2` rehearsal run `42189214107` completed successfully from source commit `94c178b5a986f6e9fc44c613f9b312c24a718c2c`. All six Python evidence bundles include all seven extras and report zero unlocked distributions and zero malformed license metadata. The per-environment readback still found distributions without captured license metadata or without a discovered license file:
+Verified November 6, 2026: the latest non-publishing candidate is version `0.5.3`, rehearsal run `42200105414`, from source commit `494e4402b170505ad1f2e1ef4dcdc64f5fe08df1`. All six Python evidence bundles include all seven extras and report zero unlocked distributions and zero malformed license metadata. Their v2 `uv.lock` and `pyproject.toml` input hashes are identical across Windows, macOS, and Linux because CRLF is normalized to LF before hashing; the source commit still binds the evidence to the committed inputs. The per-environment readback still found distributions without captured license metadata or without a discovered license file:
 
 | Target | Installed distributions | Without captured license metadata | Without discovered license files |
 |---|---:|---:|---:|
@@ -43,6 +43,16 @@ Verified November 6, 2026: non-publishing version `0.5.2` rehearsal run `4218921
 | macOS, Python 3.12 | 142 | 2 | 6 |
 
 “Without captured license metadata” means the installed distribution has no license expression, license classifier, or legacy license field; “without discovered license files” means the collector found no matching license/notice file in that distribution. Neither count proves that a package is unlicensed. Independent verification confirmed all 18 payload hashes in `checksums.txt`, all 19 SLSA provenance attestations (18 payloads plus the checksum file), and all four archive-to-SPDX attestations against the expected repository, workflow, branch, and source commit. The workflow created no public release. This candidate evidence does not populate the source inventory's missing metadata, classify license compatibility, or change `release_clearance=false`.
+
+The six installed-profile manifests cover 274 of the 277 distinct external package/version identities in `python/uv.lock`. The remaining three have resolution markers outside these Linux, Windows, and macOS Python 3.11/3.12 evidence targets; their presence in the lock is not installed-wheel/license-file evidence:
+
+| Locked identity | Lockfile applicability outside the candidate evidence targets |
+|---|---|
+| `httpx2-jsfetch==1.0` | `httpx2` conditional dependency for Python `>=3.12` on `emscripten` only. |
+| `pandas==2.3.3` | pandas resolution selected for Python `>=3.14`; all candidate Python profiles use 3.11 or 3.12. |
+| `pytz==2026.6` | pandas 2.3.3 dependency under Python `>=3.14`; it is not installed in the candidate profiles. |
+
+This is a boundary of the candidate's evidence matrix, not a finding that these packages are unlicensed or a declaration that those runtimes are unsupported. If Emscripten or Python 3.14 is within the supported/shipped runtime scope, add corresponding installed-package and license-file evidence before release; do not infer coverage from lock resolution alone.
 
 The six candidate manifests identify these 19 distinct installed distributions for targeted review. `L3.11`/`L3.12`, `W3.11`/`W3.12`, and `M3.11`/`M3.12` mean Linux, Windows, and macOS with the indicated Python version. A dash means that dimension had no reported gap for that distribution in the six profiles:
 

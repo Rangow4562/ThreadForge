@@ -25,7 +25,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 
-EVIDENCE_SCHEMA = "threadforge.python-license-evidence.v1"
+EVIDENCE_SCHEMA = "threadforge.python-license-evidence.v2"
 SOURCE_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_VERSION_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 DIST_NAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,253}[A-Za-z0-9])?$")
@@ -50,6 +50,11 @@ class LicenseEvidenceError(ValueError):
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _sha256_lf_normalized_bytes(data: bytes) -> str:
+    """Hash text-file content consistently across LF and CRLF checkouts."""
+    return _sha256(data.replace(b"\r\n", b"\n"))
 
 
 def _sha256_source_file(path: Path) -> str:
@@ -178,7 +183,7 @@ def _load_lock_versions(lock_path: Path) -> tuple[dict[tuple[str, str], bool], s
         if key in versions:
             raise LicenseEvidenceError("Python lockfile contains a duplicate package identity")
         versions[key] = True
-    return versions, _sha256(lock_bytes)
+    return versions, _sha256_lf_normalized_bytes(lock_bytes)
 
 
 def _load_project(path: Path, extras: list[str]) -> tuple[str, str, str, str]:
@@ -201,7 +206,7 @@ def _load_project(path: Path, extras: list[str]) -> tuple[str, str, str, str]:
         raise LicenseEvidenceError("Python optional dependencies are invalid")
     if not extras or len(set(extras)) != len(extras) or any(extra not in optional for extra in extras):
         raise LicenseEvidenceError("requested Python extras are empty, duplicated, or undeclared")
-    return name, version, _sha256(project_bytes), str(project.get("license", ""))
+    return name, version, _sha256_lf_normalized_bytes(project_bytes), str(project.get("license", ""))
 
 
 def _license_expression(metadata: Message) -> tuple[str | None, str, int, bool]:

@@ -163,16 +163,18 @@ def test_archive_is_deterministic_path_free_and_never_clears_review(tmp_path):
 
     assert first.read_bytes() == second.read_bytes()
     assert evidence == second_evidence
-    assert evidence["schema"] == "threadforge.python-license-evidence.v1"
+    assert evidence["schema"] == "threadforge.python-license-evidence.v2"
     assert evidence["source_commit"] == SOURCE_COMMIT
     assert evidence["collector_sha256"] == EVIDENCE._sha256_source_file(SCRIPT_PATH)
-    assert evidence["input_hashes"]["uv_lock_sha256"] == hashlib.sha256((tmp_path / "uv.lock").read_bytes()).hexdigest()
+    assert evidence["input_hashes"]["uv_lock_sha256"] == EVIDENCE._sha256_lf_normalized_bytes(
+        (tmp_path / "uv.lock").read_bytes()
+    )
     assert evidence["installed_distribution_count"] == 2
     assert evidence["unlocked_distribution_count"] == 0
     assert evidence["license_review_status"] == "unreviewed"
     assert evidence["license_review_required"] is True
     assert evidence["release_clearance"] is False
-    schema = json.loads((SCRIPT_PATH.parents[1] / "schema" / "python-license-evidence-v1.schema.json").read_text())
+    schema = json.loads((SCRIPT_PATH.parents[1] / "schema" / "python-license-evidence-v2.schema.json").read_text())
     Draft202012Validator.check_schema(schema)
     Draft202012Validator(schema).validate(evidence)
 
@@ -278,6 +280,25 @@ def test_collector_digest_is_stable_across_lf_and_crlf_checkouts(tmp_path):
     crlf_digest = EVIDENCE._sha256_source_file(source)
 
     assert lf_digest == crlf_digest
+
+
+def test_project_and_lock_input_hashes_are_stable_across_lf_and_crlf_checkouts(tmp_path):
+    lock, project = write_inputs(tmp_path)
+    lock.write_bytes(lock.read_bytes().replace(b"\r\n", b"\n"))
+    project.write_bytes(project.read_bytes().replace(b"\r\n", b"\n"))
+    extras = ["decisions", "test", "workspace"]
+    lf_lock_digest = EVIDENCE._load_lock_versions(lock)[1]
+    lf_project_digest = EVIDENCE._load_project(project, extras)[2]
+
+    lock.write_bytes(lock.read_bytes().replace(b"\n", b"\r\n"))
+    project.write_bytes(project.read_bytes().replace(b"\n", b"\r\n"))
+    crlf_lock_digest = EVIDENCE._load_lock_versions(lock)[1]
+    crlf_project_digest = EVIDENCE._load_project(project, extras)[2]
+
+    assert lf_lock_digest == crlf_lock_digest
+    assert lf_project_digest == crlf_project_digest
+    assert lf_lock_digest == hashlib.sha256(lock.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+    assert lf_project_digest == hashlib.sha256(project.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def test_rejects_target_mismatch_invalid_scope_and_existing_output(tmp_path):

@@ -28,7 +28,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ['3.11', '3.12']
+        python: ['3.11', '3.12', '3.13', '3.14']
     steps:
       - name: Check out Threadforge
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -213,7 +213,7 @@ jobs:
       || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
     needs: [test, elasticsearch-local-stack]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 25
+    timeout-minutes: 45
     permissions:
       contents: read
       id-token: write
@@ -228,18 +228,36 @@ jobs:
           - runner: ubuntu-latest
             target_os: linux
             python: '3.12'
+          - runner: ubuntu-latest
+            target_os: linux
+            python: '3.13'
+          - runner: ubuntu-latest
+            target_os: linux
+            python: '3.14'
           - runner: windows-latest
             target_os: windows
             python: '3.11'
           - runner: windows-latest
             target_os: windows
             python: '3.12'
+          - runner: windows-latest
+            target_os: windows
+            python: '3.13'
+          - runner: windows-latest
+            target_os: windows
+            python: '3.14'
           - runner: macos-latest
             target_os: darwin
             python: '3.11'
           - runner: macos-latest
             target_os: darwin
             python: '3.12'
+          - runner: macos-latest
+            target_os: darwin
+            python: '3.13'
+          - runner: macos-latest
+            target_os: darwin
+            python: '3.14'
     steps:
       - name: Check out Threadforge
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -293,6 +311,13 @@ jobs:
           uv --version
           uv lock --check
           uv sync --locked --extra test --extra decisions --extra hf --extra serving --extra typed-data --extra evolution --extra workspace
+
+      - name: Test full Python suite with all declared extras
+        shell: bash
+        working-directory: python
+        run: >-
+          uv run --locked --extra test --extra decisions --extra hf --extra serving --extra typed-data --extra evolution --extra workspace
+          python -m pytest -q
 
       - name: Collect locked Python license and notice evidence
         shell: bash
@@ -575,14 +600,17 @@ jobs:
             "dist/threadforge_${RELEASE_VERSION}_darwin_arm64.go-licenses.tar.gz"
             "dist/threadforge_${RELEASE_VERSION}_windows_amd64.go-licenses.tar.gz"
           )
-          python_license_evidence=(
-            "dist/threadforge_${RELEASE_VERSION}_python_linux_py3.11.license-evidence.tar.gz"
-            "dist/threadforge_${RELEASE_VERSION}_python_linux_py3.12.license-evidence.tar.gz"
-            "dist/threadforge_${RELEASE_VERSION}_python_windows_py3.11.license-evidence.tar.gz"
-            "dist/threadforge_${RELEASE_VERSION}_python_windows_py3.12.license-evidence.tar.gz"
-            "dist/threadforge_${RELEASE_VERSION}_python_darwin_py3.11.license-evidence.tar.gz"
-            "dist/threadforge_${RELEASE_VERSION}_python_darwin_py3.12.license-evidence.tar.gz"
-          )
+          python_license_evidence=()
+          for target_os in linux windows darwin; do
+            for python_version in 3.11 3.12 3.13 3.14; do
+              evidence="dist/threadforge_${RELEASE_VERSION}_python_${target_os}_py${python_version}.license-evidence.tar.gz"
+              if [[ ! -f "$evidence" ]]; then
+                echo "Missing target Python license-evidence bundle: $evidence" >&2
+                exit 1
+              fi
+              python_license_evidence+=("$evidence")
+            done
+          done
           for archive in "${archives[@]}"; do
             if [[ ! -f "$archive" ]]; then
               echo "Missing supported CLI archive: $archive" >&2
@@ -607,8 +635,8 @@ jobs:
             exit 1
           fi
           candidate_payloads=(dist/threadforge_${RELEASE_VERSION}_*)
-          if [[ ${#candidate_payloads[@]} -ne 18 ]]; then
-            echo "Expected exactly 18 versioned candidate payload files, found ${#candidate_payloads[@]}." >&2
+          if [[ ${#candidate_payloads[@]} -ne 24 ]]; then
+            echo "Expected exactly 24 versioned candidate payload files, found ${#candidate_payloads[@]}." >&2
             find dist -maxdepth 1 -type f -printf '%f\n' >&2
             exit 1
           fi

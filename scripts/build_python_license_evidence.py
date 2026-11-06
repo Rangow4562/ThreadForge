@@ -26,6 +26,7 @@ from typing import Any, Iterable
 
 
 EVIDENCE_SCHEMA = "threadforge.python-license-evidence.v2"
+SUPPORTED_PYTHON_EVIDENCE_VERSIONS = ("3.11", "3.12", "3.13", "3.14")
 SOURCE_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_VERSION_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 DIST_NAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,253}[A-Za-z0-9])?$")
@@ -462,7 +463,7 @@ def build_python_license_evidence(
         raise LicenseEvidenceError("release version must be stable MAJOR.MINOR.PATCH")
     if target_os not in ALLOWED_TARGET_OS:
         raise LicenseEvidenceError("unsupported Python evidence target OS")
-    if python_version not in {"3.11", "3.12"}:
+    if python_version not in SUPPORTED_PYTHON_EVIDENCE_VERSIONS:
         raise LicenseEvidenceError("unsupported Python evidence version")
     if not isinstance(source_date_epoch, int) or source_date_epoch < 0 or source_date_epoch > 2**32 - 1:
         raise LicenseEvidenceError("source date epoch is outside the supported range")

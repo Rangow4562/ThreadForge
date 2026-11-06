@@ -35,6 +35,8 @@ def test_release_evidence_installs_and_collects_every_declared_extra():
         line.strip() for line in job.splitlines() if line.strip().startswith("uv sync --locked")
     )
     assert set(re.findall(r"--extra\s+([^\s]+)", sync_command)) == extras
+    for version in EVIDENCE.SUPPORTED_PYTHON_EVIDENCE_VERSIONS:
+        assert job.count(f"python: '{version}'") == 3
 
     marker = "      - name: Collect locked Python license and notice evidence\n"
     assert marker in job
@@ -46,6 +48,13 @@ def test_release_evidence_installs_and_collects_every_declared_extra():
     collector_args = collector_step.split("python ../scripts/build_python_license_evidence.py", 1)[1]
     collector_args = collector_args.split("--source-date-epoch", 1)[0]
     assert set(re.findall(r"--extra\s+([^\s]+)", collector_args)) == extras
+
+    test_marker = "      - name: Test full Python suite with all declared extras\n"
+    assert test_marker in job
+    test_step = job.split(test_marker, 1)[1].split("      - name: Collect locked Python license and notice evidence\n", 1)[0]
+    test_command = next(line.strip() for line in test_step.splitlines() if line.strip().startswith("uv run --locked"))
+    assert set(re.findall(r"--extra\s+([^\s]+)", test_command)) == extras
+    assert "python -m pytest -q" in test_step
 
 
 SOURCE_COMMIT = "a" * 40
@@ -194,6 +203,22 @@ def test_archive_is_deterministic_path_free_and_never_clears_review(tmp_path):
         "python-license-evidence/licenses/example-package/1.2.0/example.dist-info/licenses/LICENSE"
         in members
     )
+
+
+@pytest.mark.parametrize("python_version", EVIDENCE.SUPPORTED_PYTHON_EVIDENCE_VERSIONS)
+def test_all_supported_python_profiles_are_bound_into_v2_schema(tmp_path, python_version):
+    example = make_distribution(tmp_path, "example-package", "1.2.0", expression="MIT")
+    project = make_distribution(tmp_path, "threadforge-python", "0.4.6", expression="Apache-2.0")
+    _, evidence = build(
+        tmp_path,
+        f"python-{python_version.replace('.', '')}.tar.gz",
+        [example, project],
+        python_version=python_version,
+    )
+
+    schema = json.loads((SCRIPT_PATH.parents[1] / "schema" / "python-license-evidence-v2.schema.json").read_text())
+    Draft202012Validator(schema).validate(evidence)
+    assert evidence["target"]["python_version"] == python_version
 
 
 def test_missing_or_unsafe_metadata_is_recorded_without_inference(tmp_path):

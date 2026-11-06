@@ -44,6 +44,32 @@ Verified November 6, 2026: non-publishing version `0.5.2` rehearsal run `4218921
 
 “Without captured license metadata” means the installed distribution has no license expression, license classifier, or legacy license field; “without discovered license files” means the collector found no matching license/notice file in that distribution. Neither count proves that a package is unlicensed. Independent verification confirmed all 18 payload hashes in `checksums.txt`, all 19 SLSA provenance attestations (18 payloads plus the checksum file), and all four archive-to-SPDX attestations against the expected repository, workflow, branch, and source commit. The workflow created no public release. This candidate evidence does not populate the source inventory's missing metadata, classify license compatibility, or change `release_clearance=false`.
 
+The six candidate manifests identify these 19 distinct installed distributions for targeted review. `L3.11`/`L3.12`, `W3.11`/`W3.12`, and `M3.11`/`M3.12` mean Linux, Windows, and macOS with the indicated Python version. A dash means that dimension had no reported gap for that distribution in the six profiles:
+
+| Distribution/version | No captured license metadata | No discovered license/notice file |
+|---|---|---|
+| `cuda-tile` 1.7.0 | — | L3.11 |
+| `cuda-toolkit` 13.0.3.0 | L3.11 | L3.11 |
+| `cuda-toolkit` 13.2.2 | L3.12 | L3.12 |
+| `fastmcp-slim` 4.1.4 | — | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 |
+| `flatbuffers` 25.12.19 | — | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 |
+| `loguru` 0.7.3 | — | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 |
+| `model-hosting-container-standards` 0.1.16 | — | L3.11 |
+| `nvidia-ml-py` 13.615.71 | — | L3.11 |
+| `opentelemetry-semantic-conventions-ai` 0.5.1 | — | L3.11 |
+| `oss-harmony` 0.0.11 | L3.11 | — |
+| `pymupdf-layout` 2.0 | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 |
+| `pymupdf4llm` 2.0 | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 |
+| `quack-kernels` 0.6.5 | L3.11 | — |
+| `ruff` 0.15.1 | — | W3.11, W3.12 |
+| `sentencepiece` 0.2.2 | — | L3.11 |
+| `supervisor` 4.3.0 | — | L3.11 |
+| `tokenizers` 0.23.3 | — | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 |
+| `torchcodec` 0.17.0 | L3.11 | — |
+| `z3-solver` 4.15.4.0 | — | L3.11 |
+
+This is a reviewer work queue derived from installed wheel metadata and `RECORD` file listings, not an inferred license list. Review each distribution against its authoritative source and release artifact; do not treat metadata fields alone as proof of license terms.
+
 This Python evidence is a readback of only those six installed environments; it does **not** populate the lockfile inventory's missing Python metadata entries, establish the license of a package from its notice text, or cover the Engineering container/runtime or benchmark datasets/evaluators. Successful installation of the `serving` extra on Linux/Python 3.11 is not evidence that vLLM inference or GPU/runtime behavior works. Neither the Go nor Python collectors review compatibility or grant legal approval.
 
 ## Release gate

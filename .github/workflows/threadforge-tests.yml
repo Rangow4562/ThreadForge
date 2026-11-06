@@ -292,7 +292,7 @@ jobs:
           python -m pip install uv==0.11.7
           uv --version
           uv lock --check
-          uv sync --locked --extra test --extra decisions --extra workspace
+          uv sync --locked --extra test --extra decisions --extra hf --extra serving --extra typed-data --extra evolution --extra workspace
 
       - name: Collect locked Python license and notice evidence
         shell: bash
@@ -306,13 +306,13 @@ jobs:
           LICENSE_EVIDENCE_PATH: dist/threadforge_${{ steps.release.outputs.version }}_python_${{ matrix.target_os }}_py${{ matrix.python }}.license-evidence.tar.gz
         run: >-
           mkdir -p dist &&
-          uv run --locked --extra test --extra decisions --extra workspace
+          uv run --locked --extra test --extra decisions --extra hf --extra serving --extra typed-data --extra evolution --extra workspace
           python ../scripts/build_python_license_evidence.py
           --source-commit "$SOURCE_COMMIT"
           --release-version "$RELEASE_VERSION"
           --target-os "$TARGET_OS"
           --python-version "$PYTHON_VERSION"
-          --extra test --extra decisions --extra workspace
+          --extra test --extra decisions --extra hf --extra serving --extra typed-data --extra evolution --extra workspace
           --source-date-epoch "$SOURCE_DATE_EPOCH"
           --output "$LICENSE_EVIDENCE_PATH"
 

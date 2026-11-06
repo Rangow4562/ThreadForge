@@ -4,7 +4,9 @@ import importlib.util
 import io
 import json
 import platform
+import re
 import tarfile
+import tomllib
 from email.message import Message
 from pathlib import Path
 
@@ -13,11 +15,37 @@ from jsonschema import Draft202012Validator
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "build_python_license_evidence.py"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_PATH = REPOSITORY_ROOT / "python" / "pyproject.toml"
+WORKFLOW_PATH = REPOSITORY_ROOT / ".github" / "workflows" / "threadforge-tests.yml"
 SCRIPT_SPEC = importlib.util.spec_from_file_location("threadforge_python_license_evidence", SCRIPT_PATH)
 if SCRIPT_SPEC is None or SCRIPT_SPEC.loader is None:
     raise RuntimeError("could not load the Python license evidence builder")
 EVIDENCE = importlib.util.module_from_spec(SCRIPT_SPEC)
 SCRIPT_SPEC.loader.exec_module(EVIDENCE)
+
+
+def test_release_evidence_installs_and_collects_every_declared_extra():
+    extras = set(tomllib.loads(PROJECT_PATH.read_text(encoding="utf-8"))["project"]["optional-dependencies"])
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    marker = "  python-license-evidence:\n"
+    assert marker in workflow
+    job = workflow.split(marker, 1)[1].split("\n  release-candidate:\n", 1)[0]
+    sync_command = next(
+        line.strip() for line in job.splitlines() if line.strip().startswith("uv sync --locked")
+    )
+    assert set(re.findall(r"--extra\s+([^\s]+)", sync_command)) == extras
+
+    marker = "      - name: Collect locked Python license and notice evidence\n"
+    assert marker in job
+    collector_step = job.split(marker, 1)[1].split("      - name: Attest Python license evidence provenance\n", 1)[0]
+    run_command = next(
+        line.strip() for line in collector_step.splitlines() if line.strip().startswith("uv run --locked")
+    )
+    assert set(re.findall(r"--extra\s+([^\s]+)", run_command)) == extras
+    collector_args = collector_step.split("python ../scripts/build_python_license_evidence.py", 1)[1]
+    collector_args = collector_args.split("--source-date-epoch", 1)[0]
+    assert set(re.findall(r"--extra\s+([^\s]+)", collector_args)) == extras
 
 
 SOURCE_COMMIT = "a" * 40

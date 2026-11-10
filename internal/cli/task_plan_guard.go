@@ -334,7 +334,7 @@ func taskPlanGateToolIsSupported(host, toolName string) bool {
 		return toolName == "Write"
 	case "antigravity-cli":
 		switch toolName {
-		case "write_to_file", "replace_file_content", "multi_replace_file_content":
+		case "write_file", "replace", "write_to_file", "replace_file_content", "multi_replace_file_content":
 			return true
 		default:
 			return false
@@ -384,6 +384,22 @@ func taskPlanGateToolTargetPaths(host, toolName string, raw json.RawMessage) ([]
 		return []string{targetPath}, true
 	}
 	if host == "antigravity-cli" {
+		if toolName == "write_file" || toolName == "replace" {
+			targetPath := ""
+			for _, candidate := range []string{input.FilePath, input.Path, input.TargetFile} {
+				if candidate == "" {
+					continue
+				}
+				if targetPath != "" && targetPath != candidate {
+					return nil, false
+				}
+				targetPath = candidate
+			}
+			if targetPath == "" {
+				return nil, false
+			}
+			return []string{targetPath}, true
+		}
 		if input.TargetFile == "" {
 			return nil, false
 		}

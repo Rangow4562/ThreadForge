@@ -13,7 +13,7 @@ export async function runAntigravityAgentMcpRead({
   toolName = 'threadforge_procedure_get', toolArguments, prompt, expectedFinalResponse,
   requiredResultMarkers = [], hostVersion = 'unknown', scriptedFunctionCall, expectedToolResponseMarker,
   verifyTaskResumeReceipt,
-  toolAction = 'read',
+  toolAction = 'read', agentName,
   sandbox = true, permissionAllowRules, executionMode,
 }) {
   const requestedArguments = toolArguments ?? { procedure_id: procedureID };
@@ -81,16 +81,24 @@ export async function runAntigravityAgentMcpRead({
 
         const functionResponses = collectFunctionResponses(body.contents);
         const contents = Array.isArray(body.contents) ? body.contents : [];
+        const responseErrorRedactions = scriptedFunctionCall ? {
+          fixtureKey, cliPath, projectRoot, home, procedureID, expectedGuidance,
+          deniedFilePath: scriptedFunctionCall.args?.Path ?? scriptedFunctionCall.args?.TargetFile,
+          deniedFileContent: scriptedFunctionCall.args?.Content ?? scriptedFunctionCall.args?.CodeContent,
+        } : undefined;
         providerTrace.push({
           request_index: providerRequests,
           content_roles: contents.map((item) => item?.role).filter((value) => typeof value === 'string').slice(-8),
           part_types: contents.flatMap((item) => (Array.isArray(item?.parts) ? item.parts : []).map((part) =>
             Object.keys(part ?? {}).filter((key) => ['text', 'functionCall', 'functionResponse', 'inlineData', 'fileData'].includes(key)).join('+') || 'other'))
             .slice(-12),
+          declared_tool_names: declarations.map((item) => item.name).slice(0, 48),
           declared_threadforge_tools: declarations.map((item) => item.name).filter((name) => /threadforge|mcp/i.test(name)).slice(0, 16),
           declared_direct_file_tools: declarations.map((item) => item.name).filter((name) =>
-            ['write_to_file', 'replace_file_content', 'multi_replace_file_content'].includes(name)).slice(0, 8),
-          declared_tool_schemas: declarations.filter((item) => item.name.includes(toolName) || /call_mcp_tool/i.test(item.name))
+            ['write_file', 'replace', 'write_to_file', 'replace_file_content', 'multi_replace_file_content'].includes(name)).slice(0, 8),
+          declared_tool_schemas: declarations.filter((item) => item.name.includes(toolName) ||
+            ['write_file', 'replace', 'write_to_file', 'replace_file_content', 'multi_replace_file_content'].includes(item.name) ||
+            /call_mcp_tool/i.test(item.name))
             .map((item) => ({
               name: item.name,
               parameter_keys: Object.keys(item.schema?.properties ?? {}).slice(0, 24),
@@ -111,7 +119,8 @@ export async function runAntigravityAgentMcpRead({
               item.args?.task_id === requestedArguments.task_id ||
               item.args?.Arguments?.task_id === requestedArguments.task_id,
           })).slice(-8),
-          function_responses: functionResponses.map((item) => summarizeFunctionResponse(item, expectedGuidance)).slice(-8),
+          function_responses: functionResponses.map((item) =>
+            summarizeFunctionResponse(item, expectedGuidance, responseErrorRedactions)).slice(-8),
         });
 
         if (functionResponses.length > 0) {
@@ -314,6 +323,18 @@ export async function runAntigravityAgentMcpRead({
     all_proxy: proxy,
     no_proxy: '127.0.0.1,localhost',
   };
+  let selectedAgentDiscovered;
+  let selectedAgentListExitCode;
+  if (agentName !== undefined) {
+    const agentList = await runAntigravityCli(['agent'], {
+      cwd: projectRoot,
+      env: environment,
+      timeout: 12_000,
+    });
+    selectedAgentListExitCode = agentList.exitCode;
+    selectedAgentDiscovered = agentList.exitCode === 0 &&
+      agentList.stdout.split(/\r?\n/).some((line) => line.trim() === agentName);
+  }
   let output = '';
   let invocationFailed = false;
   let hostOutput = '';
@@ -324,6 +345,12 @@ export async function runAntigravityAgentMcpRead({
       '--print-timeout', '8s',
       '--model', fixtureModel,
     ];
+    if (agentName !== undefined) {
+      if (agentName !== 'threadforge-plan-gate-probe') {
+        throw new Error('Antigravity smoke agent name is invalid');
+      }
+      cliArgs.push('--agent', agentName);
+    }
     cliArgs.push(...antigravityExecutionModeArgs(executionMode));
     if (sandbox) cliArgs.push('--sandbox');
     const run = await runAntigravityCli(cliArgs, { cwd: projectRoot, env: environment, timeout: 12_000 });
@@ -393,6 +420,10 @@ export async function runAntigravityAgentMcpRead({
       } : {}),
       provider_requests: providerRequests,
       auxiliary_provider_requests: auxiliaryRequests,
+      ...(agentName !== undefined ? {
+        selected_agent_discovered: selectedAgentDiscovered === true,
+        selected_agent_list_exit_code: selectedAgentListExitCode,
+      } : {}),
       local_fixture_authentication_validated: providerRequests > 0 && authorizationSafe,
       external_network_attempts_blocked: blockedExternalRequests,
       provider_trace: providerTrace,
@@ -408,6 +439,7 @@ export async function runAntigravityPlanGateAttempt({
 }) {
   const marker = 'THREADFORGE_ANTIGRAVITY_DENIED_FILE_SENTINEL';
   const denialReason = 'Threadforge withheld this Antigravity file operation';
+  const agentName = installAntigravityPlanGateAgent(projectRoot);
   const result = await runAntigravityAgentMcpRead({
     projectRoot,
     home,
@@ -419,18 +451,16 @@ export async function runAntigravityPlanGateAttempt({
     sandbox: false,
     executionMode: 'accept-edits',
     permissionAllowRules: [scopedAntigravityWritePermissionRule(projectRoot, deniedFilePath)],
-    toolName: 'write_to_file',
+    agentName,
+    toolName: 'write_file',
     prompt: 'Create one file in the project and wait for the tool result.',
     expectedFinalResponse: 'The requested file write was denied by the Threadforge task plan gate.',
     scriptedFunctionCall: {
-      name: 'write_to_file',
+      name: 'write_file',
       args: {
-        TargetFile: deniedFilePath,
+        Path: deniedFilePath,
+        Content: marker,
         Overwrite: false,
-        CodeContent: marker,
-        Description: 'Create the isolated plan-gate smoke sentinel.',
-        toolAction: 'write',
-        toolSummary: 'Create the isolated plan-gate smoke sentinel.',
       },
     },
     expectedToolResponseMarker: denialReason,
@@ -442,11 +472,13 @@ export async function runAntigravityPlanGateAttempt({
     } catch { audit = []; }
   }
   const hostToolResponse = result.provider_trace?.flatMap((trace) => trace.function_responses ?? [])
-    .find((entry) => entry.name === 'write_to_file');
-  const hostToolErrorObserved = hostToolResponse?.result_signal === 'tool_error' &&
-    hostToolResponse?.result_markers?.numeric_status === 1;
+    .find((entry) => entry.name === 'write_file');
+  const hostToolResultObserved = hostToolResponse !== undefined;
+  const hostToolErrorObserved = hostToolResponse?.is_error === true ||
+    (hostToolResponse?.result_signal === 'tool_error' && hostToolResponse?.result_markers?.numeric_status === 1);
   const classification = classifyAntigravityPlanGateProbe({
     toolCallCount: result.tool_call_count,
+    hostToolResultObserved,
     hookCallbackInvocations: audit.length,
     guardDecision: audit.length === 1 ? audit[0]?.decision : 'unknown',
     hostToolErrorObserved,
@@ -458,12 +490,36 @@ export async function runAntigravityPlanGateAttempt({
     status: classification.status,
     reason: classification.reason,
     hook_callback_invocations: audit.length,
-    direct_file_tools_declared: [...new Set(['write_to_file', 'replace_file_content', 'multi_replace_file_content'])]
+    direct_file_tools_declared: [...new Set(['write_file', 'replace', 'write_to_file', 'replace_file_content', 'multi_replace_file_content'])]
       .filter((name) => result.provider_trace?.some((trace) => trace.declared_direct_file_tools?.includes(name))),
     guard_decision: audit.length === 1 ? audit[0]?.decision : 'unknown',
+    host_tool_result_observed: hostToolResultObserved,
     host_tool_error_observed: hostToolErrorObserved,
-    tool_result_observed: hostToolErrorObserved,
+    tool_result_observed: hostToolResultObserved,
   };
+}
+
+export function antigravityPlanGateAgentMarkdown() {
+  return [
+    '---',
+    'name: threadforge-plan-gate-probe',
+    'description: Disposable primary agent for the Threadforge Antigravity plan-gate smoke.',
+    'mainAgent: true',
+    'tools:',
+    '  - write_file',
+    '---',
+    'Use only the write_file tool to create the exact file requested by the user.',
+    'Do not use shell, MCP, or any alternate tool. Stop after the host returns the tool result.',
+    '',
+  ].join('\n');
+}
+
+function installAntigravityPlanGateAgent(projectRoot) {
+  const agentDirectory = path.join(projectRoot, '.agents', 'agents');
+  mkdirSync(agentDirectory, { recursive: true, mode: 0o700 });
+  const agentPath = path.join(agentDirectory, 'threadforge-plan-gate-probe.md');
+  writeFileSync(agentPath, antigravityPlanGateAgentMarkdown(), { flag: 'wx', mode: 0o600 });
+  return 'threadforge-plan-gate-probe';
 }
 
 export function scopedAntigravityWritePermissionRule(projectRoot, targetPath) {
@@ -488,21 +544,29 @@ export function antigravityExecutionModeArgs(mode) {
 
 export function classifyAntigravityPlanGateProbe({
   toolCallCount,
+  hostToolResultObserved,
   hookCallbackInvocations,
   guardDecision,
   hostToolErrorObserved,
   fixtureIntegrityVerified,
 }) {
-  if (!fixtureIntegrityVerified || ![0, 1].includes(toolCallCount) || ![0, 1].includes(hookCallbackInvocations)) {
+  if (!fixtureIntegrityVerified || ![0, 1].includes(toolCallCount) ||
+      typeof hostToolResultObserved !== 'boolean' || ![0, 1].includes(hookCallbackInvocations)) {
     return { status: 'not_verified', reason: 'probe_integrity_not_verified' };
   }
-  if (toolCallCount === 0 && hookCallbackInvocations === 0 && guardDecision === 'unknown' && !hostToolErrorObserved) {
+  if (toolCallCount === 0 && !hostToolResultObserved && hookCallbackInvocations === 0 &&
+      guardDecision === 'unknown' && !hostToolErrorObserved) {
     return { status: 'probe_not_exercised', reason: 'host_tool_call_not_observed' };
   }
-  if (toolCallCount === 1 && hookCallbackInvocations === 0 && guardDecision === 'unknown') {
+  if (toolCallCount === 1 && !hostToolResultObserved && hookCallbackInvocations === 0 &&
+      guardDecision === 'unknown' && !hostToolErrorObserved) {
+    return { status: 'not_verified', reason: 'host_tool_result_not_observed' };
+  }
+  if (toolCallCount === 1 && hostToolResultObserved && hookCallbackInvocations === 0 &&
+      guardDecision === 'unknown') {
     return { status: 'not_observed', reason: 'workspace_pretool_hook_not_invoked' };
   }
-  if (toolCallCount === 1 && hookCallbackInvocations === 1 && guardDecision === 'deny') {
+  if (toolCallCount === 1 && hostToolResultObserved && hookCallbackInvocations === 1 && guardDecision === 'deny') {
     return hostToolErrorObserved
       ? { status: 'verified', reason: undefined }
       : { status: 'not_verified', reason: 'host_tool_error_after_guard_denial_not_observed' };
@@ -634,8 +698,14 @@ function functionResponseText(value, parts = [], depth = 0) {
   return parts.join('\n');
 }
 
-function summarizeFunctionResponse(item, expectedGuidance) {
+function summarizeFunctionResponse(item, expectedGuidance, responseErrorRedactions) {
   const output = item.response?.output;
+  const responseErrorPresent = item.response && typeof item.response === 'object' &&
+    Object.hasOwn(item.response, 'error') && item.response.error !== null &&
+    item.response.error !== undefined && item.response.error !== false;
+  const responseError = responseErrorPresent ? item.response.error : undefined;
+  const responseErrorText = typeof responseError === 'string'
+    ? responseError : responseError === undefined ? '' : JSON.stringify(responseError);
   let parsed = output;
   let outputIsJson = false;
   if (typeof output === 'string') {
@@ -650,13 +720,26 @@ function summarizeFunctionResponse(item, expectedGuidance) {
   return {
     name: typeof item.name === 'string' ? item.name : undefined,
     response_keys: item.response && typeof item.response === 'object' ? Object.keys(item.response).slice(0, 24) : [],
+    response_error_keys: responseError && typeof responseError === 'object' && !Array.isArray(responseError)
+      ? Object.keys(responseError).slice(0, 16) : [],
+    response_error_type: responseError === null ? 'null' : responseError === undefined ? 'absent' :
+      Array.isArray(responseError) ? 'array' : typeof responseError,
+    ...(responseErrorPresent && responseErrorRedactions ? {
+      response_error_summary: summarizeHostError(responseErrorText, responseErrorRedactions),
+    } : {}),
+    response_error_markers: {
+      hook: /hook|callback/i.test(responseErrorText),
+      permission: /permission|denied|not allowed/i.test(responseErrorText),
+      invalid_arguments: /invalid|argument|parameter/i.test(responseErrorText),
+      timeout: /timeout|timed out/i.test(responseErrorText),
+    },
     output_type: output === null ? 'null' : Array.isArray(output) ? 'array' : typeof output,
     output_bytes: typeof output === 'string' ? Buffer.byteLength(output) : undefined,
     output_json_parsed: outputIsJson,
-    result_signal: classifyProcedureOutput(output),
+    result_signal: responseErrorPresent ? 'tool_error' : classifyProcedureOutput(output),
     result_markers: procedureOutputMarkers(output),
     result_shapes: shapes.slice(0, 12),
-    is_error: item.response?.isError === true || item.response?.is_error === true || item.isError === true,
+    is_error: responseErrorPresent || item.response?.isError === true || item.response?.is_error === true || item.isError === true,
     expected_guidance_present: textValues.some((value) => normalizedText(value).includes(normalizedText(expectedGuidance))),
   };
 }

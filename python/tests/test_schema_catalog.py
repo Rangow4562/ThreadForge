@@ -945,6 +945,59 @@ def test_antigravity_plan_gate_smoke_schema_records_callback_non_observation_wit
     ):
         with pytest.raises(ValidationError):
             validator.validate(invalid)
+
+
+def test_antigravity_plan_gate_smoke_v2_uses_current_direct_write_tool_contract():
+    schema = json.loads((SCHEMA_DIRECTORY / "antigravity-plan-gate-smoke-v2.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.antigravity-plan-gate-smoke.v2",
+        "status": "verified",
+        "host_cli_version": "1.5.4",
+        "install_action": "installed",
+        "hook_event": "PreToolUse",
+        "tool": "write_file",
+        "provider_tool_call_count": 1,
+        "direct_file_tools_declared": ["write_file", "replace"],
+        "hook_callback_invocations": 1,
+        "guard_decision": "deny",
+        "host_tool_result_observed": True,
+        "host_tool_error_observed": True,
+        "sandbox_enabled": False,
+        "sentinel_created": False,
+        "provider": "loopback-gemini-api-fixture",
+        "provider_requests": 2,
+        "real_model_invocations": 0,
+    }
+    validator.validate(result)
+    validator.validate({
+        **result,
+        "status": "not_verified",
+        "hook_callback_invocations": 0,
+        "guard_decision": "unknown",
+        "host_tool_result_observed": False,
+        "host_tool_error_observed": False,
+    })
+    validator.validate({
+        **result,
+        "status": "not_verified",
+        "hook_callback_invocations": 1,
+        "guard_decision": "deny",
+        "host_tool_result_observed": False,
+        "host_tool_error_observed": False,
+    })
+    for invalid in (
+        {**result, "tool": "write_to_file"},
+        {**result, "direct_file_tools_declared": ["write_file", "unknown_tool"]},
+        {**result, "host_tool_result_observed": False},
+        {**result, "sentinel_created": True},
+        {**result, "real_model_invocations": 1},
+        {**result, "hook_callback_invocations": 0},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_schema_catalog_exists_and_is_nonempty():
     assert SCHEMA_DIRECTORY.is_dir()
     assert SCHEMA_PATHS

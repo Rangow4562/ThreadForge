@@ -1507,7 +1507,7 @@ test('adapter CLI manages the project-only Antigravity deny/pass-through task-pl
     assert.deepEqual(config['threadforge-task-plan-gate'], {
       enabled: true,
       PreToolUse: [{
-        matcher: '^(write_to_file|replace_file_content|multi_replace_file_content)$',
+        matcher: '^(write_file|replace|write_to_file|replace_file_content|multi_replace_file_content)$',
         hooks: [{ type: 'command', command, timeout: 10 }],
       }],
     });
@@ -1557,7 +1557,7 @@ test('adapter CLI requires project scope and manages Antigravity plan gates sepa
     assert.deepEqual(config['threadforge-task-plan-gate'], {
       enabled: true,
       PreToolUse: [{
-        matcher: '^(write_to_file|replace_file_content|multi_replace_file_content)$',
+        matcher: '^(write_file|replace|write_to_file|replace_file_content|multi_replace_file_content)$',
         hooks: [{ type: 'command', command, timeout: 10 }],
       }],
     });

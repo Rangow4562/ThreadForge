@@ -1753,27 +1753,60 @@ try {
     projectRoot, home: isolatedHome, cliPath, isolatedEnvironment,
     deniedFilePath: antigravityDeniedFile, auditPath: antigravityPlanGateAuditPath, hostVersion: antigravityVersion,
   });
+  if (antigravityPlanGateResult.status !== 'verified') {
+    process.stderr.write('Antigravity plan-gate diagnostic: ' + JSON.stringify({
+      status: antigravityPlanGateResult.status,
+      reason: antigravityPlanGateResult.reason,
+      selected_agent_discovered: antigravityPlanGateResult.selected_agent_discovered,
+      selected_agent_list_exit_code: antigravityPlanGateResult.selected_agent_list_exit_code,
+      declared_tool_schemas: antigravityPlanGateResult.provider_trace
+        ?.flatMap((trace) => trace.declared_tool_schemas ?? []).slice(0, 8),
+      declared_tool_names: [...new Set(antigravityPlanGateResult.provider_trace
+        ?.flatMap((trace) => trace.declared_tool_names ?? []) ?? [])].slice(0, 48),
+      function_responses: antigravityPlanGateResult.provider_trace
+        ?.flatMap((trace) => trace.function_responses ?? []).slice(-4),
+      direct_file_tools_declared: antigravityPlanGateResult.direct_file_tools_declared,
+    }) + String.fromCharCode(10));
+  }
   const antigravityDeniedFileCreated = existsSync(antigravityDeniedFile);
   const antigravityPlanGateProbeValid = (
     antigravityPlanGateResult.status === 'verified' &&
     antigravityPlanGateResult.tool_call_count === 1 &&
+    antigravityPlanGateResult.host_tool_result_observed &&
     antigravityPlanGateResult.hook_callback_invocations === 1 &&
     antigravityPlanGateResult.guard_decision === 'deny' &&
     antigravityPlanGateResult.host_tool_error_observed
   ) || (
     antigravityPlanGateResult.status === 'not_observed' &&
     antigravityPlanGateResult.tool_call_count === 1 &&
+    antigravityPlanGateResult.host_tool_result_observed &&
     antigravityPlanGateResult.hook_callback_invocations === 0 &&
     antigravityPlanGateResult.guard_decision === 'unknown'
   ) || (
     antigravityPlanGateResult.status === 'probe_not_exercised' &&
     antigravityPlanGateResult.tool_call_count === 0 &&
+    !antigravityPlanGateResult.host_tool_result_observed &&
     antigravityPlanGateResult.hook_callback_invocations === 0 &&
     antigravityPlanGateResult.guard_decision === 'unknown' &&
     !antigravityPlanGateResult.host_tool_error_observed
   ) || (
     antigravityPlanGateResult.status === 'not_verified' &&
     antigravityPlanGateResult.tool_call_count === 1 &&
+    antigravityPlanGateResult.host_tool_result_observed &&
+    antigravityPlanGateResult.hook_callback_invocations === 1 &&
+    antigravityPlanGateResult.guard_decision === 'deny' &&
+    !antigravityPlanGateResult.host_tool_error_observed
+  ) || (
+    antigravityPlanGateResult.status === 'not_verified' &&
+    antigravityPlanGateResult.tool_call_count === 1 &&
+    !antigravityPlanGateResult.host_tool_result_observed &&
+    antigravityPlanGateResult.hook_callback_invocations === 0 &&
+    antigravityPlanGateResult.guard_decision === 'unknown' &&
+    !antigravityPlanGateResult.host_tool_error_observed
+  ) || (
+    antigravityPlanGateResult.status === 'not_verified' &&
+    antigravityPlanGateResult.tool_call_count === 1 &&
+    !antigravityPlanGateResult.host_tool_result_observed &&
     antigravityPlanGateResult.hook_callback_invocations === 1 &&
     antigravityPlanGateResult.guard_decision === 'deny' &&
     !antigravityPlanGateResult.host_tool_error_observed
@@ -1787,6 +1820,7 @@ try {
       host_error_summary: antigravityPlanGateResult.host_error_summary,
       provider_requests: antigravityPlanGateResult.provider_requests,
       tool_call_count: antigravityPlanGateResult.tool_call_count,
+      host_tool_result_observed: antigravityPlanGateResult.host_tool_result_observed,
       hook_callback_invocations: antigravityPlanGateResult.hook_callback_invocations,
       guard_decision: antigravityPlanGateResult.guard_decision,
       host_tool_error_observed: antigravityPlanGateResult.host_tool_error_observed,
@@ -1798,15 +1832,16 @@ try {
     })}`);
   assert.equal(antigravityDeniedFileCreated, false, 'Antigravity plan gate did not prevent the denied file write');
   const antigravityPlanGateSmoke = {
-    schema_version: 'threadforge.antigravity-plan-gate-smoke.v1',
+    schema_version: 'threadforge.antigravity-plan-gate-smoke.v2',
     status: antigravityPlanGateResult.status,
     host_cli_version: antigravityVersion,
     install_action: antigravityPlanGateInstallAction,
     hook_event: 'PreToolUse',
     tool: antigravityPlanGateResult.tool,
-    tool_call_count: antigravityPlanGateResult.tool_call_count,
+    provider_tool_call_count: antigravityPlanGateResult.tool_call_count,
     direct_file_tools_declared: antigravityPlanGateResult.direct_file_tools_declared,
     hook_callback_invocations: antigravityPlanGateResult.hook_callback_invocations,
+    host_tool_result_observed: antigravityPlanGateResult.host_tool_result_observed,
     guard_decision: antigravityPlanGateResult.guard_decision,
     host_tool_error_observed: antigravityPlanGateResult.host_tool_error_observed,
     sandbox_enabled: false,
@@ -2106,7 +2141,7 @@ try {
   if (blockedLauncherError) throw blockedLauncherError;
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v46',
+    schema_version: 'threadforge.installed-skill-smoke.v47',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,

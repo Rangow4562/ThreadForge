@@ -846,6 +846,59 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 		t.Fatalf("in-scope Antigravity write must pass through without overriding host policy: code=%d stdout=%s stderr=%s",
 			code, antigravityInScopeOutput, antigravityInScopeError)
 	}
+	antigravityCurrentWriteInput := map[string]any{
+		"toolCall": map[string]any{
+			"name": "write_file",
+			"args": map[string]any{"Path": "src/main.go", "Content": "private source", "Overwrite": false},
+		},
+		"workspacePaths": []string{projectRoot},
+	}
+	code, antigravityCurrentWriteOutput, antigravityCurrentWriteError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "antigravity-cli", antigravityCurrentWriteInput)
+	var antigravityCurrentWrite map[string]any
+	if code != 0 || antigravityCurrentWriteError != "" ||
+		json.Unmarshal([]byte(antigravityCurrentWriteOutput), &antigravityCurrentWrite) != nil ||
+		antigravityCurrentWrite["decision"] != "allow" || antigravityCurrentWrite["permissionOverrides"] != nil {
+		t.Fatalf("current Antigravity write_file contract did not pass through in scope: code=%d stdout=%s stderr=%s",
+			code, antigravityCurrentWriteOutput, antigravityCurrentWriteError)
+	}
+	antigravityCurrentReplaceInput := map[string]any{
+		"toolCall": map[string]any{
+			"name": "replace",
+			"args": map[string]any{
+				"Path": "docs/private-marker.md", "Content": "private source",
+			},
+		},
+		"workspacePaths": []string{projectRoot},
+	}
+	code, antigravityCurrentReplaceOutput, antigravityCurrentReplaceError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "antigravity-cli", antigravityCurrentReplaceInput)
+	var antigravityCurrentReplace map[string]any
+	if code != 0 || antigravityCurrentReplaceError != "" ||
+		json.Unmarshal([]byte(antigravityCurrentReplaceOutput), &antigravityCurrentReplace) != nil ||
+		antigravityCurrentReplace["decision"] != "deny" || antigravityCurrentReplace["reason"] == nil ||
+		strings.Contains(antigravityCurrentReplaceOutput, "docs/private-marker.md") ||
+		strings.Contains(antigravityCurrentReplaceOutput, "private source") {
+		t.Fatalf("out-of-scope Antigravity replace did not return a private deny: code=%d stdout=%s stderr=%s",
+			code, antigravityCurrentReplaceOutput, antigravityCurrentReplaceError)
+	}
+	antigravityConflictingPathsInput := map[string]any{
+		"toolCall": map[string]any{
+			"name": "write_file",
+			"args": map[string]any{
+				"Path": "src/main.go", "TargetFile": "docs/private-marker.md", "Content": "private source",
+			},
+		},
+		"workspacePaths": []string{projectRoot},
+	}
+	code, antigravityConflictingPathsOutput, antigravityConflictingPathsError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "antigravity-cli", antigravityConflictingPathsInput)
+	if code != 0 || antigravityConflictingPathsError != "" ||
+		!strings.Contains(antigravityConflictingPathsOutput, "\"decision\": \"deny\"") ||
+		strings.Contains(antigravityConflictingPathsOutput, "docs/private-marker.md") {
+		t.Fatalf("conflicting Antigravity path aliases did not fail closed: code=%d stdout=%s stderr=%s",
+			code, antigravityConflictingPathsOutput, antigravityConflictingPathsError)
+	}
 	antigravityOutsideInput := map[string]any{
 		"toolCall": map[string]any{
 			"name": "replace_file_content",

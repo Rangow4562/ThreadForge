@@ -214,7 +214,7 @@ test('project plan gate installs only direct file PreToolUse handlers and preser
     assert.equal(config['threadforge-task-plan-gate'].enabled, true);
     assert.deepEqual(config['threadforge-task-plan-gate'].PreToolUse, [
       {
-        matcher: '^(write_to_file|replace_file_content|multi_replace_file_content)$',
+        matcher: '^(write_file|replace|write_to_file|replace_file_content|multi_replace_file_content)$',
         hooks: [{ type: 'command', command: planGateCommand, timeout: 10 }],
       },
     ]);

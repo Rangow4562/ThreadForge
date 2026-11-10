@@ -3,6 +3,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
+  antigravityPlanGateAgentMarkdown,
   antigravityExecutionModeArgs,
   classifyAntigravityPlanGateProbe,
   scopedAntigravityWritePermissionRule,
@@ -10,6 +11,7 @@ import {
 
 const validFixture = {
   toolCallCount: 1,
+  hostToolResultObserved: true,
   hookCallbackInvocations: 1,
   guardDecision: 'deny',
   hostToolErrorObserved: true,
@@ -39,10 +41,29 @@ test('distinguishes a provider turn that never exercised the host tool', () => {
   assert.deepEqual(classifyAntigravityPlanGateProbe({
     ...validFixture,
     toolCallCount: 0,
+    hostToolResultObserved: false,
     hookCallbackInvocations: 0,
     guardDecision: 'unknown',
     hostToolErrorObserved: false,
   }), { status: 'probe_not_exercised', reason: 'host_tool_call_not_observed' });
+});
+
+test('does not mistake a provider tool-call request for an observed host result', () => {
+  assert.deepEqual(classifyAntigravityPlanGateProbe({
+    ...validFixture,
+    hostToolResultObserved: false,
+    hookCallbackInvocations: 0,
+    guardDecision: 'unknown',
+    hostToolErrorObserved: false,
+  }), { status: 'not_verified', reason: 'host_tool_result_not_observed' });
+});
+
+test('does not claim an observed callback when the host has not returned a tool result', () => {
+  assert.deepEqual(classifyAntigravityPlanGateProbe({
+    ...validFixture,
+    hostToolResultObserved: false,
+    hostToolErrorObserved: false,
+  }), { status: 'not_verified', reason: 'guard_denial_not_observed' });
 });
 
 test('fails closed for an unexpected allow, invalid fixture, or repeated invocation', () => {
@@ -65,6 +86,15 @@ test('scopes the plan-gate fixture permission to one project-relative write targ
     () => scopedAntigravityWritePermissionRule(root, path.resolve(root, '..', 'outside', 'denied.txt')),
     /inside the disposable project/,
   );
+});
+
+test('selects an isolated primary agent with only the direct file-write tool', () => {
+  const markdown = antigravityPlanGateAgentMarkdown();
+  assert.match(markdown, /^name: threadforge-plan-gate-probe$/m);
+  assert.match(markdown, /^mainAgent: true$/m);
+  assert.match(markdown, /^tools:\n  - write_file$/m);
+  assert.match(markdown, /Use only the write_file tool/);
+  assert.match(markdown, /only the write_file tool/);
 });
 
 test('Antigravity execution mode flags are explicit and constrained', () => {

@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/antigravity-plan-gate-smoke-v2.schema.json",
+  "title": "Threadforge Antigravity PreToolUse Plan-Gate Smoke v2",
+  "description": "Content-free installed-host probe for the current Antigravity write_file PreToolUse callback and direct file-tool response.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "host_cli_version",
+    "install_action",
+    "hook_event",
+    "tool",
+    "provider_tool_call_count",
+    "direct_file_tools_declared",
+    "hook_callback_invocations",
+    "guard_decision",
+    "host_tool_result_observed",
+    "host_tool_error_observed",
+    "sandbox_enabled",
+    "sentinel_created",
+    "provider",
+    "provider_requests",
+    "real_model_invocations"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.antigravity-plan-gate-smoke.v2" },
+    "status": { "enum": ["verified", "not_observed", "probe_not_exercised", "not_verified"] },
+    "host_cli_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "install_action": { "enum": ["installed", "updated", "unchanged"] },
+    "hook_event": { "const": "PreToolUse" },
+    "tool": { "const": "write_file" },
+    "provider_tool_call_count": { "enum": [0, 1] },
+    "direct_file_tools_declared": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 5,
+      "items": {
+        "enum": ["write_file", "replace", "write_to_file", "replace_file_content", "multi_replace_file_content"]
+      }
+    },
+    "hook_callback_invocations": { "enum": [0, 1] },
+    "guard_decision": { "enum": ["deny", "unknown"] },
+    "host_tool_result_observed": { "type": "boolean" },
+    "host_tool_error_observed": { "type": "boolean" },
+    "sandbox_enabled": { "const": false },
+    "sentinel_created": { "const": false },
+    "provider": { "const": "loopback-gemini-api-fixture" },
+    "provider_requests": { "type": "integer", "minimum": 1, "maximum": 8 },
+    "real_model_invocations": { "const": 0 }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "status": { "const": "verified" },
+        "provider_tool_call_count": { "const": 1 },
+        "host_tool_result_observed": { "const": true },
+        "hook_callback_invocations": { "const": 1 },
+        "guard_decision": { "const": "deny" },
+        "host_tool_error_observed": { "const": true }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "not_observed" },
+        "provider_tool_call_count": { "const": 1 },
+        "host_tool_result_observed": { "const": true },
+        "hook_callback_invocations": { "const": 0 },
+        "guard_decision": { "const": "unknown" }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "probe_not_exercised" },
+        "provider_tool_call_count": { "const": 0 },
+        "host_tool_result_observed": { "const": false },
+        "hook_callback_invocations": { "const": 0 },
+        "guard_decision": { "const": "unknown" },
+        "host_tool_error_observed": { "const": false }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "not_verified" },
+        "provider_tool_call_count": { "const": 1 },
+        "host_tool_result_observed": { "const": true },
+        "hook_callback_invocations": { "const": 1 },
+        "guard_decision": { "const": "deny" },
+        "host_tool_error_observed": { "const": false }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "not_verified" },
+        "provider_tool_call_count": { "const": 1 },
+        "host_tool_result_observed": { "const": false },
+        "hook_callback_invocations": { "const": 0 },
+        "guard_decision": { "const": "unknown" },
+        "host_tool_error_observed": { "const": false }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "not_verified" },
+        "provider_tool_call_count": { "const": 1 },
+        "host_tool_result_observed": { "const": false },
+        "hook_callback_invocations": { "const": 1 },
+        "guard_decision": { "const": "deny" },
+        "host_tool_error_observed": { "const": false }
+      }
+    }
+  ]
+}

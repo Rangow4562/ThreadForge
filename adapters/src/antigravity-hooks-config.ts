@@ -175,7 +175,7 @@ export async function installAntigravityProjectPlanGateHook(options: { command: 
       PreToolUse: [
         ...readEventGroups(cleaned.value, 'PreToolUse'),
         {
-          matcher: '^(write_to_file|replace_file_content|multi_replace_file_content)$',
+          matcher: '^(write_file|replace|write_to_file|replace_file_content|multi_replace_file_content)$',
           hooks: [{ type: 'command', command: options.command, timeout: 10 }],
         },
       ],

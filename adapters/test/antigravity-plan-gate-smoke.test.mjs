@@ -7,6 +7,7 @@ import {
   antigravityExecutionModeArgs,
   classifyAntigravityPlanGateProbe,
   scopedAntigravityWritePermissionRule,
+  summarizeAntigravityHostError,
 } from '../scripts/antigravity-mcp-smoke.mjs';
 
 const validFixture = {
@@ -101,4 +102,34 @@ test('Antigravity execution mode flags are explicit and constrained', () => {
   assert.deepEqual(antigravityExecutionModeArgs(undefined), []);
   assert.deepEqual(antigravityExecutionModeArgs('accept-edits'), ['--mode', 'accept-edits']);
   assert.throws(() => antigravityExecutionModeArgs('--dangerously-skip-permissions'), /execution mode is invalid/);
+});
+
+test('redacts current and legacy Antigravity file paths and contents from host errors', () => {
+  const context = {
+    fixtureKey: 'fixture-secret-key',
+    cliPath: 'C:\\private\\threadforge.exe',
+    projectRoot: 'C:\\private\\isolated-project',
+    home: 'C:\\private\\isolated-home',
+    procedureID: 'private-procedure',
+    expectedGuidance: 'private-guidance',
+  };
+  const calls = [
+    { name: 'write_file', args: { Path: 'C:\\private\\isolated-project\\draft.txt', Content: 'private current payload' } },
+    { name: 'write_to_file', args: { TargetFile: 'C:\\private\\isolated-project\\legacy.txt', CodeContent: 'private legacy payload' } },
+  ];
+  for (const functionCall of calls) {
+    const { Path, TargetFile, Content, CodeContent } = functionCall.args;
+    const filePath = Path ?? TargetFile;
+    const fileContent = Content ?? CodeContent;
+    const summary = summarizeAntigravityHostError(
+      `provider error key=${context.fixtureKey} path=${filePath} content=${fileContent}`,
+      context,
+      functionCall,
+    );
+    assert.ok(!summary.includes(context.fixtureKey));
+    assert.ok(!summary.includes(filePath));
+    assert.ok(!summary.includes(fileContent));
+    assert.ok(summary.includes('<target-file>'));
+    assert.ok(summary.includes('<file-content>'));
+  }
 });

@@ -82,9 +82,8 @@ export async function runAntigravityAgentMcpRead({
         const functionResponses = collectFunctionResponses(body.contents);
         const contents = Array.isArray(body.contents) ? body.contents : [];
         const responseErrorRedactions = scriptedFunctionCall ? {
-          fixtureKey, cliPath, projectRoot, home, procedureID, expectedGuidance,
-          deniedFilePath: scriptedFunctionCall.args?.Path ?? scriptedFunctionCall.args?.TargetFile,
-          deniedFileContent: scriptedFunctionCall.args?.Content ?? scriptedFunctionCall.args?.CodeContent,
+          context: { fixtureKey, cliPath, projectRoot, home, procedureID, expectedGuidance },
+          functionCall: scriptedFunctionCall,
         } : undefined;
         providerTrace.push({
           request_index: providerRequests,
@@ -359,11 +358,9 @@ export async function runAntigravityAgentMcpRead({
     invocationFailed = run.error !== undefined || run.exitCode !== 0 || run.timedOut;
     if (invocationFailed) {
       hostFailureCategory = classifyHostFailure(hostOutput);
-      hostErrorSummary = summarizeHostError(hostOutput, {
+      hostErrorSummary = summarizeAntigravityHostError(hostOutput, {
         fixtureKey, cliPath, projectRoot, home, procedureID, expectedGuidance,
-        deniedFilePath: scriptedFunctionCall?.args?.TargetFile,
-        deniedFileContent: scriptedFunctionCall?.args?.CodeContent,
-      });
+      }, scriptedFunctionCall);
     }
 
     if (scriptedFunctionCall && expectedToolResponseMarker &&
@@ -612,7 +609,7 @@ function runAntigravityCli(args, { cwd, env, timeout }) {
 
 function summarizeHostError(message, replacements) {
   let summary = String(message);
-  for (const [value, replacement] of [
+  const redactions = [
     [replacements.fixtureKey, '<fixture-key>'],
     [replacements.cliPath, '<threadforge-cli>'],
     [replacements.projectRoot, '<isolated-project>'],
@@ -621,13 +618,23 @@ function summarizeHostError(message, replacements) {
     [replacements.expectedGuidance, '<guidance>'],
     [replacements.deniedFilePath, '<target-file>'],
     [replacements.deniedFileContent, '<file-content>'],
-  ]) {
-    if (value) summary = summary.replaceAll(value, replacement);
+  ].filter(([value]) => value).sort(([left], [right]) => String(right).length - String(left).length);
+  for (const [value, replacement] of redactions) {
+    summary = summary.replaceAll(value, replacement);
   }
   return summary
     .replace(/(?:Bearer\s+|key=)[^\s&]+/gi, '<credential>')
     .replace(/[\r\n\t]+/g, ' ')
     .trim().slice(-600);
+}
+
+export function summarizeAntigravityHostError(message, context = {}, functionCall) {
+  const args = functionCall?.args ?? {};
+  return summarizeHostError(message, {
+    ...context,
+    deniedFilePath: args.Path ?? args.TargetFile ?? args.file_path,
+    deniedFileContent: args.Content ?? args.CodeContent ?? args.Code,
+  });
 }
 
 function classifyHostFailure(message) {
@@ -725,7 +732,8 @@ function summarizeFunctionResponse(item, expectedGuidance, responseErrorRedactio
     response_error_type: responseError === null ? 'null' : responseError === undefined ? 'absent' :
       Array.isArray(responseError) ? 'array' : typeof responseError,
     ...(responseErrorPresent && responseErrorRedactions ? {
-      response_error_summary: summarizeHostError(responseErrorText, responseErrorRedactions),
+      response_error_summary: summarizeAntigravityHostError(
+        responseErrorText, responseErrorRedactions.context, responseErrorRedactions.functionCall),
     } : {}),
     response_error_markers: {
       hook: /hook|callback/i.test(responseErrorText),

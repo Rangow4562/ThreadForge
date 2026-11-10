@@ -31,6 +31,7 @@ def test_release_evidence_installs_and_collects_every_declared_extra():
     marker = "  python-license-evidence:\n"
     assert marker in workflow
     job = workflow.split(marker, 1)[1].split("\n  release-candidate:\n", 1)[0]
+    assert "      - name: Set up Go from go.mod\n" in job
     sync_command = next(
         line.strip() for line in job.splitlines() if line.strip().startswith("uv sync --locked")
     )

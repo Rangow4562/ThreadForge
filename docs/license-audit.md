@@ -1,6 +1,6 @@
 # Dependency and license audit status
 
-Status: **open; not legal clearance for redistribution.** This workpaper records the repository inventory checked on **November 6, 2026**. It separates machine-readable lock metadata from actual license review; a package's declared license field or a successful build does not by itself establish compatibility.
+Status: **open; not legal clearance for redistribution.** This workpaper records the repository inventory checked on **November 6, 2026** and candidate evidence checked on **November 10, 2026**. It separates machine-readable lock metadata from actual license review; a package's declared license field or a successful build does not by itself establish compatibility.
 
 The fresh `scripts/generate_dependency_inventory.py --repo-root .` inventory on November 6, 2026 contains 932 components across 10 manifests. Its 478 `missing_declared_license_metadata` entries mean **license metadata was not collected**, not that those components are unlicensed. Inventory v3 breaks the missing declarations down as 77 Go module records and 401 Python package records; it does not infer licenses. It reports 0 `unresolved_versions`: the 278 external `python/uv.lock` package records have resolved versions and artifact hashes, while the 32 direct source requirements are retained on their locked records with pyproject manifest hashes. All 454 npm lock entries have a nonempty declared license field, including the new pinned `yaml` parser dependency used by Aider's explicit project-config adapter. Every inventory entry still has `license_review_status=unreviewed`, and `release_clearance=false`.
 
@@ -31,56 +31,52 @@ Release-candidate builds add separate per-target Go license-evidence archives us
 
 The release-candidate workflow collects Python license evidence from twelve locked environments: Linux, Windows, and macOS on Python 3.11, 3.12, 3.13, and 3.14. Each installs all seven extras declared in `python/pyproject.toml` and runs the full Python test suite before evidence collection. New candidates emit `threadforge.python-license-evidence.v2`; the v1 schema remains unchanged for older raw-byte input hashes. `scripts/build_python_license_evidence.py` records the source commit, candidate version, platform/runtime, selected extras, `uv.lock`/`pyproject.toml` hashes, installed package metadata hashes, safe license-expression/classifier fields, and hashes plus copies of discovered license/notice files. The collector-source and v2 input-manifest hashes normalize CRLF to LF so their identities are consistent across Windows and Unix checkouts; the source commit still binds them to the committed files. It rejects installed distributions absent from the lock and unsafe/oversized paths or payloads. Missing metadata/files stay explicitly missing; it does not infer a license. Each deterministic archive is provenance-attested and included in the combined candidate checksums. The collector remains `license_review_status=unreviewed`, `license_review_required=true`, and `release_clearance=false`.
 
-Verified November 6, 2026: the latest non-publishing candidate is version `0.5.3`, rehearsal run `42200105414`, from source commit `494e4402b170505ad1f2e1ef4dcdc64f5fe08df1`. All six Python evidence bundles include all seven extras and report zero unlocked distributions and zero malformed license metadata. Their v2 `uv.lock` and `pyproject.toml` input hashes are identical across Windows, macOS, and Linux because CRLF is normalized to LF before hashing; the source commit still binds the evidence to the committed inputs. The per-environment readback still found distributions without captured license metadata or without a discovered license file:
+Verified November 10, 2026: the latest non-publishing candidate is version `0.5.4`, rehearsal run `42810948539`, from source commit `40c367b4f00be4cb54d97a2ea7dfb6d3d5bb009f`. All twelve Python evidence bundles include all seven extras, validate schema v2, and report zero unlocked distributions and zero malformed license metadata. Their `uv.lock` and `pyproject.toml` input hashes are consistent across Windows, macOS, and Linux because CRLF is normalized to LF before hashing; the source commit binds them to the committed inputs. Installed-package readback still finds distributions without captured license metadata or discovered license files:
 
 | Target | Installed distributions | Without captured license metadata | Without discovered license files |
 |---|---:|---:|---:|
 | Linux, Python 3.11 | 253 | 6 | 14 |
 | Linux, Python 3.12 | 161 | 3 | 7 |
+| Linux, Python 3.13 | 161 | 3 | 7 |
+| Linux, Python 3.14 | 163 | 3 | 7 |
 | Windows, Python 3.11 | 146 | 2 | 7 |
 | Windows, Python 3.12 | 146 | 2 | 7 |
+| Windows, Python 3.13 | 146 | 2 | 7 |
+| Windows, Python 3.14 | 147 | 2 | 7 |
 | macOS, Python 3.11 | 142 | 2 | 6 |
 | macOS, Python 3.12 | 142 | 2 | 6 |
+| macOS, Python 3.13 | 142 | 2 | 6 |
+| macOS, Python 3.14 | 144 | 2 | 6 |
 
-“Without captured license metadata” means the installed distribution has no license expression, license classifier, or legacy license field; “without discovered license files” means the collector found no matching license/notice file in that distribution. Neither count proves that a package is unlicensed. Independent verification confirmed all 18 payload hashes in `checksums.txt`, all 19 SLSA provenance attestations (18 payloads plus the checksum file), and all four archive-to-SPDX attestations against the expected repository, workflow, branch, and source commit. The workflow created no public release. This candidate evidence does not populate the source inventory's missing metadata, classify license compatibility, or change `release_clearance=false`.
+“Without captured license metadata” means the installed distribution has no license expression, license classifier, or legacy license field; “without discovered license files” means the collector found no matching license/notice file in that distribution. Neither count proves that a package is unlicensed. Excluding the local editable `threadforge-python` project, the twelve manifests cover 277 of 278 distinct external locked package/version identities; the one outside these desktop/server targets is `httpx2-jsfetch==1.0`, marked for Emscripten. Lock presence is not installed-package or license-file evidence.
 
-For the v0.5.3 candidate's then-current lock snapshot, the six installed-profile manifests cover 274 of 277 distinct external package/version identities. The remaining three have resolution markers outside those Linux, Windows, and macOS Python 3.11/3.12 evidence targets; their presence in the lock is not installed-wheel/license-file evidence:
-
-| Locked identity | Lockfile applicability outside the candidate evidence targets |
-|---|---|
-| `httpx2-jsfetch==1.0` | `httpx2` conditional dependency for Python `>=3.12` on `emscripten` only. |
-| `pandas==2.3.3` | pandas resolution selected for Python `>=3.14`; all candidate Python profiles use 3.11 or 3.12. |
-| `pytz==2026.6` | pandas 2.3.3 dependency under Python `>=3.14`; it is not installed in the candidate profiles. |
-
-This was a boundary of the v0.5.3 candidate's evidence matrix, not a finding that these packages are unlicensed or a declaration that those runtimes are unsupported. The current lock has since been refreshed; a new candidate must use its own twelve-profile manifests and must not reuse the v0.5.3 counts or hashes. `httpx2-jsfetch==1.0` remains Emscripten-only and outside the three supported desktop/server OS targets; do not infer installed-package or license-file evidence from lock resolution alone.
-
-The six candidate manifests identify these 19 distinct installed distributions for targeted review. `L3.11`/`L3.12`, `W3.11`/`W3.12`, and `M3.11`/`M3.12` mean Linux, Windows, and macOS with the indicated Python version. A dash means that dimension had no reported gap for that distribution in the six profiles:
+Across the twelve profiles, 19 distinct installed distribution/version identities have at least one evidence gap. The table is a reviewer work queue, not an inferred license list. `L`, `W`, and `M` denote Linux, Windows, and macOS; a profile such as `L3.11` means Linux with Python 3.11. A dash means no gap of that type was reported for that identity:
 
 | Distribution/version | No captured license metadata | No discovered license/notice file |
 |---|---|---|
 | `cuda-tile` 1.7.0 | — | L3.11 |
 | `cuda-toolkit` 13.0.3.0 | L3.11 | L3.11 |
-| `cuda-toolkit` 13.2.2 | L3.12 | L3.12 |
-| `fastmcp-slim` 4.1.4 | — | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 |
-| `flatbuffers` 25.12.19 | — | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 |
-| `loguru` 0.7.3 | — | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 |
+| `cuda-toolkit` 13.2.2 | L3.12, L3.13, L3.14 | L3.12, L3.13, L3.14 |
+| `fastmcp-slim` 4.1.4 | — | All 12 profiles |
+| `flatbuffers` 25.12.19 | — | All 12 profiles |
+| `loguru` 0.7.3 | — | All 12 profiles |
 | `model-hosting-container-standards` 0.1.16 | — | L3.11 |
 | `nvidia-ml-py` 13.615.71 | — | L3.11 |
 | `opentelemetry-semantic-conventions-ai` 0.5.1 | — | L3.11 |
 | `oss-harmony` 0.0.11 | L3.11 | — |
-| `pymupdf-layout` 2.0 | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 |
-| `pymupdf4llm` 2.0 | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 |
+| `pymupdf-layout` 2.0 | All 12 profiles | All 12 profiles |
+| `pymupdf4llm` 2.0 | All 12 profiles | All 12 profiles |
 | `quack-kernels` 0.6.5 | L3.11 | — |
-| `ruff` 0.15.1 | — | W3.11, W3.12 |
+| `ruff` 0.15.1 | — | W3.11, W3.12, W3.13, W3.14 |
 | `sentencepiece` 0.2.2 | — | L3.11 |
 | `supervisor` 4.3.0 | — | L3.11 |
-| `tokenizers` 0.23.3 | — | L3.11, L3.12, W3.11, W3.12, M3.11, M3.12 |
+| `tokenizers` 0.23.3 | — | All 12 profiles |
 | `torchcodec` 0.17.0 | L3.11 | — |
 | `z3-solver` 4.15.4.0 | — | L3.11 |
 
-This is a reviewer work queue derived from installed wheel metadata and `RECORD` file listings, not an inferred license list. Review each distribution against its authoritative source and release artifact; do not treat metadata fields alone as proof of license terms.
+The candidate bundle contained 24 payloads plus `checksums.txt`; all 24 payload hashes matched. All 25 SLSA provenance attestations and four archive-to-SPDX attestations verified against the expected repository, workflow, branch, and source commit. All four Go evidence bundles and all twelve Python manifests remain `license_review_status=unreviewed` with `release_clearance=false`; the workflow created no public release. This evidence does not populate the source inventory's missing metadata, classify license compatibility, or grant legal approval.
 
-This Python evidence is a readback of only those six installed environments; it does **not** populate the lockfile inventory's missing Python metadata entries, establish the license of a package from its notice text, or cover the Engineering container/runtime or benchmark datasets/evaluators. Successful installation of the `serving` extra on Linux/Python 3.11 is not evidence that vLLM inference or GPU/runtime behavior works. Neither the Go nor Python collectors review compatibility or grant legal approval.
+These findings are a readback of the twelve installed environments; they do **not** populate the lockfile inventory's missing Python metadata entries, establish a package's license from notice text, or cover the Engineering container/runtime or benchmark datasets/evaluators. Successful installation of the `serving` extra on Linux/Python 3.11 is not evidence that vLLM inference or GPU/runtime behavior works. Neither the Go nor Python collectors review compatibility or grant legal approval.
 
 ## Release gate
 

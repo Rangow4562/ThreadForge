@@ -828,12 +828,32 @@ func runConfiguredMigrationSourceReadback(t *testing.T, product migrate.Product,
 			product, verification.Status, verification.ActualState, verification.SnapshotRecordCount,
 			verification.StagedRecordCount, verification.ExcludedRecordCount, verification.CutoverAuthorized, verification.Mismatches)
 	}
+	var rollbackReceipt store.MigrationReceipt
+	runMigrationJSON(t, &rollbackReceipt, "migrate", "rollback", "--id", snapshot.ID,
+		"--reason", "source-backed migration rollback rehearsal", "--db", databasePath)
+	if rollbackReceipt.Status != "rolled_back" {
+		t.Fatalf("configured %s migration rollback did not report a rolled-back receipt", product)
+	}
+	var rollbackVerification migrationVerification
+	runMigrationJSON(t, &rollbackVerification, "migrate", "verify", "--manifest", manifestPath,
+		"--expect", "rolled_back", "--db", databasePath)
+	if rollbackVerification.Status != "rollback_reconciled" || rollbackVerification.ActualState != "rolled_back" ||
+		rollbackVerification.SnapshotRecordCount != snapshot.Summary.RecordsImported ||
+		rollbackVerification.StagedRecordCount != 0 ||
+		rollbackVerification.ExcludedRecordCount != snapshot.Summary.RecordsCredentialBlocked+snapshot.Summary.RecordsRejected ||
+		rollbackVerification.CutoverAuthorized || len(rollbackVerification.Mismatches) != 0 {
+		t.Fatalf("configured %s rollback did not reconcile to an empty staged set: status=%q state=%q snapshot=%d staged=%d excluded=%d cutover=%t mismatches=%v",
+			product, rollbackVerification.Status, rollbackVerification.ActualState,
+			rollbackVerification.SnapshotRecordCount, rollbackVerification.StagedRecordCount,
+			rollbackVerification.ExcludedRecordCount, rollbackVerification.CutoverAuthorized,
+			rollbackVerification.Mismatches)
+	}
 	var after migrate.Manifest
 	runMigrationJSON(t, &after, "migrate", "inspect", "--product", string(product), "--root", absoluteRoot)
 	if after.SourceFingerprint != snapshot.SourceFingerprint {
 		t.Fatalf("configured %s migration source changed during readback", product)
 	}
-	t.Logf("reconciled migration round-trip: product=%s files=%d ready=%d credential_path_exclusions=%d records=%d source_bytes=%d",
+	t.Logf("reconciled migration apply and rollback: product=%s files=%d ready=%d credential_path_exclusions=%d records=%d source_bytes=%d",
 		product, snapshot.Summary.FilesScanned, snapshot.Summary.FilesReady,
 		snapshot.Summary.FilesCredentialBlocked, snapshot.Summary.RecordsImported, snapshot.Summary.TotalSourceBytes)
 	return migrationSourceReadbackResult{Snapshot: snapshot, ManifestPath: manifestPath, Verification: verification, Coverage: coverage}

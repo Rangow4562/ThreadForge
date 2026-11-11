@@ -723,14 +723,25 @@ func TestProcedureMCPListReturnsMetadataWithFreshnessButNoGuidance(t *testing.T)
 }
 
 func TestMCPProcedureReadsSurfaceFreshnessAndWithholdStaleGuidance(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "src", "app.go")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package app\nfunc Build() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := procedurefiles.FingerprintSources(root, []string{"src/app.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	procedures, err := store.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer procedures.Close()
-	baseline := proceduregraph.PathFingerprint{Path: "src/app.go", SHA256: strings.Repeat("a", 64)}
-	addApprovedProcedureWithSources(t, procedures, "freshness-proc", []proceduregraph.PathFingerprint{baseline})
-	server := New(procedures)
+	addApprovedProcedureWithSources(t, procedures, "freshness-proc", baseline)
+	server := NewWithProjectStores(procedures, nil, nil, root)
 
 	call := func(name, arguments string) (any, string) {
 		t.Helper()
@@ -744,15 +755,20 @@ func TestMCPProcedureReadsSurfaceFreshnessAndWithholdStaleGuidance(t *testing.T)
 		}
 		return value, string(data)
 	}
-	_, unverified := call("threadforge_procedure_guide", `{"procedure_id":"freshness-proc","seeds":["compile"],"paths":["src/app.go"]}`)
-	if !strings.Contains(unverified, `"status":"incomplete"`) ||
-		!strings.Contains(unverified, `"freshness":"unverified"`) ||
-		!strings.Contains(unverified, "Run go test ./... before merging.") {
-		t.Fatalf("guide did not surface missing fingerprints as incomplete: %s", unverified)
-	}
-
 	changed := `{"path":"src/app.go","sha256":"` + strings.Repeat("b", 64) + `"}`
 	staleArgs := `{"procedure_id":"freshness-proc","seeds":["compile"],"path_fingerprints":[` + changed + `]}`
+	matched := `{"path":"src/app.go","sha256":"` + baseline[0].SHA256 + `"}`
+	matchedArgs := `{"procedure_id":"freshness-proc","seeds":["compile"],"path_fingerprints":[` + matched + `]}`
+	_, matchedGuide := call("threadforge_procedure_guide", matchedArgs)
+	if !strings.Contains(matchedGuide, `"status":"complete"`) ||
+		!strings.Contains(matchedGuide, `"freshness":"verified"`) ||
+		!strings.Contains(matchedGuide, `"neighborhood"`) ||
+		!strings.Contains(matchedGuide, `"action_ready":false`) {
+		t.Fatalf("matching procedure guide lost its advisory freshness receipt: %s", matchedGuide)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package app\nfunc Build() { changed := true; _ = changed }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	_, staleGuide := call("threadforge_procedure_guide", staleArgs)
 	if !strings.Contains(staleGuide, `"status":"stale"`) ||
 		!strings.Contains(staleGuide, `"freshness":"stale"`) ||
@@ -766,31 +782,70 @@ func TestMCPProcedureReadsSurfaceFreshnessAndWithholdStaleGuidance(t *testing.T)
 		strings.Contains(staleGet, `"procedure"`) || strings.Contains(staleGet, "Run go test ./... before merging.") {
 		t.Fatalf("get exposed a procedure whose source changed: %s", staleGet)
 	}
-
-	matched := `{"path":"src/app.go","sha256":"` + baseline.SHA256 + `"}`
-	matchedArgs := `{"procedure_id":"freshness-proc","seeds":["compile"],"path_fingerprints":[` + matched + `]}`
-	_, matchedGuide := call("threadforge_procedure_guide", matchedArgs)
-	if !strings.Contains(matchedGuide, `"status":"complete"`) ||
-		!strings.Contains(matchedGuide, `"freshness":"verified"`) ||
-		!strings.Contains(matchedGuide, `"neighborhood"`) ||
-		!strings.Contains(matchedGuide, `"action_ready":false`) {
-		t.Fatalf("matching procedure guide lost its advisory freshness receipt: %s", matchedGuide)
-	}
 	duplicateArgs := `{"procedure_id":"freshness-proc","path_fingerprints":[` + matched + `,` + matched + `]}`
-	if _, err := server.callTool(context.Background(), toolCallParams{Name: "threadforge_procedure_get", Arguments: json.RawMessage(duplicateArgs)}); err == nil {
+	if _, err := New(procedures).callTool(context.Background(), toolCallParams{Name: "threadforge_procedure_get", Arguments: json.RawMessage(duplicateArgs)}); err == nil {
 		t.Fatal("duplicate path fingerprints were accepted")
 	}
 }
 
-func TestMCPProcedureRetrievalReceiptBindsTaskAndWithholdsStaleGuidance(t *testing.T) {
+func TestMCPProcedureFreshnessDoesNotTrustCallerFingerprintsWithoutProjectRoot(t *testing.T) {
 	procedures, err := store.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer procedures.Close()
-	graph := addApprovedProcedureWithSources(t, procedures, "receipt-procedure", []proceduregraph.PathFingerprint{
-		{Path: "src/app.go", SHA256: strings.Repeat("a", 64)},
-	})
+	baseline := proceduregraph.PathFingerprint{Path: "src/app.go", SHA256: strings.Repeat("a", 64)}
+	addApprovedProcedureWithSources(t, procedures, "untrusted-claim-proc", []proceduregraph.PathFingerprint{baseline})
+	server := New(procedures)
+	for _, test := range []struct {
+		name string
+		args string
+	}{
+		{"get", `{"procedure_id":"untrusted-claim-proc","path_fingerprints":[{"path":"src/app.go","sha256":"` + baseline.SHA256 + `"}]}`},
+		{"guide", `{"procedure_id":"untrusted-claim-proc","seeds":["compile"],"path_fingerprints":[{"path":"src/app.go","sha256":"` + baseline.SHA256 + `"}]}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			value, callErr := server.callTool(context.Background(), toolCallParams{
+				Name:      map[string]string{"get": "threadforge_procedure_get", "guide": "threadforge_procedure_guide"}[test.name],
+				Arguments: json.RawMessage(test.args),
+			})
+			if callErr != nil {
+				t.Fatal(callErr)
+			}
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := string(encoded)
+			if strings.Contains(result, `"freshness":"verified"`) ||
+				!strings.Contains(result, `"status":"incomplete"`) ||
+				!strings.Contains(result, `"freshness":"unverified"`) ||
+				!strings.Contains(result, "caller-supplied fingerprints cannot verify current source files") {
+				t.Fatalf("caller-controlled digest was treated as independent freshness proof: %s", result)
+			}
+		})
+	}
+}
+
+func TestMCPProcedureRetrievalReceiptBindsTaskAndWithholdsStaleGuidance(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "src", "app.go")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package app\nfunc Build() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := procedurefiles.FingerprintSources(root, []string{"src/app.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	procedures, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer procedures.Close()
+	graph := addApprovedProcedureWithSources(t, procedures, "receipt-procedure", baseline)
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	task := continuity.Task{
 		SchemaVersion: continuity.SchemaVersion, ID: "task-receipt-mcp", ProjectID: graph.ProjectID, Owner: "local-user",
@@ -801,7 +856,7 @@ func TestMCPProcedureRetrievalReceiptBindsTaskAndWithholdsStaleGuidance(t *testi
 	if err := procedures.CreateTask(context.Background(), task, "local-user", "create MCP receipt test task"); err != nil {
 		t.Fatal(err)
 	}
-	server := New(procedures)
+	server := NewWithProjectStores(procedures, nil, nil, root)
 	call := func(arguments string) (memoryfeedback.RetrievalReceipt, string, error) {
 		t.Helper()
 		value, callErr := server.callTool(context.Background(), toolCallParams{
@@ -833,6 +888,9 @@ func TestMCPProcedureRetrievalReceiptBindsTaskAndWithholdsStaleGuidance(t *testi
 		receipt.ObservationBoundary != "mcp_handler_result_prepared" ||
 		strings.Contains(response, "model_exposure_confirmed") || strings.Contains(response, "delivery_confirmed") {
 		t.Fatalf("receipt overstated or lost handler-result provenance: %s", response)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package app\nfunc Build() { changed := true; _ = changed }\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	staleArgs := `{"procedure_id":"receipt-procedure","task_id":"task-receipt-mcp","path_fingerprints":[{"path":"src/app.go","sha256":"` + strings.Repeat("b", 64) + `"}]}`
 	stale, staleResponse, err := call(staleArgs)

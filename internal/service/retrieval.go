@@ -87,12 +87,14 @@ func RetrieveContextWithProjectRoot(
 	if version2 {
 		response.Memory = []MemoryContextItem{}
 	}
-	currentByPath := make(map[string]string, len(request.PathFingerprints))
-	for _, current := range request.PathFingerprints {
-		currentByPath[current.Path] = current.SHA256
-	}
+	// Fingerprints supplied by a context caller are claims, not independent
+	// evidence that the caller read the current project files. Only hashes
+	// computed by this service from a configured project root may establish
+	// verified freshness.
+	currentByPath := make(map[string]string)
 	localFingerprintError := false
-	if strings.TrimSpace(projectRoot) != "" {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot != "" {
 		candidates := make([]proceduregraph.Graph, 0, request.MaxItems)
 		for _, graph := range rankedGraphs {
 			if matchesProcedureApplicability(graph, request.Paths, request.Modules) {
@@ -136,6 +138,8 @@ func RetrieveContextWithProjectRoot(
 		freshness, reason := "", ""
 		if localFingerprintError {
 			freshness, reason = "unverified", "current source fingerprints are unavailable from the configured project root"
+		} else if projectRoot == "" && len(graph.SourceFiles) > 0 {
+			freshness, reason = "unverified", "the service has no configured project root; caller-supplied fingerprints cannot verify current source files"
 		} else {
 			freshness, reason = freshnessFor(graph, currentByPath, request.Paths)
 		}

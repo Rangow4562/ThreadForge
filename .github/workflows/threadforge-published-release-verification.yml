@@ -1,0 +1,104 @@
+name: Threadforge published-release verification
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable release version without the leading v
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  attestations: read
+
+concurrency:
+  group: threadforge-published-release-${{ github.event.release.tag_name || inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out verification tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Resolve and validate release identity
+        id: resolve
+        shell: bash
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$EVENT_TAG" ]]; then
+            tag="$EVENT_TAG"
+          else
+            if [[ ! "$INPUT_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "workflow_dispatch requires a stable MAJOR.MINOR.PATCH version" >&2
+              exit 1
+            fi
+            tag="v$INPUT_VERSION"
+          fi
+          if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "release tag is not a stable vMAJOR.MINOR.PATCH tag" >&2
+            exit 1
+          fi
+          version="${tag#v}"
+          source_commit="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${tag}" --jq '.sha')"
+          if [[ ! "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "GitHub returned an invalid tag commit" >&2
+            exit 1
+          fi
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "source_commit=$source_commit"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download public release assets
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          asset_dir="$RUNNER_TEMP/threadforge-published-release-assets"
+          mkdir "$asset_dir"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$asset_dir"
+
+      - name: Verify published assets against candidate provenance
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.resolve.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.resolve.outputs.version }}
+          SOURCE_COMMIT: ${{ steps.resolve.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/threadforge-published-release-verification.json"
+          python scripts/verify_published_release.py \
+            --bundle-dir "$RUNNER_TEMP/threadforge-published-release-assets" \
+            --version "$RELEASE_VERSION" \
+            --source-commit "$SOURCE_COMMIT" \
+            --repo "$GITHUB_REPOSITORY" > "$report"
+          {
+            echo "# Published release verification: $RELEASE_TAG"
+            echo
+            cat "$report"
+          } >> "$GITHUB_STEP_SUMMARY"

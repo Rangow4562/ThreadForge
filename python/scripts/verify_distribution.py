@@ -53,7 +53,15 @@ REQUIRED_DISTRIBUTION_FILES = {
     "threadforge_domains/workspace/runtime/archipelago/harness_eng/main.py",
     "threadforge_domains/workspace/runtime/legal/CREDITS.anyjev.md",
     "threadforge_domains/workspace/runtime/legal/UPSTREAM_MODIFICATIONS.md",
+    "threadforge_py/legal/LICENSE.threadforge",
+    "threadforge_py/legal/NOTICE.threadforge",
+    "threadforge_py/legal/THIRD_PARTY.md",
+    "threadforge_py/legal/LICENSE.anyjev",
+    "threadforge_py/legal/LICENSE.rrsi",
+    "threadforge_py/legal/CREDITS.anyjev.md",
+    "threadforge_py/legal/UPSTREAM_MODIFICATIONS.md",
 }
+REQUIRED_SDIST_NOTICES = {"LICENSE.threadforge", "NOTICE.threadforge", "THIRD_PARTY.md"}
 FORBIDDEN_SUFFIXES = {
     ".gguf",
     ".npz",
@@ -104,6 +112,24 @@ def _copy_sources(staging_root: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source, destination, ignore=ignore)
 
+    staged_python = staging_root / "python"
+    package_legal = staged_python / "threadforge_py" / "legal"
+    package_legal.mkdir(parents=True, exist_ok=True)
+    legal_sources = (
+        (REPOSITORY_ROOT / "LICENSE", "LICENSE.threadforge"),
+        (REPOSITORY_ROOT / "NOTICE", "NOTICE.threadforge"),
+        (REPOSITORY_ROOT / "THIRD_PARTY.md", "THIRD_PARTY.md"),
+        (PYTHON_ROOT / "LICENSE.anyjev", "LICENSE.anyjev"),
+        (PYTHON_ROOT / "LICENSE.rrsi", "LICENSE.rrsi"),
+        (PYTHON_ROOT / "CREDITS.anyjev.md", "CREDITS.anyjev.md"),
+        (PYTHON_ROOT / "UPSTREAM_MODIFICATIONS.md", "UPSTREAM_MODIFICATIONS.md"),
+    )
+    for source, name in legal_sources:
+        if source.is_symlink() or not source.is_file():
+            raise RuntimeError("Python distribution is missing a regular upstream notice")
+        shutil.copyfile(source, staged_python / name)
+        shutil.copyfile(source, package_legal / name)
+
 
 def _run(command: list[str], *, cwd: Path, input_text: str | None = None, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
@@ -146,12 +172,15 @@ def _wheel_paths(filename: Path) -> set[str]:
 
 def _verify_archive(paths: set[str], *, wheel: bool) -> int:
     missing = REQUIRED_DISTRIBUTION_FILES - paths
+    if not wheel:
+        missing |= REQUIRED_SDIST_NOTICES - paths
     if missing:
-        raise RuntimeError("Python distribution omits required runtime assets or notices")
+        missing_list = ", ".join(sorted(missing))
+        raise RuntimeError(f"Python distribution omits required runtime assets or notices: {missing_list}")
     if wheel:
-        for license_name in ("LICENSE.anyjev", "LICENSE.rrsi"):
+        for license_name in ("LICENSE.threadforge", "LICENSE.anyjev", "LICENSE.rrsi"):
             if not any(path.endswith(f".dist-info/licenses/{license_name}") for path in paths):
-                raise RuntimeError("Python wheel omits a vendored-library license notice")
+                raise RuntimeError("Python wheel omits a required project or vendored-library license notice")
     for path in paths:
         lowered = path.lower()
         if lowered.endswith(tuple(FORBIDDEN_SUFFIXES)):

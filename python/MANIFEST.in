@@ -1,3 +1,4 @@
 recursive-include threadforge_domains/workspace/runtime *
-include CREDITS.anyjev.md UPSTREAM_MODIFICATIONS.md
+include LICENSE.threadforge NOTICE.threadforge THIRD_PARTY.md
+include LICENSE.anyjev LICENSE.rrsi CREDITS.anyjev.md UPSTREAM_MODIFICATIONS.md
 global-exclude *.py[cod]

@@ -17,8 +17,10 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable
+from urllib.parse import quote
 
 
 REPOSITORY = "Rangow4562/ThreadForge"
@@ -28,9 +30,31 @@ SPDX_PREDICATE = "https://spdx.dev/Document/v2.3"
 PYTHON_EXTRAS = ["decisions", "evolution", "hf", "serving", "test", "typed-data", "workspace"]
 GO_TARGETS = ["linux_amd64", "darwin_amd64", "darwin_arm64", "windows_amd64"]
 PYTHON_TARGETS = [(system, version) for system in ("linux", "windows", "darwin") for version in ("3.11", "3.12", "3.13", "3.14")]
+PYTHON_DISTRIBUTION_FILES = {
+    "threadforge_py/__main__.py",
+    "threadforge_py/protocol.py",
+    "anyjev/decider.py",
+    "rrsi/loop.py",
+    "threadforge_domains/workspace/adapter.py",
+    "threadforge_domains/workspace/runtime/domain/produce.sh",
+    "threadforge_domains/workspace/runtime/archipelago/LICENSE",
+    "threadforge_domains/workspace/runtime/archipelago/harness_workspace/main.py",
+    "threadforge_domains/workspace/runtime/archipelago/harness_eng/main.py",
+    "threadforge_domains/workspace/runtime/legal/CREDITS.anyjev.md",
+    "threadforge_domains/workspace/runtime/legal/UPSTREAM_MODIFICATIONS.md",
+    "threadforge_py/legal/LICENSE.threadforge",
+    "threadforge_py/legal/NOTICE.threadforge",
+    "threadforge_py/legal/THIRD_PARTY.md",
+    "threadforge_py/legal/LICENSE.anyjev",
+    "threadforge_py/legal/LICENSE.rrsi",
+    "threadforge_py/legal/CREDITS.anyjev.md",
+    "threadforge_py/legal/UPSTREAM_MODIFICATIONS.md",
+}
+PYTHON_FORBIDDEN_SUFFIXES = (".gguf", ".npz", ".parquet", ".pt", ".pth", ".safetensors")
 MAX_BUNDLE_FILE_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_UNPACKED_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 25_000
+MAX_PYTHON_DISTRIBUTION_MEMBERS = 25_000
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 VERSION_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
@@ -118,7 +142,10 @@ def expected_payload_names(version: str) -> set[str]:
         )
     for system, python_version in PYTHON_TARGETS:
         names.add(f"threadforge_{version}_python_{system}_py{python_version}.license-evidence.tar.gz")
-    if len(names) != 24:
+    names.add(f"threadforge_python-{version}.tar.gz")
+    names.add(f"threadforge_python-{version}-py3-none-any.whl")
+    names.add(f"threadforge_{version}_python.spdx.json")
+    if len(names) != 27:
         raise ReleaseCandidateError("internal candidate payload inventory is invalid")
     return names
 
@@ -142,7 +169,7 @@ def _parse_checksums(path: Path, expected: set[str]) -> dict[str, str]:
             raise ReleaseCandidateError("checksums.txt contains a duplicate filename")
         checksums[name] = digest
     if set(checksums) != expected:
-        raise ReleaseCandidateError("checksums.txt does not cover exactly the 24 candidate payloads")
+        raise ReleaseCandidateError("checksums.txt does not cover exactly the 27 candidate payloads")
     return checksums
 
 
@@ -176,14 +203,14 @@ def _read_tar(path: Path) -> dict[str, bytes]:
     return members
 
 
-def _read_zip(path: Path) -> dict[str, bytes]:
+def _read_zip(path: Path, *, max_members: int = 32) -> dict[str, bytes]:
     _require_regular_file(path)
     members: dict[str, bytes] = {}
     total = 0
     try:
         with zipfile.ZipFile(path) as archive:
             infos = archive.infolist()
-            if len(infos) > 32:
+            if len(infos) > max_members:
                 raise ReleaseCandidateError("candidate ZIP contains too many members")
             for info in infos:
                 name = _safe_member_name(info.filename)
@@ -290,7 +317,7 @@ def _validate_go_evidence(data: bytes, *, target: str, source_commit: str) -> No
 
 def _validate_python_evidence(
     data: bytes, *, system: str, python_version: str, release_version: str, source_commit: str
-) -> None:
+) -> dict[str, Any]:
     members = _read_tar_bytes(data, expected_prefix="python-license-evidence/")
     evidence = _decode_json(members["evidence.json"], "Python license evidence")
     scope = evidence.get("scope")
@@ -312,6 +339,7 @@ def _validate_python_evidence(
     installed_count = evidence.get("installed_distribution_count")
     locked_count = evidence.get("locked_package_count")
     distributions = evidence.get("distributions")
+    input_hashes = evidence.get("input_hashes")
     if (
         not _is_nonnegative_int(installed_count)
         or installed_count < 1
@@ -319,8 +347,23 @@ def _validate_python_evidence(
         or locked_count < 1
         or not isinstance(distributions, list)
         or len(distributions) != installed_count
+        or not isinstance(input_hashes, dict)
+        or set(input_hashes) != {"uv_lock_sha256", "pyproject_sha256"}
+        or not isinstance(input_hashes.get("uv_lock_sha256"), str)
+        or not SHA256_RE.fullmatch(input_hashes["uv_lock_sha256"])
+        or not isinstance(input_hashes.get("pyproject_sha256"), str)
+        or not SHA256_RE.fullmatch(input_hashes["pyproject_sha256"])
     ):
         raise ReleaseCandidateError("Python license evidence package counts are inconsistent")
+    for distribution in distributions:
+        if (
+            not isinstance(distribution, dict)
+            or not isinstance(distribution.get("normalized_name"), str)
+            or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", distribution["normalized_name"])
+            or not isinstance(distribution.get("version"), str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!+_-]{0,254}", distribution["version"])
+        ):
+            raise ReleaseCandidateError("Python license evidence has an invalid installed package identity")
     license_members = {name for name in members if name.startswith("licenses/")}
     license_bytes = sum(len(members[name]) for name in license_members)
     file_count = summary.get("license_file_count")
@@ -333,6 +376,299 @@ def _validate_python_evidence(
         or license_bytes != file_bytes
     ):
         raise ReleaseCandidateError("Python license evidence archive and manifest do not reconcile")
+    return {
+        "locked_package_count": locked_count,
+        "uv_lock_sha256": input_hashes["uv_lock_sha256"],
+        "pyproject_sha256": input_hashes["pyproject_sha256"],
+        "distributions": distributions,
+    }
+
+
+def _validate_python_lock_sbom(
+    data: bytes,
+    *,
+    version: str,
+    source_commit: str,
+    lock_sha256: str,
+    project_sha256: str,
+    locked_package_count: int,
+    installed_distributions: list[dict[str, Any]],
+) -> None:
+    document = _decode_json(data, "Python dependency SPDX SBOM", max_bytes=32 * 1024 * 1024)
+    if (
+        set(document) != {
+            "spdxVersion", "dataLicense", "SPDXID", "name", "documentNamespace", "creationInfo",
+            "documentDescribes", "packages", "relationships",
+        }
+        or
+        document.get("spdxVersion") != "SPDX-2.3"
+        or document.get("dataLicense") != "CC0-1.0"
+        or document.get("SPDXID") != "SPDXRef-DOCUMENT"
+        or document.get("name") != f"threadforge-python-{version}-all-extras-lock"
+    ):
+        raise ReleaseCandidateError("Python dependency SPDX document identity is invalid")
+
+    creation = document.get("creationInfo")
+    prefix = "threadforge.python-lock-sbom-binding.v1 "
+    comment = creation.get("comment") if isinstance(creation, dict) else None
+    if not isinstance(comment, str) or not comment.startswith(prefix):
+        raise ReleaseCandidateError("Python dependency SPDX binding is missing")
+    binding = _decode_json(comment[len(prefix):].encode("utf-8"), "Python dependency SPDX binding", max_bytes=16_384)
+    expected_binding_keys = {
+        "schema", "source_commit", "release_version", "uv_lock_sha256", "pyproject_sha256",
+        "package_record_count", "extras",
+    }
+    if (
+        set(binding) != expected_binding_keys
+        or binding.get("schema") != "threadforge.python-lock-sbom-binding.v1"
+        or binding.get("source_commit") != source_commit
+        or binding.get("release_version") != version
+        or binding.get("uv_lock_sha256") != lock_sha256
+        or binding.get("pyproject_sha256") != project_sha256
+        or binding.get("package_record_count") != locked_package_count
+        or binding.get("extras") != PYTHON_EXTRAS
+    ):
+        raise ReleaseCandidateError("Python dependency SPDX binding does not match the candidate evidence")
+    digest = hashlib.sha256(_canonical_json(binding).encode("utf-8")).hexdigest()
+    expected_namespace = f"https://threadforge.dev/spdx/python-lock/{version}/{digest}"
+    if document.get("documentNamespace") != expected_namespace:
+        raise ReleaseCandidateError("Python dependency SPDX namespace is not bound to its manifest")
+    if (
+        set(creation) != {"creators", "created", "comment"}
+        or
+        creation.get("creators") != ["Tool: Threadforge Python lock SBOM builder"]
+        or not isinstance(creation.get("created"), str)
+        or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", creation["created"])
+    ):
+        raise ReleaseCandidateError("Python dependency SPDX creation metadata is invalid")
+
+    packages = document.get("packages")
+    if not isinstance(packages, list) or len(packages) != locked_package_count or not packages:
+        raise ReleaseCandidateError("Python dependency SPDX package count does not match uv.lock")
+    by_id: dict[str, dict[str, Any]] = {}
+    identities: set[tuple[str, str]] = set()
+    project_ids: list[str] = []
+    for package in packages:
+        if not isinstance(package, dict):
+            raise ReleaseCandidateError("Python dependency SPDX package is malformed")
+        package_id = package.get("SPDXID")
+        name = package.get("name")
+        package_version = package.get("versionInfo")
+        if (
+            set(package) - {
+                "SPDXID", "name", "versionInfo", "downloadLocation", "filesAnalyzed", "licenseConcluded",
+                "licenseDeclared", "copyrightText", "primaryPackagePurpose", "externalRefs", "sourceInfo",
+            }
+            or
+            not isinstance(package_id, str)
+            or not re.fullmatch(r"SPDXRef-Package-[0-9]{6}", package_id)
+            or package_id in by_id
+            or not isinstance(name, str)
+            or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,253}[A-Za-z0-9])?", name)
+            or not isinstance(package_version, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!+_-]{0,254}", package_version)
+            or package.get("downloadLocation") != "NOASSERTION"
+            or package.get("filesAnalyzed") is not False
+            or package.get("licenseConcluded") != "NOASSERTION"
+            or package.get("licenseDeclared") != "NOASSERTION"
+            or package.get("copyrightText") != "NOASSERTION"
+        ):
+            raise ReleaseCandidateError("Python dependency SPDX package metadata is invalid or makes license claims")
+        normalized_name = re.sub(r"[-_.]+", "-", name).lower()
+        identity = (normalized_name, package_version)
+        if identity in identities:
+            raise ReleaseCandidateError("Python dependency SPDX contains duplicate package identities")
+        identities.add(identity)
+        by_id[package_id] = package
+        refs = package.get("externalRefs")
+        expected_purl = f"pkg:pypi/{quote(normalized_name, safe='-._~')}@{quote(package_version, safe='-._~+!')}"
+        if refs != [{
+            "referenceCategory": "PACKAGE-MANAGER",
+            "referenceType": "purl",
+            "referenceLocator": expected_purl,
+        }]:
+            raise ReleaseCandidateError("Python dependency SPDX package has an invalid PyPI package URL")
+        if normalized_name == "threadforge-python":
+            project_ids.append(package_id)
+            if (
+                package_version != version
+                or package.get("primaryPackagePurpose") != "APPLICATION"
+                or package.get("sourceInfo")
+                != f"Candidate version {version}; all declared extras resolved from uv.lock SHA-256 "
+                f"{lock_sha256} and pyproject.toml SHA-256 {project_sha256}."
+            ):
+                raise ReleaseCandidateError("Python dependency SPDX root package does not match the release")
+        elif "sourceInfo" in package or "primaryPackagePurpose" in package:
+            raise ReleaseCandidateError("Python dependency SPDX third-party package purpose is invalid")
+
+    if len(project_ids) != 1:
+        raise ReleaseCandidateError("Python dependency SPDX must describe exactly one Threadforge package")
+    described = document.get("documentDescribes")
+    if described != project_ids:
+        raise ReleaseCandidateError("Python dependency SPDX does not describe the candidate package")
+    relationships = document.get("relationships")
+    if not isinstance(relationships, list) or len(relationships) > 100_001:
+        raise ReleaseCandidateError("Python dependency SPDX relationship graph is malformed")
+    known_ids = set(by_id) | {"SPDXRef-DOCUMENT"}
+    described_edges: list[dict[str, Any]] = []
+    adjacency: dict[str, set[str]] = {}
+    edge_keys: set[tuple[str, str, str, str]] = set()
+    for relationship in relationships:
+        if not isinstance(relationship, dict):
+            raise ReleaseCandidateError("Python dependency SPDX contains an invalid relationship")
+        source = relationship.get("spdxElementId")
+        target = relationship.get("relatedSpdxElement")
+        relation_type = relationship.get("relationshipType")
+        comment = relationship.get("comment", "")
+        if (
+            not isinstance(source, str)
+            or not isinstance(target, str)
+            or not isinstance(relation_type, str)
+            or
+            source not in known_ids
+            or target not in known_ids
+            or relation_type not in {"DESCRIBES", "DEPENDS_ON"}
+            or not isinstance(comment, str)
+            or len(comment) > 8192
+            or not re.fullmatch(r"[-A-Za-z0-9_ .<>=!(),;']*", comment)
+        ):
+            raise ReleaseCandidateError("Python dependency SPDX relationship references invalid elements")
+        key = (source, relation_type, target, comment)
+        if key in edge_keys:
+            raise ReleaseCandidateError("Python dependency SPDX contains duplicate relationships")
+        edge_keys.add(key)
+        if relation_type == "DESCRIBES":
+            described_edges.append(relationship)
+            if source != "SPDXRef-DOCUMENT":
+                raise ReleaseCandidateError("Python dependency SPDX DESCRIBES relationship is invalid")
+        else:
+            if source == "SPDXRef-DOCUMENT" or target == "SPDXRef-DOCUMENT":
+                raise ReleaseCandidateError("Python dependency SPDX dependency edge references the document")
+            adjacency.setdefault(source, set()).add(target)
+    if (
+        len(described_edges) != 1
+        or described_edges[0].get("relatedSpdxElement") != project_ids[0]
+        or "files" in document
+    ):
+        raise ReleaseCandidateError("Python dependency SPDX document relationships are inconsistent")
+    reachable = {project_ids[0]}
+    pending = [project_ids[0]]
+    while pending:
+        for target in adjacency.get(pending.pop(), set()):
+            if target not in reachable:
+                reachable.add(target)
+                pending.append(target)
+    if reachable != set(by_id):
+        raise ReleaseCandidateError("Python dependency SPDX does not connect every locked package to the project")
+
+    for distribution in installed_distributions:
+        identity = (distribution["normalized_name"], distribution["version"])
+        if identity[0] == "threadforge-python":
+            if not any(name == identity[0] for name, _ in identities):
+                raise ReleaseCandidateError("Python dependency SPDX omits the installed Threadforge project")
+        elif identity not in identities:
+            raise ReleaseCandidateError("Python dependency SPDX omits an installed locked distribution")
+
+
+def _validate_python_distribution_metadata(data: bytes, *, version: str, label: str) -> None:
+    if len(data) > 1024 * 1024:
+        raise ReleaseCandidateError(f"Python {label} metadata exceeds the size limit")
+    try:
+        message = BytesParser().parsebytes(data)
+    except (TypeError, ValueError) as error:
+        raise ReleaseCandidateError(f"Python {label} metadata is malformed") from error
+    names = message.get_all("Name", [])
+    versions = message.get_all("Version", [])
+    canonical_names = [re.sub(r"[-_.]+", "-", name).casefold() for name in names if isinstance(name, str)]
+    if canonical_names != ["threadforge-python"] or versions != [version]:
+        raise ReleaseCandidateError(f"Python {label} name or version does not match the candidate")
+
+
+def _validate_python_sdist(path: Path, *, version: str) -> None:
+    _require_regular_file(path)
+    expected_root = f"threadforge_python-{version}"
+    roots: set[str] = set()
+    seen: set[str] = set()
+    files: dict[str, bytes] = {}
+    expanded = 0
+    try:
+        with tarfile.open(path, mode="r:gz") as archive:
+            for index, member in enumerate(archive):
+                if index >= MAX_PYTHON_DISTRIBUTION_MEMBERS:
+                    raise ReleaseCandidateError("Python source archive contains too many members")
+                raw_name = member.name
+                if not raw_name or "\\" in raw_name or "\x00" in raw_name:
+                    raise ReleaseCandidateError("Python source archive contains an unsafe member path")
+                if member.isdir() and raw_name.endswith("/"):
+                    raw_name = raw_name[:-1]
+                name = _safe_member_name(raw_name)
+                parts = PurePosixPath(name).parts
+                if not parts or (len(parts) == 1 and not member.isdir()):
+                    raise ReleaseCandidateError("Python source archive member is outside its root directory")
+                if name in seen or not (member.isdir() or member.isfile()) or member.size < 0:
+                    raise ReleaseCandidateError("Python source archive contains duplicate or non-regular members")
+                seen.add(name)
+                roots.add(parts[0])
+                if member.isdir():
+                    continue
+                relative = "/".join(parts[1:])
+                expanded += member.size
+                if expanded > MAX_ARCHIVE_UNPACKED_BYTES:
+                    raise ReleaseCandidateError("Python source archive exceeds the expanded size limit")
+                source = archive.extractfile(member)
+                if source is None:
+                    raise ReleaseCandidateError("Python source archive member cannot be read")
+                with source:
+                    content = source.read(member.size + 1)
+                if len(content) != member.size:
+                    raise ReleaseCandidateError("Python source archive member size does not match its header")
+                files[relative] = content
+    except ReleaseCandidateError:
+        raise
+    except (OSError, tarfile.TarError, EOFError) as error:
+        raise ReleaseCandidateError("Python source archive is malformed") from error
+    if roots != {expected_root}:
+        raise ReleaseCandidateError("Python source archive root does not match the candidate version")
+    required = PYTHON_DISTRIBUTION_FILES | {
+        "PKG-INFO", "LICENSE.threadforge", "NOTICE.threadforge", "THIRD_PARTY.md",
+        "LICENSE.anyjev", "LICENSE.rrsi", "CREDITS.anyjev.md", "UPSTREAM_MODIFICATIONS.md",
+    }
+    if not required.issubset(files):
+        raise ReleaseCandidateError("Python source archive omits required runtime files or upstream notices")
+    _validate_python_distribution_metadata(files["PKG-INFO"], version=version, label="source")
+    _validate_python_package_paths(files)
+
+
+def _validate_python_wheel(path: Path, *, version: str) -> None:
+    members = _read_zip(path, max_members=MAX_PYTHON_DISTRIBUTION_MEMBERS)
+    metadata_names = [
+        name for name in members
+        if len(PurePosixPath(name).parts) == 2
+        and PurePosixPath(name).parts[0].endswith(".dist-info")
+        and PurePosixPath(name).parts[1] == "METADATA"
+    ]
+    expected_dist_info = f"threadforge_python-{version}.dist-info"
+    if len(metadata_names) != 1 or PurePosixPath(metadata_names[0]).parts[0] != expected_dist_info:
+        raise ReleaseCandidateError("Python wheel dist-info identity does not match the candidate")
+    _validate_python_distribution_metadata(members[metadata_names[0]], version=version, label="wheel")
+    required = PYTHON_DISTRIBUTION_FILES | {
+        f"{expected_dist_info}/licenses/LICENSE.threadforge",
+        f"{expected_dist_info}/licenses/LICENSE.anyjev",
+        f"{expected_dist_info}/licenses/LICENSE.rrsi",
+        f"{expected_dist_info}/RECORD",
+    }
+    if not required.issubset(members):
+        raise ReleaseCandidateError("Python wheel omits required runtime files or upstream notices")
+    _validate_python_package_paths(members)
+
+
+def _validate_python_package_paths(files: dict[str, bytes]) -> None:
+    for name in files:
+        lowered = name.casefold()
+        if lowered.endswith(PYTHON_FORBIDDEN_SUFFIXES):
+            raise ReleaseCandidateError("Python distribution includes a model or benchmark binary payload")
+        if "/bench/results/" in f"/{lowered}" or "/datasets/" in f"/{lowered}":
+            raise ReleaseCandidateError("Python distribution includes benchmark results or datasets")
 
 
 def _read_tar_bytes(data: bytes, *, expected_prefix: str) -> dict[str, bytes]:
@@ -420,15 +756,36 @@ def _validate_bundle_files(bundle_dir: Path, version: str, source_commit: str) -
         expected_spdx_name = "threadforge.exe" if target == "windows_amd64" else "threadforge"
         if spdx.get("spdxVersion") != "SPDX-2.3" or spdx.get("name") != expected_spdx_name:
             raise ReleaseCandidateError("candidate SPDX SBOM has an unexpected document identity")
+    python_profiles: list[dict[str, Any]] = []
     for system, python_version in PYTHON_TARGETS:
         name = f"threadforge_{version}_python_{system}_py{python_version}.license-evidence.tar.gz"
-        _validate_python_evidence(
+        python_profiles.append(_validate_python_evidence(
             entries[name].read_bytes(),
             system=system,
             python_version=python_version,
             release_version=version,
             source_commit=source_commit,
-        )
+        ))
+    lock_hashes = {profile["uv_lock_sha256"] for profile in python_profiles}
+    project_hashes = {profile["pyproject_sha256"] for profile in python_profiles}
+    lock_counts = {profile["locked_package_count"] for profile in python_profiles}
+    if len(lock_hashes) != 1 or len(project_hashes) != 1 or len(lock_counts) != 1:
+        raise ReleaseCandidateError("Python profile evidence does not share one locked dependency input set")
+    installed_distributions = [
+        distribution for profile in python_profiles for distribution in profile["distributions"]
+    ]
+    lock_sbom_name = f"threadforge_{version}_python.spdx.json"
+    _validate_python_lock_sbom(
+        entries[lock_sbom_name].read_bytes(),
+        version=version,
+        source_commit=source_commit,
+        lock_sha256=next(iter(lock_hashes)),
+        project_sha256=next(iter(project_hashes)),
+        locked_package_count=next(iter(lock_counts)),
+        installed_distributions=installed_distributions,
+    )
+    _validate_python_sdist(entries[f"threadforge_python-{version}.tar.gz"], version=version)
+    _validate_python_wheel(entries[f"threadforge_python-{version}-py3-none-any.whl"], version=version)
     return expected, checksums
 
 
@@ -551,7 +908,9 @@ def verify_release_candidate(
         raise ReleaseCandidateError("source commit must be a full lowercase 40-character SHA-1")
     if not SOURCE_REF_RE.fullmatch(source_ref) or any(part in {"", ".", ".."} for part in source_ref.split("/")[1:]):
         raise ReleaseCandidateError("source ref must be a safe full refs/heads/... or refs/tags/... name")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) or any(
+        part in {".", ".."} for part in repository.split("/")
+    ):
         raise ReleaseCandidateError("repository must use owner/name form")
     expected, checksums = _validate_bundle_files(bundle_dir, version, source_commit)
 
@@ -615,6 +974,8 @@ def verify_release_candidate(
         "checksum_count": len(checksums),
         "slsa_attestations_verified": len(expected) + 1,
         "archive_sbom_attestations_verified": len(GO_TARGETS),
+        "python_lock_sboms_verified": 1,
+        "python_distribution_artifacts_verified": 2,
         "integrity_verified": True,
         "provenance_verified": True,
         "license_review_required": True,

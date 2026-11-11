@@ -1280,10 +1280,25 @@ func TestContextOnlyReturnsApprovedAndApplicableProcedures(t *testing.T) {
 }
 
 func TestContextMarksChangedProcedureSourceAsStaleAndOmitsIt(t *testing.T) {
-	handler, procedureStore, _ := testHandler(t)
-	baseline := strings.Repeat("a", 64)
-	approvedGraphWithSources(t, procedureStore, "stale-proc", "pkg/**", []proceduregraph.PathFingerprint{{Path: "pkg/main.go", SHA256: baseline}})
-	body := `{"schema_version":"threadforge.context-request.v2","project_id":"demo","query":"build","paths":["pkg/main.go"],"path_fingerprints":[{"path":"pkg/main.go","sha256":"` + strings.Repeat("b", 64) + `"}],"max_items":4,"max_tokens":1000}`
+	_, procedureStore, _ := testHandler(t)
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "pkg", "main.go")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package pkg\nfunc Build() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := procedurefiles.FingerprintSources(root, []string{"pkg/main.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvedGraphWithSources(t, procedureStore, "stale-proc", "pkg/**", baseline)
+	handler := NewHandlerWithProjectStoresRulesAndInventoryRoots(procedureStore, nil, nil, nil, "", "", root)
+	if err := os.WriteFile(sourcePath, []byte("package pkg\nfunc Build() { changed := true; _ = changed }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"schema_version":"threadforge.context-request.v2","project_id":"demo","query":"build","paths":["pkg/main.go"],"path_fingerprints":[{"path":"pkg/main.go","sha256":"` + baseline[0].SHA256 + `"}],"max_items":4,"max_tokens":1000}`
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, localRequest(http.MethodPost, "/v2/context", strings.NewReader(body)))
 	if recorder.Code != http.StatusOK {
@@ -1396,15 +1411,16 @@ func TestContextUsesConfiguredProjectRootAndIgnoresCallerFingerprintClaims(t *te
 func TestContextMarksMissingProcedureFingerprintUnverified(t *testing.T) {
 	handler, procedureStore, _ := testHandler(t)
 	approvedGraphWithSources(t, procedureStore, "verified-proc", "pkg/**", []proceduregraph.PathFingerprint{{Path: "pkg/main.go", SHA256: strings.Repeat("a", 64)}})
-	body := `{"schema_version":"threadforge.context-request.v2","project_id":"demo","query":"build","paths":["pkg/main.go"],"max_items":4,"max_tokens":1000}`
+	body := `{"schema_version":"threadforge.context-request.v2","project_id":"demo","query":"build","paths":["pkg/main.go"],"path_fingerprints":[{"path":"pkg/main.go","sha256":"` + strings.Repeat("a", 64) + `"}],"max_items":4,"max_tokens":1000}`
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, localRequest(http.MethodPost, "/v2/context", strings.NewReader(body)))
 	var response ContextResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Status != "incomplete" || len(response.Procedures) != 1 || response.Procedures[0].Freshness != "unverified" {
-		t.Fatalf("missing source fingerprint was presented as current: %#v", response)
+	if response.Status != "incomplete" || len(response.Procedures) != 1 || response.Procedures[0].Freshness != "unverified" ||
+		len(response.Gaps) == 0 || !strings.Contains(response.Gaps[0], "caller-supplied fingerprints cannot verify current source files") {
+		t.Fatalf("caller-supplied source fingerprint was presented as independent evidence: %#v", response)
 	}
 }
 
@@ -1587,17 +1603,27 @@ func TestV2ContextRetrievesPublishedProcedureAfterLocalSQLiteIsEmpty(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	sourcePath := filepath.Join(root, "src", "main.go")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package src\nfunc Build() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fingerprints, err := procedurefiles.FingerprintSources(root, []string{"src/main.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	publishedStore, identity := newAuthorizedProjectProcedureStore(t, root, "demo")
-	fingerprint := proceduregraph.PathFingerprint{Path: "src/main.go", SHA256: strings.Repeat("c", 64)}
-	approved := approvedGraphWithSources(t, seededStore, "published-build", "src/**", []proceduregraph.PathFingerprint{fingerprint})
+	approved := approvedGraphWithSources(t, seededStore, "published-build", "src/**", fingerprints)
 	publishServiceProcedureTest(t, publishedStore, identity, approved, 0, "publish")
 	emptyStore, err := store.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = emptyStore.Close() })
-	handler := NewHandlerWithProjectStores(emptyStore, traceStore, memoryStore, publishedStore)
-	body := `{"schema_version":"threadforge.context-request.v2","project_id":"demo","query":"build","paths":["src/main.go"],"path_fingerprints":[{"path":"src/main.go","sha256":"` + fingerprint.SHA256 + `"}],"max_items":8,"max_tokens":1000}`
+	handler := NewHandlerWithProjectStoresRulesAndInventoryRoots(emptyStore, traceStore, memoryStore, publishedStore, "", "", root)
+	body := `{"schema_version":"threadforge.context-request.v2","project_id":"demo","query":"build","paths":["src/main.go"],"path_fingerprints":[{"path":"src/main.go","sha256":"` + fingerprints[0].SHA256 + `"}],"max_items":8,"max_tokens":1000}`
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, localRequest(http.MethodPost, "/v2/context", strings.NewReader(body)))
 	var response ContextResponse

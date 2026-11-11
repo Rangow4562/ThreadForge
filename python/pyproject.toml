@@ -44,6 +44,7 @@ include = ["threadforge_py*", "anyjev*", "rrsi*", "threadforge_domains*"]
 namespaces = false
 
 [tool.setuptools.package-data]
+"threadforge_py" = ["legal/*"]
 "threadforge_domains.coding" = ["*.json"]
 "threadforge_domains.workspace" = ["*.json"]
 "threadforge_domains.engineering" = ["*.json"]

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/engineering-image-sbom-binding-v1.schema.json",
+  "title": "Threadforge Engineering image SBOM binding v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release_version",
+    "source_commit",
+    "source_ref",
+    "platform",
+    "image_tag",
+    "image_id",
+    "base_image",
+    "runtime_requirements_sha256",
+    "build_requirements_sha256",
+    "dockerfile_sha256",
+    "image_archive",
+    "sbom",
+    "license_review_status",
+    "license_review_required",
+    "release_clearance",
+    "benchmark_data_included",
+    "evaluator_included"
+  ],
+  "properties": {
+    "schema_version": {"const": "threadforge.engineering-image-sbom-binding.v1"},
+    "release_version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "source_ref": {"type": "string", "pattern": "^refs/(tags/v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)|heads/main)$"},
+    "platform": {"const": "linux/amd64"},
+    "image_tag": {"type": "string", "pattern": "^threadforge-engineering:(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-candidate$"},
+    "image_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "base_image": {"type": "string", "pattern": "^python:3\\.12\\.[0-9]+-slim-bookworm@sha256:[0-9a-f]{64}$"},
+    "runtime_requirements_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "build_requirements_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "dockerfile_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "image_archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "size_bytes"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^threadforge_(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)_engineering_linux_amd64\\.docker\\.tar$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size_bytes": {"type": "integer", "minimum": 1, "maximum": 10737418240}
+      }
+    },
+    "sbom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "package_record_count"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^threadforge_(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)_engineering_linux_amd64\\.spdx\\.json$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "package_record_count": {"type": "integer", "minimum": 1, "maximum": 200000}
+      }
+    },
+    "license_review_status": {"const": "unreviewed"},
+    "license_review_required": {"const": true},
+    "release_clearance": {"const": false},
+    "benchmark_data_included": {"const": false},
+    "evaluator_included": {"const": false}
+  }
+}

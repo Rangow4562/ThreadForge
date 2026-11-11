@@ -14,7 +14,7 @@ const memorySkillRevision = 2;
 const memoryApprovalNotice = '> This portable memory skill provides advisory guidance, not authorization to execute actions.';
 const omissionNotice = 'Evidence digests, trace references, validation datasets, reviewer identity, and approval rationale are intentionally omitted from this portable projection.';
 
-export async function runClineSkillHostSmoke(cliPath, expectedVersion, { runCommand = run } = {}) {
+export async function runClineSkillHostSmoke(cliPath, expectedVersion, { runCommand = run, processCleanup = {} } = {}) {
   const cli = await validateCliPath(cliPath);
   if (typeof expectedVersion !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(expectedVersion)) {
     throw new Error('--version must be an exact Cline CLI semantic version');
@@ -141,8 +141,131 @@ export async function runClineSkillHostSmoke(cliPath, expectedVersion, { runComm
       execution_authorized: false,
     };
   } finally {
+    await reapClineHubDaemon(cli, projectDirectory, processCleanup);
     await removeOwnedTempRoot(root);
   }
+}
+
+export async function reapClineHubDaemon(cliPath, projectDirectory, {
+  listProcesses = listRunningProcesses,
+  signalProcess = (pid, signal) => process.kill(pid, signal),
+  isProcessAlive = processExists,
+  wait = delay,
+  timeoutMs = 2_000,
+} = {}) {
+  const processRows = await listProcesses(cliPath, projectDirectory);
+  const ownedPids = [...new Set(processRows
+    .filter((row) => isSmokeOwnedHub(row, cliPath, projectDirectory))
+    .map((row) => row.pid))];
+  for (const pid of ownedPids) signalIfRunning(signalProcess, pid, 'SIGTERM');
+
+  const deadline = Date.now() + timeoutMs;
+  let remaining = ownedPids.filter(isProcessAlive);
+  while (remaining.length > 0 && Date.now() < deadline) {
+    await wait(50);
+    remaining = remaining.filter(isProcessAlive);
+  }
+  if (remaining.length > 0) {
+    const stillOwned = new Set((await listProcesses(cliPath, projectDirectory))
+      .filter((row) => isSmokeOwnedHub(row, cliPath, projectDirectory))
+      .map((row) => row.pid));
+    for (const pid of remaining) {
+      if (stillOwned.has(pid)) signalIfRunning(signalProcess, pid, 'SIGKILL');
+    }
+    await wait(100);
+    remaining = remaining.filter(isProcessAlive);
+  }
+  if (remaining.length > 0) throw new Error('Cline hub daemon did not stop; preserving its temporary project for inspection');
+}
+
+function signalIfRunning(signalProcess, pid, signal) {
+  try { signalProcess(pid, signal); }
+  catch (error) {
+    if (error?.code !== 'ESRCH') throw new Error('unable to stop the smoke-owned Cline hub daemon');
+  }
+}
+
+function isSmokeOwnedHub(row, cliPath, projectDirectory) {
+  if (!Number.isSafeInteger(row?.pid) || row.pid <= 0 || typeof row.commandLine !== 'string' ||
+      !row.commandLine.includes('--cline-hub-daemon') || !commandUsesProject(row.commandLine, projectDirectory)) return false;
+  if (typeof row.executablePath === 'string' && row.executablePath.length > 0) {
+    const actual = path.resolve(row.executablePath);
+    const expected = path.resolve(cliPath);
+    return process.platform === 'win32'
+      ? actual.toLowerCase() === expected.toLowerCase()
+      : actual === expected;
+  }
+  return row.commandLine.includes(cliPath) || row.commandLine.includes(path.basename(cliPath));
+}
+
+function commandUsesProject(commandLine, projectDirectory) {
+  const escaped = projectDirectory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|\\s)--cwd(?:=|\\s+)(?:"${escaped}"|'${escaped}'|${escaped})(?=\\s|$)`).test(commandLine);
+}
+
+function listRunningProcesses(cliPath, projectDirectory) {
+  if (process.platform === 'win32') return listWindowsProcesses(cliPath, projectDirectory);
+  const args = process.platform === 'darwin'
+    ? ['-ww', '-axo', 'pid=,command=']
+    : ['-ww', '-eo', 'pid=,args='];
+  const result = spawnSync('ps', args, { encoding: 'utf8', timeout: 10_000, windowsHide: true });
+  if (result.error || result.status !== 0) throw new Error('unable to inspect Cline smoke processes');
+  return result.stdout.split(/\r?\n/).flatMap((line) => {
+    const match = /^\s*(\d+)\s+(.+)$/.exec(line);
+    if (!match) return [];
+    const row = { pid: Number(match[1]), commandLine: match[2] };
+    return isSmokeOwnedHub(row, cliPath, projectDirectory) ? [row] : [];
+  });
+}
+
+function listWindowsProcesses(cliPath, projectDirectory) {
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  if (typeof systemRoot !== 'string' || !path.isAbsolute(systemRoot)) throw new Error('Windows process inspection is unavailable');
+  const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const script = "$targetExe = $env:THREADFORGE_CLINE_SMOKE_EXE; $targetProject = $env:THREADFORGE_CLINE_SMOKE_PROJECT; " +
+    "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $targetExe -and $_.CommandLine -and " +
+    "$_.CommandLine.Contains('--cline-hub-daemon') -and $_.CommandLine.Contains($targetProject) } | " +
+    "Select-Object @{Name='pid';Expression={$_.ProcessId}}, @{Name='executablePath';Expression={$_.ExecutablePath}}, " +
+    "@{Name='commandLine';Expression={$_.CommandLine}} | ConvertTo-Json -Compress";
+  const result = spawnSync(powershell, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script,
+  ], {
+    encoding: 'utf8',
+    timeout: 10_000,
+    maxBuffer: 1 << 20,
+    windowsHide: true,
+    env: {
+      SystemRoot: systemRoot,
+      WINDIR: systemRoot,
+      TEMP: process.env.TEMP ?? os.tmpdir(),
+      TMP: process.env.TMP ?? os.tmpdir(),
+      THREADFORGE_CLINE_SMOKE_EXE: cliPath,
+      THREADFORGE_CLINE_SMOKE_PROJECT: projectDirectory,
+    },
+  });
+  if (result.error || result.status !== 0) throw new Error('unable to inspect Cline smoke processes');
+  if (!result.stdout.trim()) return [];
+  let rows;
+  try { rows = JSON.parse(result.stdout); }
+  catch { throw new Error('Windows process inspection returned malformed data'); }
+  return (Array.isArray(rows) ? rows : [rows]).map((row) => ({
+    pid: row.pid,
+    executablePath: row.executablePath,
+    commandLine: row.commandLine,
+  })).filter((row) => isSmokeOwnedHub(row, cliPath, projectDirectory));
+}
+
+function processExists(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (error) {
+    if (error?.code === 'ESRCH') return false;
+    if (error?.code === 'EPERM') return true;
+    throw error;
+  }
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function isolatedEnvironment({ homeDirectory, appDataDirectory, localAppDataDirectory, root }) {

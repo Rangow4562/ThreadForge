@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/procedure-skill-export-v2.schema.json",
+  "title": "Threadforge approved procedure skill export v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "graph_id",
+    "graph_revision",
+    "path",
+    "sha256",
+    "already_exists",
+    "freshness"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.skill-export.v2" },
+    "graph_id": { "type": "string", "minLength": 1, "maxLength": 96 },
+    "graph_revision": { "type": "integer", "minimum": 1 },
+    "path": {
+      "type": "string",
+      "pattern": "^\\.threadforge/skills/[a-z][a-z0-9-]{0,63}/rev-[0-9]{6}/SKILL\\.md$"
+    },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "already_exists": { "type": "boolean" },
+    "freshness": { "enum": ["verified", "unverified"] }
+  }
+}

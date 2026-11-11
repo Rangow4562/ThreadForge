@@ -24,11 +24,12 @@ type SkillExport struct {
 	Path          string `json:"path"`
 	SHA256        string `json:"sha256"`
 	AlreadyExists bool   `json:"already_exists"`
+	Freshness     string `json:"freshness"`
 }
 
 // ExportSkill writes an immutable SKILL.md projection under the project root.
 // It is an explicit file export only: it does not install or inject a host skill.
-func (s *Store) ExportSkill(graph proceduregraph.Graph, privacyReviewed bool) (SkillExport, error) {
+func (s *Store) ExportSkill(graph proceduregraph.Graph, privacyReviewed, allowUnverifiedFreshness bool) (SkillExport, error) {
 	if !privacyReviewed {
 		return SkillExport{}, errors.New("skill export requires explicit privacy review")
 	}
@@ -42,7 +43,11 @@ func (s *Store) ExportSkill(graph proceduregraph.Graph, privacyReviewed bool) (S
 		}
 	}
 
-	data, err := renderSkill(shared)
+	freshness, err := s.skillFreshness(shared, allowUnverifiedFreshness)
+	if err != nil {
+		return SkillExport{}, err
+	}
+	data, err := renderSkill(shared, freshness)
 	if err != nil {
 		return SkillExport{}, err
 	}
@@ -52,7 +57,6 @@ func (s *Store) ExportSkill(graph proceduregraph.Graph, privacyReviewed bool) (S
 	if privacy.ContainsCredentialText(string(data)) {
 		return SkillExport{}, errors.New("portable skill contains credential material")
 	}
-
 	relative := filepath.Join(".threadforge", "skills", shared.ID, fmt.Sprintf("rev-%06d", shared.Revision), "SKILL.md")
 	target := filepath.Join(s.projectRoot, relative)
 	if err := s.ensureDirectory(filepath.Dir(target)); err != nil {
@@ -60,11 +64,17 @@ func (s *Store) ExportSkill(graph proceduregraph.Graph, privacyReviewed bool) (S
 	}
 	digest := sha256.Sum256(data)
 	result := SkillExport{
-		SchemaVersion: "threadforge.skill-export.v1",
+		SchemaVersion: "threadforge.skill-export.v2",
 		GraphID:       shared.ID,
 		GraphRevision: shared.Revision,
 		Path:          filepath.ToSlash(relative),
 		SHA256:        hex.EncodeToString(digest[:]),
+		Freshness:     freshness,
+	}
+	if freshness == "verified" {
+		if _, err := s.skillFreshness(shared, false); err != nil {
+			return SkillExport{}, err
+		}
 	}
 	if err := writeNoReplace(target, data); err != nil {
 		if !errors.Is(err, os.ErrExist) {
@@ -89,7 +99,34 @@ func (s *Store) ExportSkill(graph proceduregraph.Graph, privacyReviewed bool) (S
 	return result, nil
 }
 
-func renderSkill(graph proceduregraph.Graph) ([]byte, error) {
+func (s *Store) skillFreshness(graph proceduregraph.Graph, allowUnverified bool) (string, error) {
+	if len(graph.SourceFiles) == 0 {
+		if allowUnverified {
+			return "unverified", nil
+		}
+		return "", ErrFreshnessUnverified
+	}
+	paths := make([]string, len(graph.SourceFiles))
+	for index, source := range graph.SourceFiles {
+		paths[index] = source.Path
+	}
+	current, err := FingerprintSources(s.projectRoot, paths)
+	if err != nil {
+		return "", fmt.Errorf("%w: recorded project files could not be read safely", ErrFreshnessCheck)
+	}
+	currentByPath := make(map[string]string, len(current))
+	for _, fingerprint := range current {
+		currentByPath[fingerprint.Path] = fingerprint.SHA256
+	}
+	for _, source := range graph.SourceFiles {
+		if currentByPath[source.Path] != source.SHA256 {
+			return "", ErrStale
+		}
+	}
+	return "verified", nil
+}
+
+func renderSkill(graph proceduregraph.Graph, freshness string) ([]byte, error) {
 	quoted := func(value string) (string, error) {
 		data, err := json.Marshal(value)
 		return string(data), err
@@ -127,6 +164,12 @@ func renderSkill(graph proceduregraph.Graph) ([]byte, error) {
 	out.WriteString(" revision ")
 	out.WriteString(revision)
 	out.WriteString("\n\n> This portable procedure is approved guidance, not authorization to execute actions. Verify current project state and applicable policy before use.\n")
+	out.WriteString("\n## Source freshness at export\n")
+	if freshness == "verified" {
+		out.WriteString("\nAll source files recorded by the approved procedure matched the current local project when this file was exported. This is only an export-time check; revalidate applicability against the current workspace and policy before use.\n")
+	} else {
+		out.WriteString("\nUnverified: the approved procedure has no recorded source-file fingerprint baseline. Manually validate applicability against the current project and policy before relying on this guidance.\n")
+	}
 
 	if len(graph.Applicability.Modules) > 0 || len(graph.Applicability.Paths) > 0 {
 		out.WriteString("\n## Applicability\n")

@@ -22,8 +22,11 @@ import (
 )
 
 var (
-	ErrConflict = errors.New("published procedure revision conflict")
-	ErrNotFound = errors.New("published procedure not found")
+	ErrConflict            = errors.New("published procedure revision conflict")
+	ErrNotFound            = errors.New("published procedure not found")
+	ErrStale               = errors.New("procedure source fingerprints do not match the current project")
+	ErrFreshnessCheck      = errors.New("procedure source freshness could not be verified")
+	ErrFreshnessUnverified = errors.New("procedure has no recorded source-file fingerprints")
 )
 
 const maxGraphBytes = 2 << 20

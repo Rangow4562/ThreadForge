@@ -45,6 +45,7 @@ import (
 // version is replaced by the tagged release build through -ldflags. Keep the
 // checked-in value aligned with the most recently published CLI release.
 var version = "0.5.0"
+
 const maxGraphBytes = 2 << 20
 
 func Run(args []string, stdout, stderr io.Writer) int {
@@ -4171,12 +4172,13 @@ func exportProcedureSkill(args []string, stdout, stderr io.Writer) int {
 	root := fs.String("project-root", "", "project repository root")
 	id := fs.String("id", "", "approved procedure identifier")
 	privacyReviewed := fs.Bool("privacy-reviewed", false, "confirm the portable skill content has been reviewed for privacy")
+	allowUnverifiedFreshness := fs.Bool("allow-unverified-freshness", false, "allow export only when the approved graph has no source-file fingerprint baseline")
 	database := fs.String("db", "", "SQLite path (defaults under the local Threadforge data directory)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if strings.TrimSpace(*root) == "" || *id == "" || !*privacyReviewed || fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge procedure export-skill --project-root <root> --id <id> --privacy-reviewed [--db <path>]")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge procedure export-skill --project-root <root> --id <id> --privacy-reviewed [--allow-unverified-freshness] [--db <path>]")
 		return 2
 	}
 	procedures, closeStore, err := openProcedureStore(*database)
@@ -4195,7 +4197,7 @@ func exportProcedureSkill(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	result, err := projectStore.ExportSkill(graph, *privacyReviewed)
+	result, err := projectStore.ExportSkill(graph, *privacyReviewed, *allowUnverifiedFreshness)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
@@ -4600,7 +4602,7 @@ Commands:
   procedure supersede --id <old-id> --by <approved-replacement-id> --expected-revision <n> --actor <name> --reason <text> [--db <path>]
   procedure publish --project-root <root> --id <id> --expected-revision <n> --identity-key <private-key.json> --privacy-reviewed [--db <path>]
   procedure publish-supersession --project-root <root> --id <id> --expected-revision <n> --identity-key <private-key.json> --privacy-reviewed [--db <path>]
-  procedure export-skill --project-root <root> --id <id> --privacy-reviewed [--db <path>]
+  procedure export-skill --project-root <root> --id <id> --privacy-reviewed [--allow-unverified-freshness] [--db <path>]
   procedure reject --id <id> --expected-revision <n> --actor <name> --reason <reason> [--db <path>]
   procedure show --id <id> [--db <path>]
   procedure list --project-id <id> [--db <path>]

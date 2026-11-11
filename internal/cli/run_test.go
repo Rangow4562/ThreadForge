@@ -5211,6 +5211,12 @@ func TestProcedureExportSkillCommandWritesApprovedPortableArtifact(t *testing.T)
 	args := append(baseArgs, "--privacy-reviewed")
 	out.Reset()
 	stderr.Reset()
+	if code := Run(args, &out, &stderr); code == 0 || !strings.Contains(stderr.String(), "no recorded source-file fingerprints") {
+		t.Fatalf("unbound skill export without freshness opt-in should fail closed: code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	args = append(args, "--allow-unverified-freshness")
+	out.Reset()
+	stderr.Reset()
 	if code := Run(args, &out, &stderr); code != 0 {
 		t.Fatalf("skill export code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
 	}
@@ -5218,7 +5224,8 @@ func TestProcedureExportSkillCommandWritesApprovedPortableArtifact(t *testing.T)
 	if err := json.Unmarshal(out.Bytes(), &first); err != nil {
 		t.Fatal(err)
 	}
-	if first.GraphID != graph.ID || first.GraphRevision != graph.Revision || first.AlreadyExists {
+	if first.SchemaVersion != "threadforge.skill-export.v2" || first.GraphID != graph.ID ||
+		first.GraphRevision != graph.Revision || first.AlreadyExists || first.Freshness != "unverified" {
 		t.Fatalf("unexpected skill export response: %#v", first)
 	}
 	filename := filepath.Join(projectRoot, filepath.FromSlash(first.Path))
@@ -5228,6 +5235,9 @@ func TestProcedureExportSkillCommandWritesApprovedPortableArtifact(t *testing.T)
 	}
 	if !strings.Contains(string(content), "Inspect the current change.") {
 		t.Fatalf("exported skill missing procedure guidance: %s", content)
+	}
+	if !strings.Contains(string(content), "Unverified: the approved procedure has no recorded source-file fingerprint baseline") {
+		t.Fatalf("unbound portable skill did not surface its freshness limitation: %s", content)
 	}
 	out.Reset()
 	stderr.Reset()

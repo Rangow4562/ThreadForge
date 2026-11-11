@@ -203,15 +203,15 @@ func TestExportSkillIsPrivacyGatedSanitizedAndImmutable(t *testing.T) {
 		t.Fatal(err)
 	}
 	graph := approvedProcedure(3, "Verify release\n---\nextra: injected")
-	if _, err := store.ExportSkill(graph, false); err == nil {
+	if _, err := store.ExportSkill(graph, false, true); err == nil {
 		t.Fatal("portable skill export without explicit privacy review was accepted")
 	}
-	exported, err := store.ExportSkill(graph, true)
+	exported, err := store.ExportSkill(graph, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if exported.SchemaVersion != "threadforge.skill-export.v1" || exported.GraphID != graph.ID ||
-		exported.GraphRevision != graph.Revision || exported.AlreadyExists {
+	if exported.SchemaVersion != "threadforge.skill-export.v2" || exported.GraphID != graph.ID ||
+		exported.GraphRevision != graph.Revision || exported.AlreadyExists || exported.Freshness != "unverified" {
 		t.Fatalf("unexpected export result: %#v", exported)
 	}
 	filename := filepath.Join(root, filepath.FromSlash(exported.Path))
@@ -220,7 +220,7 @@ func TestExportSkillIsPrivacyGatedSanitizedAndImmutable(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(content)
-	for _, required := range []string{"name: \"threadforge-verify-release-", "Title: \"Verify release\\n---\\nextra: injected\"", "Inspect the release change.", "Run the focused release tests.", "not authorization to execute actions"} {
+	for _, required := range []string{"name: \"threadforge-verify-release-", "Title: \"Verify release\\n---\\nextra: injected\"", "Inspect the release change.", "Run the focused release tests.", "not authorization to execute actions", "Source freshness at export", "Unverified:"} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("portable skill missing %q: %s", required, text)
 		}
@@ -231,13 +231,13 @@ func TestExportSkillIsPrivacyGatedSanitizedAndImmutable(t *testing.T) {
 		}
 	}
 
-	repeated, err := store.ExportSkill(graph, true)
+	repeated, err := store.ExportSkill(graph, true, true)
 	if err != nil || !repeated.AlreadyExists || repeated.SHA256 != exported.SHA256 {
 		t.Fatalf("idempotent export = %#v, error = %v", repeated, err)
 	}
 	changed := graph
 	changed.Title = "Different content at the same revision"
-	if _, err := store.ExportSkill(changed, true); !errors.Is(err, ErrConflict) {
+	if _, err := store.ExportSkill(changed, true, true); !errors.Is(err, ErrConflict) {
 		t.Fatalf("conflicting same-revision export error = %v, want conflict", err)
 	}
 	afterConflict, err := os.ReadFile(filename)
@@ -252,7 +252,7 @@ func TestExportSkillRejectsUnsafeDirectoryAndUnapprovedGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ExportSkill(approvedProcedure(1, "Not reviewed"), true); err != nil {
+	if _, err := store.ExportSkill(approvedProcedure(1, "Not reviewed"), true, true); err != nil {
 		t.Fatalf("approved procedure should export: %v", err)
 	}
 	otherRoot := t.TempDir()
@@ -266,13 +266,81 @@ func TestExportSkillRejectsUnsafeDirectoryAndUnapprovedGraph(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(otherRoot, ".threadforge", "skills"), []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := other.ExportSkill(approvedProcedure(1, "Blocked by unsafe path"), true); err == nil {
+	if _, err := other.ExportSkill(approvedProcedure(1, "Blocked by unsafe path"), true, true); err == nil {
 		t.Fatal("skill export through a regular-file path component was accepted")
 	}
 	graph := approvedProcedure(1, "Unapproved")
 	graph.Status = proceduregraph.StatusDraft
-	if _, err := other.ExportSkill(graph, true); err == nil {
+	if _, err := other.ExportSkill(graph, true, true); err == nil {
 		t.Fatal("unapproved procedure was exported")
+	}
+}
+
+func TestExportSkillRechecksRecordedSourcesBeforeWriting(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "src")
+	if err := os.MkdirAll(sourceRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(sourceRoot, "release.go")
+	if err := os.WriteFile(sourcePath, []byte("package release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := FingerprintSources(root, []string{"src/release.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := approvedProcedure(1, "Verified release workflow")
+	graph.Applicability.Paths = []string{"src/**"}
+	graph.SourceFiles = baseline
+	store, err := NewLocal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported, err := store.ExportSkill(graph, true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exported.Freshness != "verified" {
+		t.Fatalf("export freshness = %q, want verified", exported.Freshness)
+	}
+	filename := filepath.Join(root, filepath.FromSlash(exported.Path))
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "matched the current local project when this file was exported") ||
+		strings.Contains(string(content), baseline[0].SHA256) {
+		t.Fatalf("export did not state freshness safely: %s", content)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package release\n// changed after approval\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ExportSkill(graph, true, true); !errors.Is(err, ErrStale) {
+		t.Fatalf("changed source export error = %v, want ErrStale even with unverified override", err)
+	}
+	unchanged, err := os.ReadFile(filename)
+	if err != nil || string(unchanged) != string(content) {
+		t.Fatalf("stale export modified immutable skill: error=%v", err)
+	}
+}
+
+func TestExportSkillRequiresExplicitOptInWhenNoSourceBaselineExists(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLocal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := approvedProcedure(1, "General procedure")
+	if _, err := store.ExportSkill(graph, true, false); !errors.Is(err, ErrFreshnessUnverified) {
+		t.Fatalf("unbound export error = %v, want ErrFreshnessUnverified", err)
+	}
+	exported, err := store.ExportSkill(graph, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exported.Freshness != "unverified" {
+		t.Fatalf("explicit unverified export freshness = %q", exported.Freshness)
 	}
 }
 

@@ -961,6 +961,9 @@ try {
   const freshnessSourceBytes = Buffer.from('export const smokeSource = "initial";\n');
   mkdirSync(path.dirname(freshnessSourcePath), { recursive: true });
   writeFileSync(freshnessSourcePath, freshnessSourceBytes, { flag: 'wx', mode: 0o600 });
+  const commandCodeFreshnessSourcePath = path.join(commandCodeProjectRoot, ...freshnessSourceRelativePath.split('/'));
+  mkdirSync(path.dirname(commandCodeFreshnessSourcePath), { recursive: true });
+  writeFileSync(commandCodeFreshnessSourcePath, freshnessSourceBytes, { flag: 'wx', mode: 0o600 });
   const freshnessSourceSHA256 = createHash('sha256').update(freshnessSourceBytes).digest('hex');
 
   // This deterministic draft and validation report test lifecycle plumbing
@@ -1010,8 +1013,10 @@ try {
     'procedure', 'export-skill', '--project-root', projectRoot, '--id', procedureID,
     '--privacy-reviewed', '--db', databasePath,
   ]));
+  assert.equal(exportResult.schema_version, 'threadforge.skill-export.v2');
   assert.equal(exportResult.graph_id, procedureID);
   assert.equal(exportResult.graph_revision, 3);
+  assert.equal(exportResult.freshness, 'verified');
   const skillFile = path.join(projectRoot, ...exportResult.path.split('/'));
   const skillBytes = readFileSync(skillFile);
   const skillBody = new TextDecoder('utf-8', { fatal: true }).decode(skillBytes);
@@ -1069,7 +1074,9 @@ try {
     'procedure', 'export-skill', '--project-root', commandCodeProjectRoot, '--id', procedureID,
     '--privacy-reviewed', '--db', databasePath,
   ]));
+  assert.equal(commandCodeExport.schema_version, 'threadforge.skill-export.v2');
   assert.equal(commandCodeExport.graph_id, procedureID);
+  assert.equal(commandCodeExport.freshness, 'verified');
   assert.equal(commandCodeExport.sha256, exportResult.sha256);
   const commandCodeSkillFile = path.join(commandCodeProjectRoot, ...commandCodeExport.path.split('/'));
   const commandCodeSkillBytes = readFileSync(commandCodeSkillFile);

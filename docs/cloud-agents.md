@@ -4,15 +4,15 @@ Threadforge keeps traces and personal preferences local. For a cloud-agent task 
 
 ## Export a procedure locally
 
-First review that the procedure is approved and revalidate it against current source files locally. The export command does not independently recompute source fingerprints or prove freshness. Export from a workstation with an explicit privacy-review confirmation:
+Export from a workstation with an explicit privacy-review confirmation. When the approved procedure records source-file fingerprints, Threadforge recomputes them against the selected project immediately before writing and refuses an export if a file is stale, missing, unsafe, or unreadable:
 
 ```powershell
 threadforge procedure export-skill --project-root . --id <approved-procedure-id> --privacy-reviewed
 ```
 
-The command prints a `threadforge.skill-export.v1` result containing the graph ID/revision, relative path, SHA-256, and whether the exact artifact already existed. It writes an immutable file at `.threadforge/skills/<id>/rev-NNNNNN/SKILL.md`; a different file at the same revision is a conflict, not an overwrite. Export requires an approved graph, applies the share sanitizer, rejects credential-like content, and caps output at 256 KiB.
+The command prints a `threadforge.skill-export.v2` result with graph ID/revision, relative path, SHA-256, idempotency, and `freshness` (`verified` or `unverified`), defined by the [procedure-skill-export v2 schema](../schema/procedure-skill-export-v2.schema.json). A graph without source-file fingerprints is rejected by default. If that is intentional for a general procedure, pass `--allow-unverified-freshness`; the generated artifact and result remain explicitly marked `unverified`. This flag cannot override stale, missing, unsafe, or unreadable recorded sources. Export writes an immutable file at `.threadforge/skills/<id>/rev-NNNNNN/SKILL.md`; a different file at the same revision is a conflict, not an overwrite. Export requires an approved graph, applies the share sanitizer, rejects credential-like content, and caps output at 256 KiB.
 
-The portable file contains the approved procedure instructions and applicability paths/modules. It omits evidence digests and local trace references, validation datasets/results, reviewer identity, and approval rationale. It states that its guidance is not authorization to execute actions. The file is a snapshot: Threadforge does not automatically fingerprint source files in the cloud workspace or mark this exported copy stale. Revalidate the source procedure locally and export a new revision when its applicable code or policy changes.
+The portable file contains the approved procedure instructions and applicability paths/modules, plus a plain-language freshness-at-export statement. It omits source/evidence digests and local trace references, validation datasets/results, reviewer identity, and approval rationale. It states that its guidance is not authorization to execute actions. A `verified` status proves only that recorded source files matched the local project at export time; the file is still a snapshot. Threadforge does not fingerprint source files in the cloud workspace or automatically mark the copy stale. Revalidate against the cloud workspace and current policy before use, and export a new revision when applicable code changes.
 
 ## Make it available to a cloud session
 

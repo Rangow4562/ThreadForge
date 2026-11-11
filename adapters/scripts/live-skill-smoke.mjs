@@ -169,6 +169,24 @@ function runCommandCode(args, { cwd = commandCodeProjectRoot, env = isolatedEnvi
   return run(process.execPath, [entrypoint, ...args], { cwd, env, timeout, includeStderr });
 }
 
+function runCopilotCli(args, { cwd = projectRoot, env = isolatedEnvironment, timeout = 30_000, includeStderr = false } = {}) {
+  if (process.platform !== 'win32') return run('copilot', args, { cwd, env, timeout, includeStderr });
+  let shimPath;
+  try {
+    shimPath = run('where.exe', ['copilot.ps1'], { cwd, env, timeout: 10_000 })
+      .split(/\r?\n/).map((entry) => entry.trim()).find(Boolean);
+  } catch (error) {
+    if (/where\.exe exited 1:/i.test(String(error?.message ?? error))) {
+      throw new Error('copilot could not run the local smoke command (ENOENT: installed PowerShell shim not found)');
+    }
+    throw error;
+  }
+  if (!shimPath) throw new Error('copilot could not run the local smoke command (ENOENT: installed PowerShell shim not found)');
+  const entrypoint = path.join(path.dirname(shimPath), 'node_modules', '@github', 'copilot', 'npm-loader.js');
+  if (!existsSync(entrypoint)) throw new Error('Could not resolve the Copilot CLI Node entrypoint next to copilot.ps1');
+  return run(process.execPath, [entrypoint, ...args], { cwd, env, timeout, includeStderr });
+}
+
 function runHost(command, args, { cwd = projectRoot, env = isolatedEnvironment, timeout = 30_000, includeStderr = false } = {}) {
   const hostEnvironment = { ...env, THREADFORGE_SMOKE_PROBE: env.THREADFORGE_SMOKE_PROBE ?? command };
   if (process.platform === 'win32' && command === 'cmdc') {
@@ -258,14 +276,14 @@ function tryCopilotProjectMcpDiscovery(cwd) {
   };
   let version;
   try {
-    version = runHost('copilot', ['--version'], { cwd, env, timeout: 20_000 }).trim().split(/\r?\n/, 1)[0];
+    version = runCopilotCli(['--version'], { cwd, env, timeout: 20_000 }).trim().split(/\r?\n/, 1)[0];
   } catch (error) {
     if (/could not run the local smoke command \(ENOENT\)/i.test(String(error?.message ?? error))) {
       return { status: 'not-installed', model_invocations: 0 };
     }
     throw error;
   }
-  const output = runHost('copilot', ['mcp', 'list', '--json'], { cwd, env, timeout: 30_000 });
+  const output = runCopilotCli(['mcp', 'list', '--json'], { cwd, env, timeout: 30_000 });
   let listing;
   try {
     listing = JSON.parse(output);
@@ -723,7 +741,7 @@ async function runCopilotTaskResumeHostSmoke(version, taskFixture, memoryFixture
     COPILOT_PROVIDER_WIRE_MODEL: 'threadforge-copilot-read-fixture',
   };
   try {
-    const mcpListing = runHost('copilot', ['mcp', 'list', '--json'], {
+    const mcpListing = runCopilotCli(['mcp', 'list', '--json'], {
       cwd: projectRoot, env: environment, timeout: 30_000,
     });
     assert.equal(hasNamedMcpServer(JSON.parse(mcpListing), 'threadforge'), true,
@@ -2537,7 +2555,7 @@ async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = 
     try {
       output = await runAsync('opencode', [
         'run', '--model', model, '--dir', projectRoot, '--auto', '--format', 'default', prompt,
-      ], { cwd: projectRoot, env: openCodeEnvironment, timeout: 45_000 });
+      ], { cwd: projectRoot, env: openCodeEnvironment, timeout: 120_000 });
     } catch (error) {
       throw new Error(`${error?.message ?? 'OpenCode run failed'}; fixture_paths=${providerRequestPaths.join(',') || 'none'}; completion_requests=${completionRequests}; tool_calls=${fixtureToolCalls}; fixture_error=${fixtureError ?? 'none'}`);
     }

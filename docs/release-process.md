@@ -17,15 +17,14 @@ If Syft installation or the first SBOM generation attempt fails, the pinned acti
 
 Before attestation, `scripts/verify_release_sbom.py` reconciles each SPDX package set to that exact binary's `go version -m` output. It requires every embedded Go module, checks non-replaced module versions and the Go standard-library version, and rejects unexplained SBOM packages. Its JSON summary counts package license declarations/conclusions that remain unasserted and always sets `license_review_required=true` and `release_clearance=false`. This verifies Go-binary component coverage only; it does not classify licenses, review redistribution terms, cover Python/container runtime dependencies, or grant legal approval. Those release blockers remain tracked in [the dependency and license audit](license-audit.md).
 
-After downloading the candidate artifact, verify the checksums and attestations before considering publication. Publish the exact candidate files; do not rebuild or recompress them, because any byte change invalidates the source-bound attestations:
+After downloading the candidate artifact, verify the complete bundle with the repository verifier. It checks the exact 24-payload inventory, all payload checksums, archive member safety/layout, embedded-versus-separate Go license evidence, Go/Python evidence manifest bindings, 25 SLSA provenance attestations, and four archive-to-SPDX attestations. GitHub CLI must be authenticated and able to read the repository's attestations. Use the exact source commit and full ref recorded by the candidate workflow:
 
 ```bash
-sha256sum --check checksums.txt
-gh attestation verify threadforge_VERSION_linux_amd64.tar.gz --repo Rangow4562/ThreadForge
-gh attestation verify threadforge_VERSION_linux_amd64.tar.gz --repo Rangow4562/ThreadForge --predicate-type https://spdx.dev/Document/v2.3
-gh attestation verify threadforge_VERSION_linux_amd64.spdx.json --repo Rangow4562/ThreadForge
-gh attestation verify threadforge_VERSION_linux_amd64.go-licenses.tar.gz --repo Rangow4562/ThreadForge
-gh attestation verify checksums.txt --repo Rangow4562/ThreadForge
+python scripts/verify_release_candidate.py \
+  --bundle-dir ./threadforge-candidate \
+  --version VERSION \
+  --source-commit FULL_SOURCE_COMMIT_SHA \
+  --source-ref refs/tags/vVERSION
 ```
 
-Repeat attestation verification for each platform archive, matching SBOM, and matching `.go-licenses.tar.gz` evidence bundle. A passing build workflow is artifact evidence only: it does not satisfy the cutover assessor, approve licenses/privacy/security/name review, or authorize publication. Release creation and asset attachment remain a separate human-approved operation after every documented parity and cutover gate passes. The existing `v0.4.6` assets predate this workflow and are not retroactively attested.
+For a `workflow_dispatch` rehearsal from the `main` branch, pass `--source-ref refs/heads/main`; for a tag-triggered candidate, pass its exact `refs/tags/vVERSION` ref. The verifier performs GitHub API lookups for each attestation and may take several minutes. Its success output proves bundle integrity and the specified provenance bindings only: it always reports `license_review_required=true`, `release_clearance=false`, and `release_authorized=false`. It does not satisfy the cutover assessor, approve license/privacy/security/name review, or authorize publication. Publish the exact verified candidate files; do not rebuild or recompress them, because any byte change invalidates the source-bound attestations. Release creation and asset attachment remain a separate human-approved operation after every documented parity and cutover gate passes. Existing public-release assets that predate this workflow are not retroactively attested.

@@ -38,7 +38,8 @@ def build(path, *, version="0.5.6", project_path=PROJECT_PATH, lock_path=LOCK_PA
 
 
 def test_spdx_covers_full_locked_all_extras_graph_without_license_claims_or_paths(tmp_path):
-    assert hashlib.sha256(SPDX_SCHEMA_PATH.read_bytes()).hexdigest() == (
+    schema_bytes = SPDX_SCHEMA_PATH.read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha256(schema_bytes).hexdigest() == (
         "3ec6cd5b8ba0c9a3e821da48536fa1b814567dc7e4376efe98d3e7b2a7a8d230"
     )
     assert "CC0-1.0" in THIRD_PARTY_PATH.read_text(encoding="utf-8")

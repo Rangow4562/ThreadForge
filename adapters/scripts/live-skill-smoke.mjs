@@ -1744,7 +1744,28 @@ try {
   const antigravityPlanGateObserver = path.join(repositoryRoot, 'adapters', 'scripts', 'antigravity-plan-gate-observer.mjs');
   mkdirSync(path.dirname(antigravityDeniedFile), { recursive: true });
   assert.equal(existsSync(antigravityDeniedFile), false, 'Antigravity plan-gate sentinel unexpectedly exists before smoke');
-  const antigravityPlanGateCommand = `"${process.execPath}" "${antigravityPlanGateObserver}" "${antigravityPlanGateAuditPath}" "${cliPath}" task plan guard --host antigravity-cli --task-id ${openCodeTaskFixture.id} --project-id ${openCodeTaskFixture.projectID} --project-root "${projectRoot}" --db "${databasePath}" --threadforge-managed-antigravity-plan-gate=v1 --threadforge-plan-gate=antigravity-v1`;
+  // Antigravity's Windows hook runner splits command strings without removing
+  // quotes. Keep generated path arguments unquoted and reject unsafe tokens.
+  const antigravityPlanGateArgs = [
+    process.platform === 'win32' ? 'node' : process.execPath,
+    antigravityPlanGateObserver,
+    antigravityPlanGateAuditPath,
+    cliPath,
+    'task', 'plan', 'guard', '--host', 'antigravity-cli',
+    '--task-id', openCodeTaskFixture.id,
+    '--project-id', openCodeTaskFixture.projectID,
+    '--project-root', projectRoot,
+    '--db', databasePath,
+    '--threadforge-managed-antigravity-plan-gate=v1',
+    '--threadforge-plan-gate=antigravity-v1',
+  ];
+  if (process.platform === 'win32') {
+    assert.ok(antigravityPlanGateArgs.every((argument) => !/[\s"'&|<>^()%!]/u.test(argument)),
+      'Antigravity Windows hook smoke requires command arguments without spaces or shell metacharacters');
+  }
+  const antigravityPlanGateCommand = antigravityPlanGateArgs
+    .map((argument) => process.platform === 'win32' ? argument : JSON.stringify(argument))
+    .join(' ');
   const antigravityPlanGateInstallAction = await installAntigravityProjectPlanGateHook({
     command: antigravityPlanGateCommand,
     projectRoot,
@@ -1781,7 +1802,8 @@ try {
     antigravityPlanGateResult.tool_call_count === 1 &&
     antigravityPlanGateResult.host_tool_result_observed &&
     antigravityPlanGateResult.hook_callback_invocations === 0 &&
-    antigravityPlanGateResult.guard_decision === 'unknown'
+    antigravityPlanGateResult.guard_decision === 'unknown' &&
+    !antigravityPlanGateResult.host_hook_failure_observed
   ) || (
     antigravityPlanGateResult.status === 'probe_not_exercised' &&
     antigravityPlanGateResult.tool_call_count === 0 &&
@@ -1795,21 +1817,32 @@ try {
     antigravityPlanGateResult.host_tool_result_observed &&
     antigravityPlanGateResult.hook_callback_invocations === 1 &&
     antigravityPlanGateResult.guard_decision === 'deny' &&
-    !antigravityPlanGateResult.host_tool_error_observed
+    !antigravityPlanGateResult.host_tool_error_observed &&
+    !antigravityPlanGateResult.host_hook_failure_observed
+  ) || (
+    antigravityPlanGateResult.status === 'not_verified' &&
+    antigravityPlanGateResult.tool_call_count === 1 &&
+    antigravityPlanGateResult.host_tool_result_observed &&
+    antigravityPlanGateResult.hook_callback_invocations === 0 &&
+    antigravityPlanGateResult.guard_decision === 'unknown' &&
+    antigravityPlanGateResult.host_tool_error_observed &&
+    antigravityPlanGateResult.host_hook_failure_observed
   ) || (
     antigravityPlanGateResult.status === 'not_verified' &&
     antigravityPlanGateResult.tool_call_count === 1 &&
     !antigravityPlanGateResult.host_tool_result_observed &&
     antigravityPlanGateResult.hook_callback_invocations === 0 &&
     antigravityPlanGateResult.guard_decision === 'unknown' &&
-    !antigravityPlanGateResult.host_tool_error_observed
+    !antigravityPlanGateResult.host_tool_error_observed &&
+    !antigravityPlanGateResult.host_hook_failure_observed
   ) || (
     antigravityPlanGateResult.status === 'not_verified' &&
     antigravityPlanGateResult.tool_call_count === 1 &&
     !antigravityPlanGateResult.host_tool_result_observed &&
     antigravityPlanGateResult.hook_callback_invocations === 1 &&
     antigravityPlanGateResult.guard_decision === 'deny' &&
-    !antigravityPlanGateResult.host_tool_error_observed
+    !antigravityPlanGateResult.host_tool_error_observed &&
+    !antigravityPlanGateResult.host_hook_failure_observed
   );
   assert.ok(antigravityPlanGateProbeValid && antigravityPlanGateResult.provider_requests > 0 &&
     antigravityPlanGateResult.local_fixture_authentication_validated && antigravityPlanGateResult.real_model_invocations === 0,
@@ -1824,6 +1857,7 @@ try {
       hook_callback_invocations: antigravityPlanGateResult.hook_callback_invocations,
       guard_decision: antigravityPlanGateResult.guard_decision,
       host_tool_error_observed: antigravityPlanGateResult.host_tool_error_observed,
+      host_hook_failure_observed: antigravityPlanGateResult.host_hook_failure_observed,
       declared_tool_schemas: antigravityPlanGateResult.provider_trace?.flatMap((trace) => trace.declared_tool_schemas ?? []).slice(-4),
       function_calls: antigravityPlanGateResult.provider_trace?.flatMap((trace) => trace.function_calls ?? []).slice(-2),
       function_responses: antigravityPlanGateResult.provider_trace?.flatMap((trace) => trace.function_responses ?? []).slice(-2),
@@ -1844,6 +1878,7 @@ try {
     host_tool_result_observed: antigravityPlanGateResult.host_tool_result_observed,
     guard_decision: antigravityPlanGateResult.guard_decision,
     host_tool_error_observed: antigravityPlanGateResult.host_tool_error_observed,
+    host_hook_failure_observed: antigravityPlanGateResult.host_hook_failure_observed,
     sandbox_enabled: false,
     sentinel_created: antigravityDeniedFileCreated,
     provider: 'loopback-gemini-api-fixture',
@@ -2141,7 +2176,7 @@ try {
   if (blockedLauncherError) throw blockedLauncherError;
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v47',
+    schema_version: 'threadforge.installed-skill-smoke.v48',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,

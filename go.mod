@@ -1,6 +1,6 @@
 module github.com/threadforge-ai/threadforge
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/asymptote-labs/agent-beacon/cli/beacon v0.0.0

@@ -16,6 +16,7 @@ const validFixture = {
   hookCallbackInvocations: 1,
   guardDecision: 'deny',
   hostToolErrorObserved: true,
+  hostHookFailureObserved: false,
   fixtureIntegrityVerified: true,
 };
 
@@ -36,6 +37,24 @@ test('records an absent hook callback after an actual host tool call without cla
       hostToolErrorObserved,
     }), { status: 'not_observed', reason: 'workspace_pretool_hook_not_invoked' });
   }
+});
+
+test('distinguishes a failed host hook command from an undispatched hook', () => {
+  assert.deepEqual(classifyAntigravityPlanGateProbe({
+    ...validFixture,
+    hookCallbackInvocations: 0,
+    guardDecision: 'unknown',
+    hostToolErrorObserved: true,
+    hostHookFailureObserved: true,
+  }), { status: 'not_verified', reason: 'host_hook_command_failed_before_guard_callback' });
+  assert.deepEqual(classifyAntigravityPlanGateProbe({
+    ...validFixture,
+    hostToolResultObserved: false,
+    hookCallbackInvocations: 0,
+    guardDecision: 'unknown',
+    hostToolErrorObserved: false,
+    hostHookFailureObserved: true,
+  }), { status: 'not_verified', reason: 'inconsistent_host_hook_failure_evidence' });
 });
 
 test('distinguishes a provider turn that never exercised the host tool', () => {
@@ -132,4 +151,14 @@ test('redacts current and legacy Antigravity file paths and contents from host e
     assert.ok(summary.includes('<target-file>'));
     assert.ok(summary.includes('<file-content>'));
   }
+});
+
+test('keeps hook failure and module-resolution evidence while redacting arbitrary Windows paths', () => {
+  const summary = summarizeAntigravityHostError(
+    'JSON hook "threadforge-task-plan-gate" failed: command failed: Cannot find module \'C:\\Users\\private name\\observer.mjs\'\nRequire stack: C:\\Users\\private name\\runner.js',
+  );
+  assert.match(summary, /JSON hook .* failed/);
+  assert.match(summary, /Cannot find module/);
+  assert.equal(summary.includes('private name'), false);
+  assert.match(summary, /<path>/);
 });

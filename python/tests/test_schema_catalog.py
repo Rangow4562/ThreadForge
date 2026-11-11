@@ -963,6 +963,7 @@ def test_antigravity_plan_gate_smoke_v2_uses_current_direct_write_tool_contract(
         "guard_decision": "deny",
         "host_tool_result_observed": True,
         "host_tool_error_observed": True,
+        "host_hook_failure_observed": False,
         "sandbox_enabled": False,
         "sentinel_created": False,
         "provider": "loopback-gemini-api-fixture",
@@ -977,6 +978,7 @@ def test_antigravity_plan_gate_smoke_v2_uses_current_direct_write_tool_contract(
         "guard_decision": "unknown",
         "host_tool_result_observed": False,
         "host_tool_error_observed": False,
+        "host_hook_failure_observed": False,
     })
     validator.validate({
         **result,
@@ -985,6 +987,16 @@ def test_antigravity_plan_gate_smoke_v2_uses_current_direct_write_tool_contract(
         "guard_decision": "deny",
         "host_tool_result_observed": False,
         "host_tool_error_observed": False,
+        "host_hook_failure_observed": False,
+    })
+    validator.validate({
+        **result,
+        "status": "not_verified",
+        "hook_callback_invocations": 0,
+        "guard_decision": "unknown",
+        "host_tool_result_observed": True,
+        "host_tool_error_observed": True,
+        "host_hook_failure_observed": True,
     })
     for invalid in (
         {**result, "tool": "write_to_file"},

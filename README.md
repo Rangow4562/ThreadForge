@@ -8,7 +8,7 @@
 
 [![Release](https://img.shields.io/badge/Release-v0.5.0-2563eb?style=flat-square&logo=github)](https://github.com/Rangow4562/ThreadForge/releases/tag/v0.5.0)
 [![License](https://img.shields.io/badge/License-Apache--2.0-2f855a?style=flat-square)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.27.3%2B-00ADD8?style=flat-square&logo=go&logoColor=white)](go.mod)
+[![Go](https://img.shields.io/badge/Go-1.27.4%2B-00ADD8?style=flat-square&logo=go&logoColor=white)](go.mod)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white)](python/pyproject.toml)
 [![Node](https://img.shields.io/badge/Node.js-22.19%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](adapters/package.json)
 [![Posture](https://img.shields.io/badge/Runtime-Loopback--Only%20%7C%20Local--First-00b4d8?style=flat-square)](docs/architecture.md)

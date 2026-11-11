@@ -18,6 +18,7 @@
     "guard_decision",
     "host_tool_result_observed",
     "host_tool_error_observed",
+    "host_hook_failure_observed",
     "sandbox_enabled",
     "sentinel_created",
     "provider",
@@ -44,6 +45,7 @@
     "guard_decision": { "enum": ["deny", "unknown"] },
     "host_tool_result_observed": { "type": "boolean" },
     "host_tool_error_observed": { "type": "boolean" },
+    "host_hook_failure_observed": { "type": "boolean" },
     "sandbox_enabled": { "const": false },
     "sentinel_created": { "const": false },
     "provider": { "const": "loopback-gemini-api-fixture" },
@@ -58,7 +60,8 @@
         "host_tool_result_observed": { "const": true },
         "hook_callback_invocations": { "const": 1 },
         "guard_decision": { "const": "deny" },
-        "host_tool_error_observed": { "const": true }
+        "host_tool_error_observed": { "const": true },
+        "host_hook_failure_observed": { "const": false }
       }
     },
     {
@@ -67,7 +70,9 @@
         "provider_tool_call_count": { "const": 1 },
         "host_tool_result_observed": { "const": true },
         "hook_callback_invocations": { "const": 0 },
-        "guard_decision": { "const": "unknown" }
+        "guard_decision": { "const": "unknown" },
+        "host_tool_error_observed": { "const": false },
+        "host_hook_failure_observed": { "const": false }
       }
     },
     {
@@ -77,7 +82,8 @@
         "host_tool_result_observed": { "const": false },
         "hook_callback_invocations": { "const": 0 },
         "guard_decision": { "const": "unknown" },
-        "host_tool_error_observed": { "const": false }
+        "host_tool_error_observed": { "const": false },
+        "host_hook_failure_observed": { "const": false }
       }
     },
     {
@@ -87,7 +93,8 @@
         "host_tool_result_observed": { "const": true },
         "hook_callback_invocations": { "const": 1 },
         "guard_decision": { "const": "deny" },
-        "host_tool_error_observed": { "const": false }
+        "host_tool_error_observed": { "const": false },
+        "host_hook_failure_observed": { "const": false }
       }
     },
     {
@@ -97,7 +104,8 @@
         "host_tool_result_observed": { "const": false },
         "hook_callback_invocations": { "const": 0 },
         "guard_decision": { "const": "unknown" },
-        "host_tool_error_observed": { "const": false }
+        "host_tool_error_observed": { "const": false },
+        "host_hook_failure_observed": { "const": false }
       }
     },
     {
@@ -107,7 +115,19 @@
         "host_tool_result_observed": { "const": false },
         "hook_callback_invocations": { "const": 1 },
         "guard_decision": { "const": "deny" },
-        "host_tool_error_observed": { "const": false }
+        "host_tool_error_observed": { "const": false },
+        "host_hook_failure_observed": { "const": false }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "not_verified" },
+        "provider_tool_call_count": { "const": 1 },
+        "host_tool_result_observed": { "const": true },
+        "hook_callback_invocations": { "const": 0 },
+        "guard_decision": { "const": "unknown" },
+        "host_tool_error_observed": { "const": true },
+        "host_hook_failure_observed": { "const": true }
       }
     }
   ]

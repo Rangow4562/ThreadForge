@@ -16,7 +16,7 @@ sys.modules[CHECKER_SPEC.name] = CHECKER
 CHECKER_SPEC.loader.exec_module(CHECKER)
 
 
-BUILD_INFO = """threadforge.exe: go1.27.3
+BUILD_INFO = """threadforge.exe: go1.27.4
 	path example.com/threadforge/cmd/threadforge
 	mod example.com/threadforge (devel)
 	dep example.com/library v1.2.3 h1:libraryhash
@@ -41,7 +41,7 @@ def complete_spdx_document():
             package("example.com/threadforge"),
             package("example.com/library", "v1.2.3"),
             package("example.com/local"),
-            package("stdlib", "go1.27.3"),
+            package("stdlib", "go1.27.4"),
             package("threadforge", "sha256:binary"),
             package("threadforge.exe"),
         ],
@@ -84,7 +84,7 @@ def test_reconciles_modules_versions_and_keeps_legal_clearance_closed(tmp_path):
 
     assert report["schema"] == "threadforge.release-binary-sbom-check.v1"
     assert report["main_module"] == "example.com/threadforge"
-    assert report["go_toolchain"] == "go1.27.3"
+    assert report["go_toolchain"] == "go1.27.4"
     assert report["go_module_count"] == 3
     assert report["spdx_package_count"] == 6
     assert report["declared_license_not_asserted"] == 6

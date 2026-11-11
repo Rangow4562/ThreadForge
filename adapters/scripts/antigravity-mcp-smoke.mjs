@@ -473,12 +473,15 @@ export async function runAntigravityPlanGateAttempt({
   const hostToolResultObserved = hostToolResponse !== undefined;
   const hostToolErrorObserved = hostToolResponse?.is_error === true ||
     (hostToolResponse?.result_signal === 'tool_error' && hostToolResponse?.result_markers?.numeric_status === 1);
+  const hostHookFailureObserved = hostToolResponse?.response_error_markers?.hook === true &&
+    /(?:json\s*hook|hook).{0,160}(?:failed|command failed)/i.test(hostToolResponse?.response_error_summary ?? '');
   const classification = classifyAntigravityPlanGateProbe({
     toolCallCount: result.tool_call_count,
     hostToolResultObserved,
     hookCallbackInvocations: audit.length,
     guardDecision: audit.length === 1 ? audit[0]?.decision : 'unknown',
     hostToolErrorObserved,
+    hostHookFailureObserved,
     fixtureIntegrityVerified: result.provider_requests > 0 &&
       result.local_fixture_authentication_validated && result.real_model_invocations === 0,
   });
@@ -492,6 +495,7 @@ export async function runAntigravityPlanGateAttempt({
     guard_decision: audit.length === 1 ? audit[0]?.decision : 'unknown',
     host_tool_result_observed: hostToolResultObserved,
     host_tool_error_observed: hostToolErrorObserved,
+    host_hook_failure_observed: hostHookFailureObserved,
     tool_result_observed: hostToolResultObserved,
   };
 }
@@ -545,11 +549,15 @@ export function classifyAntigravityPlanGateProbe({
   hookCallbackInvocations,
   guardDecision,
   hostToolErrorObserved,
+  hostHookFailureObserved = false,
   fixtureIntegrityVerified,
 }) {
   if (!fixtureIntegrityVerified || ![0, 1].includes(toolCallCount) ||
       typeof hostToolResultObserved !== 'boolean' || ![0, 1].includes(hookCallbackInvocations)) {
     return { status: 'not_verified', reason: 'probe_integrity_not_verified' };
+  }
+  if (hostHookFailureObserved && (!hostToolResultObserved || !hostToolErrorObserved)) {
+    return { status: 'not_verified', reason: 'inconsistent_host_hook_failure_evidence' };
   }
   if (toolCallCount === 0 && !hostToolResultObserved && hookCallbackInvocations === 0 &&
       guardDecision === 'unknown' && !hostToolErrorObserved) {
@@ -561,6 +569,9 @@ export function classifyAntigravityPlanGateProbe({
   }
   if (toolCallCount === 1 && hostToolResultObserved && hookCallbackInvocations === 0 &&
       guardDecision === 'unknown') {
+    if (hostToolErrorObserved && hostHookFailureObserved) {
+      return { status: 'not_verified', reason: 'host_hook_command_failed_before_guard_callback' };
+    }
     return { status: 'not_observed', reason: 'workspace_pretool_hook_not_invoked' };
   }
   if (toolCallCount === 1 && hostToolResultObserved && hookCallbackInvocations === 1 && guardDecision === 'deny') {
@@ -622,10 +633,14 @@ function summarizeHostError(message, replacements) {
   for (const [value, replacement] of redactions) {
     summary = summary.replaceAll(value, replacement);
   }
-  return summary
+  summary = summary
     .replace(/(?:Bearer\s+|key=)[^\s&]+/gi, '<credential>')
+    .replace(/(["'])(?:[A-Z]:\\|\\\\)[^"'\r\n]*\1/gi, '<path>')
+    .replace(/(?:\b[A-Z]:\\|\\\\)[^\s"'<>|]+/gi, '<path>')
     .replace(/[\r\n\t]+/g, ' ')
-    .trim().slice(-600);
+    .trim();
+  if (summary.length <= 600) return summary;
+  return `${summary.slice(0, 420)} … ${summary.slice(-160)}`;
 }
 
 export function summarizeAntigravityHostError(message, context = {}, functionCall) {

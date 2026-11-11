@@ -155,7 +155,13 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         working-directory: adapters/browser-extension
-        run: npx playwright install --with-deps chromium
+        run: |
+          npx playwright install chromium
+          if ! node -e 'const { chromium } = require("playwright"); (async () => { const browser = await chromium.launch({ headless: true }); await browser.close(); })().catch((error) => { console.error(error); process.exitCode = 1; });'; then
+            echo "Chromium cannot launch with the runner image libraries; installing Playwright's Linux dependencies."
+            npx playwright install-deps chromium
+            node -e 'const { chromium } = require("playwright"); (async () => { const browser = await chromium.launch({ headless: true }); await browser.close(); })().catch((error) => { console.error(error); process.exitCode = 1; });'
+          fi
 
       - name: Install Playwright Chromium
         if: runner.os != 'Linux'

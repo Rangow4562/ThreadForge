@@ -295,6 +295,33 @@ func TestEngineeringRuntimeSBOMJobIsNonPublishingAndGated(t *testing.T) {
 	}
 }
 
+func TestBrowserReplayProbesChromiumBeforeInstallingLinuxPackages(t *testing.T) {
+	data := readRepositoryDocument(t, filepath.Join("..", "..", ".github", "workflows", "threadforge-tests.yml"))
+	var document yaml.Node
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		t.Fatalf("parse browser replay workflow: %v", err)
+	}
+	job := workflowYAMLValue(workflowYAMLValue(document.Content[0], "jobs"), "test")
+	steps := workflowYAMLValue(job, "steps")
+	if steps == nil || steps.Kind != yaml.SequenceNode {
+		t.Fatal("cross-platform test steps are missing")
+	}
+	for _, step := range steps.Content {
+		if workflowYAMLScalar(step, "name") != "install playwright chromium and linux dependencies" {
+			continue
+		}
+		run := workflowYAMLScalar(step, "run")
+		installBrowser := strings.Index(run, "npx playwright install chromium")
+		probeRuntime := strings.Index(run, "chromium.launch")
+		installSystemDeps := strings.Index(run, "npx playwright install-deps chromium")
+		if installBrowser < 0 || probeRuntime < 0 || installSystemDeps < 0 || installBrowser > probeRuntime || probeRuntime > installSystemDeps {
+			t.Fatal("Linux browser setup must install Chromium, probe a real launch, then conditionally install system dependencies")
+		}
+		return
+	}
+	t.Fatal("Linux Chromium setup step is missing")
+}
+
 func TestPublishedReleaseVerificationWorkflowIsReadOnly(t *testing.T) {
 	data := readRepositoryDocument(t, filepath.Join("..", "..", ".github", "workflows", "threadforge-published-release-verification.yml"))
 	var document yaml.Node

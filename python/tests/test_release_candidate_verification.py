@@ -353,6 +353,42 @@ def test_verifies_exact_bundle_and_all_signed_claims(tmp_path):
         assert options["timeout"] == 120
 
 
+def test_retries_a_transient_attestation_service_failure(tmp_path, monkeypatch):
+    root = write_candidate(tmp_path / "candidate")
+    successful = SuccessfulGH()
+    calls = 0
+
+    def transient_then_success(command, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="HTTP 503 Service Unavailable")
+        return successful(command, **kwargs)
+
+    monkeypatch.setattr(VERIFIER.time, "sleep", lambda _seconds: None)
+    result = run_verification(root, transient_then_success)
+
+    assert result["provenance_verified"] is True
+    assert calls == 33
+    assert len(successful.calls) == 32
+
+
+def test_does_not_retry_a_permanent_attestation_rejection(tmp_path, monkeypatch):
+    root = write_candidate(tmp_path / "candidate")
+    calls = 0
+
+    def permanent_failure(command, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="no attestations found")
+
+    monkeypatch.setattr(VERIFIER.time, "sleep", lambda _seconds: None)
+    with pytest.raises(VERIFIER.ReleaseCandidateError, match="GitHub attestation verification failed"):
+        run_verification(root, permanent_failure)
+
+    assert calls == 1
+
+
 def test_rejects_checksum_mismatch_before_network_calls(tmp_path):
     root = write_candidate(tmp_path / "candidate")
     archive = next(root.glob("threadforge_1.2.3_linux_amd64.tar.gz"))

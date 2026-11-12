@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import time
 import zipfile
 from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
@@ -27,6 +28,28 @@ REPOSITORY = "Rangow4562/ThreadForge"
 WORKFLOW = ".github/workflows/threadforge-tests.yml"
 SLSA_PREDICATE = "https://slsa.dev/provenance/v1"
 SPDX_PREDICATE = "https://spdx.dev/Document/v2.3"
+ATTESTATION_RETRY_DELAYS_SECONDS = (1.0, 2.0)
+TRANSIENT_ATTESTATION_ERROR_MARKERS = (
+    "api rate limit exceeded",
+    "rate limit",
+    "too many requests",
+    "http 429",
+    "http 500",
+    "http 502",
+    "http 503",
+    "http 504",
+    "temporarily unavailable",
+    "service unavailable",
+    "bad gateway",
+    "gateway timeout",
+    "connection reset",
+    "connection refused",
+    "network is unreachable",
+    "tls handshake timeout",
+    "unexpected eof",
+    "i/o timeout",
+    "context deadline exceeded",
+)
 PYTHON_EXTRAS = ["decisions", "evolution", "hf", "serving", "test", "typed-data", "workspace"]
 GO_TARGETS = ["linux_amd64", "darwin_amd64", "darwin_arm64", "windows_amd64"]
 PYTHON_TARGETS = [(system, version) for system in ("linux", "windows", "darwin") for version in ("3.11", "3.12", "3.13", "3.14")]
@@ -796,6 +819,13 @@ def _canonical_json(value: Any) -> str:
         raise ReleaseCandidateError("attestation contains invalid JSON data") from error
 
 
+def _is_transient_attestation_error(stderr: Any) -> bool:
+    if not isinstance(stderr, str):
+        return False
+    lowered = stderr.casefold()
+    return any(marker in lowered for marker in TRANSIENT_ATTESTATION_ERROR_MARKERS)
+
+
 def _verified_statement(
     *,
     gh: str,
@@ -824,19 +854,32 @@ def _verified_statement(
         "--format",
         "json",
     ]
-    try:
-        result = run(
-            command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=120,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        raise ReleaseCandidateError("GitHub attestation verification could not run") from error
-    if result.returncode != 0:
+    result: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(len(ATTESTATION_RETRY_DELAYS_SECONDS) + 1):
+        try:
+            result = run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            if attempt < len(ATTESTATION_RETRY_DELAYS_SECONDS):
+                time.sleep(ATTESTATION_RETRY_DELAYS_SECONDS[attempt])
+                continue
+            raise ReleaseCandidateError("GitHub attestation verification could not run") from error
+        except (OSError, subprocess.SubprocessError) as error:
+            raise ReleaseCandidateError("GitHub attestation verification could not run") from error
+        if result.returncode == 0:
+            break
+        if attempt < len(ATTESTATION_RETRY_DELAYS_SECONDS) and _is_transient_attestation_error(result.stderr):
+            time.sleep(ATTESTATION_RETRY_DELAYS_SECONDS[attempt])
+            continue
+        raise ReleaseCandidateError(f"GitHub attestation verification failed for {path.name}")
+    if result is None or result.returncode != 0:
         raise ReleaseCandidateError(f"GitHub attestation verification failed for {path.name}")
     if not isinstance(result.stdout, str) or len(result.stdout.encode("utf-8")) > 16 * 1024 * 1024:
         raise ReleaseCandidateError("GitHub attestation verification returned invalid or oversized output")

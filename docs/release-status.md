@@ -1,6 +1,8 @@
 # Public release status
 
-Status checked **November 12, 2026**: GitHub still marks public stable release `v0.5.0` as latest; it was published November 5, 2026 from commit `1254e70b8a0204f3e4bcd3e8c44afdce8e2a67ec`. Hosted push run `43148898205` at commit `28c7a2edf8d27e4ffcb61006adfd3ed542339155` passed all 17 jobs. Non-publishing version `0.5.7` rehearsal run `43150229512` passed all 31 jobs at the same commit.
+Status checked **November 12, 2026**: GitHub still marks public stable release `v0.5.0` as latest; it was published November 5, 2026 from commit `1254e70b8a0204f3e4bcd3e8c44afdce8e2a67ec`. Hosted push run `43157320072` completed successfully on commit `cbc733fd2f7b3a08a1b1bfc91528f4c3953481ea` with all 17 jobs green after rerunning one Windows/Python 3.13 cell whose first attempt timed out during the offline npm package smoke. Non-publishing version `0.5.8` rehearsal run `43159878500` passed all 31 jobs on this same commit.
+
+Latest candidate check: the downloaded `0.5.8` bundle from run `43159878500` independently passed `scripts/verify_release_candidate.py`. All 27 payloads and checksums verified; all 28 SLSA attestations and four archive-to-SPDX attestations verified against the expected repository, workflow, `refs/heads/main`, and exact source commit. The verifier reports `integrity_verified=true` and `provenance_verified=true`, with `license_review_required=true`, `release_clearance=false`, and `release_authorized=false`. The hosted Engineering runtime SBOM/provenance job also passed. No public release was created; these are not production/cutover approvals.
 
 Threadforge has **not** passed the all-or-nothing production/cutover acceptance gate. Publishing `v0.5.0` is not evidence that Beacon, Mancode, AnyJev, or RRSI can be retired or replaced. Do not use this release as authorization to cut over or delete legacy data.
 

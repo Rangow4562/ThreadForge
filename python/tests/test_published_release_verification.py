@@ -40,6 +40,9 @@ class FakeGitHub:
         self.is_draft = False
         self.is_prerelease = False
         self.candidate_succeeds = True
+        self.candidate_stderr = (
+            "release-candidate verification failed: candidate bundle does not contain exactly the documented payload set"
+        )
         self.commands: list[list[str]] = []
 
     def run(self, command, **kwargs):
@@ -50,6 +53,8 @@ class FakeGitHub:
         completed = subprocess.CompletedProcess(command, 0, stdout="", stderr="")
         if len(command) > 1 and Path(command[1]).name == "verify_release_candidate.py":
             completed.returncode = 0 if self.candidate_succeeds else 1
+            if not self.candidate_succeeds:
+                completed.stderr = self.candidate_stderr
             return completed
         if command[1:3] == ["release", "view"]:
             completed.stdout = json.dumps({
@@ -162,9 +167,26 @@ def test_candidate_provenance_failure_stops_before_public_release_queries(tmp_pa
     fake = FakeGitHub(bundle, files)
     fake.candidate_succeeds = False
 
-    with pytest.raises(VERIFIER.PublishedReleaseVerificationError, match="candidate provenance"):
+    with pytest.raises(
+        VERIFIER.PublishedReleaseVerificationError,
+        match="candidate bundle does not contain exactly the documented payload set",
+    ):
         verify(bundle, fake)
     assert len(fake.commands) == 1
+
+
+def test_candidate_provenance_failure_does_not_echo_unsafe_subprocess_output(tmp_path):
+    bundle = tmp_path / "candidate"
+    files = candidate_bundle(bundle)
+    fake = FakeGitHub(bundle, files)
+    fake.candidate_succeeds = False
+    fake.candidate_stderr = "release-candidate verification failed: token gho_abc123 at C:/private/path"
+
+    with pytest.raises(VERIFIER.PublishedReleaseVerificationError) as error:
+        verify(bundle, fake)
+
+    assert str(error.value) == "release-candidate provenance verification command failed"
+    assert "gho_abc123" not in str(error.value)
 
 
 @pytest.mark.parametrize(

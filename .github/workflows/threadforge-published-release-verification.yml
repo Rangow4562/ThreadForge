@@ -13,6 +13,7 @@ on:
 permissions:
   contents: read
   attestations: read
+  actions: read
 
 concurrency:
   group: threadforge-published-release-${{ github.event.release.tag_name || inputs.version }}
@@ -26,6 +27,7 @@ jobs:
     permissions:
       contents: read
       attestations: read
+      actions: read
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -73,17 +75,7 @@ jobs:
             echo "source_commit=$source_commit"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Download public release assets
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ steps.resolve.outputs.tag }}
-        run: |
-          set -euo pipefail
-          asset_dir="$RUNNER_TEMP/threadforge-published-release-assets"
-          mkdir "$asset_dir"
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$asset_dir"
-
-      - name: Verify published assets against candidate provenance
+      - name: Download the exact tag candidate bundle
         shell: bash
         env:
           RELEASE_TAG: ${{ steps.resolve.outputs.tag }}
@@ -91,9 +83,41 @@ jobs:
           SOURCE_COMMIT: ${{ steps.resolve.outputs.source_commit }}
         run: |
           set -euo pipefail
+          candidate_runs="$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow threadforge-tests.yml \
+            --commit "$SOURCE_COMMIT" \
+            --event push \
+            --limit 100 \
+            --json databaseId,headSha,headBranch,event,status,conclusion,createdAt)"
+          candidate_run_id="$(jq -r \
+            --arg tag "$RELEASE_TAG" \
+            --arg sha "$SOURCE_COMMIT" \
+            'map(select(.headBranch == $tag and .headSha == $sha and .event == "push" and .status == "completed" and .conclusion == "success")) | sort_by(.createdAt) | last | .databaseId // ""' \
+            <<< "$candidate_runs")"
+          if [[ ! "$candidate_run_id" =~ ^[0-9]+$ ]]; then
+            echo "No successful candidate workflow run exists for the exact release tag and commit." >&2
+            exit 1
+          fi
+          candidate_dir="$RUNNER_TEMP/threadforge-release-candidate"
+          mkdir "$candidate_dir"
+          gh run download "$candidate_run_id" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "threadforge-release-candidate-$RELEASE_VERSION" \
+            --dir "$candidate_dir"
+
+      - name: Verify published assets against candidate provenance
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.resolve.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.resolve.outputs.version }}
+          SOURCE_COMMIT: ${{ steps.resolve.outputs.source_commit }}
+          CANDIDATE_DIR: ${{ runner.temp }}/threadforge-release-candidate
+        run: |
+          set -euo pipefail
           report="$RUNNER_TEMP/threadforge-published-release-verification.json"
           python scripts/verify_published_release.py \
-            --bundle-dir "$RUNNER_TEMP/threadforge-published-release-assets" \
+            --bundle-dir "$CANDIDATE_DIR" \
             --version "$RELEASE_VERSION" \
             --source-commit "$SOURCE_COMMIT" \
             --repo "$GITHUB_REPOSITORY" > "$report"

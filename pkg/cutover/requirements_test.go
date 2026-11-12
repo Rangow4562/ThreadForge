@@ -377,7 +377,9 @@ func TestPublishedReleaseVerificationWorkflowIsReadOnly(t *testing.T) {
 	}
 	usesCount := 0
 	verifyCommandFound := false
-	downloadCommandFound := false
+	candidateLookupFound := false
+	candidateDownloadFound := false
+	verifierUsesCandidateBundle := false
 	var inspect func(*yaml.Node)
 	inspect = func(node *yaml.Node) {
 		if node == nil {
@@ -400,11 +402,24 @@ func TestPublishedReleaseVerificationWorkflowIsReadOnly(t *testing.T) {
 					}
 				case "run":
 					script := strings.ToLower(value.Value)
-					if strings.Contains(script, "gh release download") {
-						downloadCommandFound = true
+					if strings.Contains(script, "gh run list") &&
+						strings.Contains(script, "--workflow threadforge-tests.yml") &&
+						strings.Contains(script, "--commit \"$source_commit\"") &&
+						strings.Contains(script, "--event push") &&
+						strings.Contains(script, ".event == \"push\"") &&
+						strings.Contains(script, ".status == \"completed\"") &&
+						strings.Contains(script, ".conclusion == \"success\"") &&
+						strings.Contains(script, ".headbranch == $tag") &&
+						strings.Contains(script, ".headsha == $sha") {
+						candidateLookupFound = true
+					}
+					if strings.Contains(script, "gh run download \"$candidate_run_id\"") &&
+						strings.Contains(script, "threadforge-release-candidate-$release_version") {
+						candidateDownloadFound = true
 					}
 					if strings.Contains(script, "scripts/verify_published_release.py") {
 						verifyCommandFound = true
+						verifierUsesCandidateBundle = strings.Contains(script, "--bundle-dir \"$candidate_dir\"")
 					}
 					for _, forbidden := range []string{
 						"gh release create", "gh release upload", "gh release edit", "gh release delete",
@@ -431,8 +446,8 @@ func TestPublishedReleaseVerificationWorkflowIsReadOnly(t *testing.T) {
 	if usesCount != 2 {
 		t.Errorf("expected only checkout and Python setup actions, got %d actions", usesCount)
 	}
-	if !downloadCommandFound || !verifyCommandFound {
-		t.Error("workflow must download the published assets and invoke the provenance verifier")
+	if !candidateLookupFound || !candidateDownloadFound || !verifierUsesCandidateBundle || !verifyCommandFound {
+		t.Error("workflow must select the exact successful tag candidate run, download its complete bundle, and verify it against the published assets")
 	}
 }
 
@@ -446,8 +461,8 @@ func assertReadOnlyReleasePermissions(t *testing.T, node *yaml.Node) {
 	for index := 0; index+1 < len(node.Content); index += 2 {
 		permissions[node.Content[index].Value] = strings.ToLower(node.Content[index+1].Value)
 	}
-	if len(permissions) != 2 || permissions["contents"] != "read" || permissions["attestations"] != "read" {
-		t.Errorf("published-release verifier must request only contents:read and attestations:read, got %#v", permissions)
+	if len(permissions) != 3 || permissions["contents"] != "read" || permissions["attestations"] != "read" || permissions["actions"] != "read" {
+		t.Errorf("published-release verifier must request only contents:read, attestations:read, and actions:read, got %#v", permissions)
 	}
 }
 

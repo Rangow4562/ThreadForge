@@ -28,6 +28,8 @@ MAX_FILE_BYTES = 512 * 1024 * 1024
 MAX_TOTAL_BYTES = 10 * 1024 * 1024 * 1024
 COMMAND_TIMEOUT_SECONDS = 3600
 CHUNK_SIZE = 1024 * 1024
+CANDIDATE_FAILURE_PREFIX = "release-candidate verification failed: "
+SAFE_CANDIDATE_DIAGNOSTIC_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,:()'-]{0,239}$")
 
 
 class PublishedReleaseVerificationError(ValueError):
@@ -115,8 +117,26 @@ def _run_checked(
     except (OSError, subprocess.TimeoutExpired) as error:
         raise PublishedReleaseVerificationError(f"{stage} command failed or timed out") from error
     if result.returncode != 0:
+        if stage == "release-candidate provenance verification":
+            detail = _candidate_verification_detail(result.stderr)
+            if detail is not None:
+                raise PublishedReleaseVerificationError(f"{stage} failed: {detail}")
         raise PublishedReleaseVerificationError(f"{stage} command failed")
     return result
+
+
+def _candidate_verification_detail(stderr: Any) -> str | None:
+    """Expose only a bounded, path-free diagnostic from our candidate verifier."""
+    if not isinstance(stderr, str):
+        return None
+    for line in stderr.splitlines():
+        line = line.strip()
+        if not line.startswith(CANDIDATE_FAILURE_PREFIX):
+            continue
+        detail = line[len(CANDIDATE_FAILURE_PREFIX) :].strip()
+        if len(detail) <= 240 and SAFE_CANDIDATE_DIAGNOSTIC_RE.fullmatch(detail):
+            return detail
+    return None
 
 
 def verify_published_release(

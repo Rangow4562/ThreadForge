@@ -1,18 +1,22 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/threadforge-ai/threadforge/internal/migrate"
 	"github.com/threadforge-ai/threadforge/internal/store"
@@ -791,6 +795,8 @@ func runConfiguredMigrationSourceReadback(t *testing.T, product migrate.Product,
 	}
 	t.Logf("source format coverage: product=%s files=%d unconverted_files=%d unconverted_families=%s formats=%s",
 		product, coverage.FilesScanned, coverage.UnconvertedFiles, strings.Join(unconvertedFormats, ","), strings.Join(populatedFormats, ","))
+	interruptMigrationApplyAndVerifyAtomicRecovery(t, snapshot.ID, manifestPath, backupRoot, databasePath)
+	t.Logf("process-interruption recovery verified: product=%s records=%d", product, snapshot.Summary.RecordsImported)
 
 	var applied struct {
 		Receipt        store.MigrationReceipt `json:"receipt"`
@@ -857,6 +863,76 @@ func runConfiguredMigrationSourceReadback(t *testing.T, product migrate.Product,
 		product, snapshot.Summary.FilesScanned, snapshot.Summary.FilesReady,
 		snapshot.Summary.FilesCredentialBlocked, snapshot.Summary.RecordsImported, snapshot.Summary.TotalSourceBytes)
 	return migrationSourceReadbackResult{Snapshot: snapshot, ManifestPath: manifestPath, Verification: verification, Coverage: coverage}
+}
+
+func interruptMigrationApplyAndVerifyAtomicRecovery(t *testing.T, migrationID, manifestPath, backupRoot, databasePath string) {
+	t.Helper()
+	command := exec.Command(os.Args[0], "-test.run=^TestMigrateApplyCLICrashChild$")
+	command.Env = append(os.Environ(),
+		"THREADFORGE_MIGRATION_CLI_CRASH_HELPER=1",
+		"THREADFORGE_MIGRATION_CLI_MANIFEST="+manifestPath,
+		"THREADFORGE_MIGRATION_CLI_DB="+databasePath,
+		"THREADFORGE_MIGRATION_CLI_BACKUP="+backupRoot,
+	)
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal("open migration interruption helper output")
+	}
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	if err := command.Start(); err != nil {
+		t.Fatalf("start migration interruption helper: %v", err)
+	}
+	ready := make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			if strings.TrimSpace(scanner.Text()) == "MIGRATION_PROGRESS_READY" {
+				ready <- nil
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			ready <- err
+			return
+		}
+		ready <- errors.New("migration CLI exited before staging its first row")
+	}()
+	select {
+	case err := <-ready:
+		if err != nil {
+			_ = command.Process.Kill()
+			_ = command.Wait()
+			t.Fatalf("migration %s missed its interruption point: %v; stderr=%s", migrationID, err, stderr.String())
+		}
+	case <-time.After(120 * time.Second):
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		t.Fatalf("migration %s did not reach its interruption point; stderr=%s", migrationID, stderr.String())
+	}
+	if err := command.Process.Kill(); err != nil {
+		_ = command.Wait()
+		t.Fatalf("kill migration %s during its open transaction: %v", migrationID, err)
+	}
+	if err := command.Wait(); err == nil {
+		t.Fatalf("migration %s interruption helper exited normally", migrationID)
+	}
+
+	database, err := store.Open(databasePath)
+	if err != nil {
+		t.Fatalf("reopen store after %s process death: %v", migrationID, err)
+	}
+	if _, err := database.GetMigration(t.Context(), migrationID); !errors.Is(err, store.ErrMigrationNotFound) {
+		_ = database.Close()
+		t.Fatalf("%s process death left a migration receipt: %v", migrationID, err)
+	}
+	if records, count, err := database.ListMigrationRecords(t.Context(), migrationID, 10, 0); err != nil || count != 0 || len(records) != 0 {
+		_ = database.Close()
+		t.Fatalf("%s process death left partial staged records=%#v count=%d error=%v", migrationID, records, count, err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close store after %s process death: %v", migrationID, err)
+	}
 }
 
 func copyMigrationSourceTree(t *testing.T, sourceRoot, backupRoot string) {

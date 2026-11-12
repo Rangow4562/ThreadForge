@@ -897,13 +897,20 @@ jobs:
           subject-path: ${{ runner.temp }}/threadforge-engineering-runtime-${{ steps.release.outputs.version }}/threadforge_${{ steps.release.outputs.version }}_engineering_linux_amd64.docker.tar
           sbom-path: ${{ runner.temp }}/threadforge-engineering-runtime-${{ steps.release.outputs.version }}/threadforge_${{ steps.release.outputs.version }}_engineering_linux_amd64.spdx.json
 
-      - name: Attest Engineering SPDX, binding, and checksum provenance
+      - name: Attest Engineering SPDX provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: |
-            ${{ runner.temp }}/threadforge-engineering-runtime-${{ steps.release.outputs.version }}/threadforge_${{ steps.release.outputs.version }}_engineering_linux_amd64.spdx.json
-            ${{ runner.temp }}/threadforge-engineering-runtime-${{ steps.release.outputs.version }}/threadforge_${{ steps.release.outputs.version }}_engineering_linux_amd64.binding.json
-            ${{ runner.temp }}/threadforge-engineering-runtime-${{ steps.release.outputs.version }}/checksums.txt
+          subject-path: ${{ runner.temp }}/threadforge-engineering-runtime-${{ steps.release.outputs.version }}/threadforge_${{ steps.release.outputs.version }}_engineering_linux_amd64.spdx.json
+
+      - name: Attest Engineering binding provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/threadforge-engineering-runtime-${{ steps.release.outputs.version }}/threadforge_${{ steps.release.outputs.version }}_engineering_linux_amd64.binding.json
+
+      - name: Attest Engineering checksum provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/threadforge-engineering-runtime-${{ steps.release.outputs.version }}/checksums.txt
 
       - name: Verify Engineering runtime attestations
         shell: bash

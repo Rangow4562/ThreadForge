@@ -266,8 +266,17 @@ func TestEngineeringRuntimeSBOMJobIsNonPublishingAndGated(t *testing.T) {
 		t.Fatal("Engineering runtime SBOM steps are missing")
 	}
 	buildFound, scanFound, bindingFound, verificationFound, uploadFound := false, false, false, false, false
+	attestationActions := 0
 	for _, step := range steps.Content {
 		uses := workflowYAMLScalar(step, "uses")
+		if strings.HasPrefix(uses, "actions/attest@") {
+			attestationActions++
+			with := workflowYAMLValue(step, "with")
+			subjectPath := workflowYAMLValue(with, "subject-path")
+			if subjectPath == nil || subjectPath.Kind != yaml.ScalarNode || strings.Contains(subjectPath.Value, "\n") {
+				t.Error("each Engineering runtime provenance statement must have a single file subject")
+			}
+		}
 		if strings.HasPrefix(uses, "anchore/sbom-action@") {
 			with := workflowYAMLValue(step, "with")
 			if workflowYAMLScalar(with, "upload-release-assets") != "false" || workflowYAMLScalar(with, "upload-artifact") != "false" {
@@ -292,6 +301,9 @@ func TestEngineeringRuntimeSBOMJobIsNonPublishingAndGated(t *testing.T) {
 	}
 	if !buildFound || !scanFound || !bindingFound || !verificationFound || !uploadFound {
 		t.Errorf("Engineering runtime SBOM job is missing required build/scan/binding/verification/upload steps: build=%t scan=%t bind=%t verify=%t upload=%t", buildFound, scanFound, bindingFound, verificationFound, uploadFound)
+	}
+	if attestationActions != 5 {
+		t.Errorf("Engineering runtime evidence must attest four payloads individually and bind one archive to its SBOM; got %d attestations", attestationActions)
 	}
 }
 

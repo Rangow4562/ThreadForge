@@ -252,7 +252,15 @@ def _run_attestation(
         "json",
     ]
     try:
-        result = run(command, capture_output=True, text=True, check=False, timeout=120)
+        result = run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=120,
+        )
     except (OSError, subprocess.SubprocessError) as error:
         raise EngineeringRuntimeSBOMError("GitHub attestation verification could not run") from error
     if result.returncode != 0:

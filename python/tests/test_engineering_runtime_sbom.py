@@ -130,9 +130,11 @@ def _fixture(tmp_path, *, tag=TAG, unsafe_member=None, sbom=None):
 class FakeGitHub:
     def __init__(self):
         self.commands = []
+        self.options = []
 
     def run(self, command, **kwargs):
         self.commands.append(command)
+        self.options.append(kwargs)
         path = Path(command[3])
         predicate = command[command.index("--predicate-type") + 1]
         limit = VERIFIER.MAX_ARCHIVE_BYTES if path.suffix == ".tar" else VERIFIER.MAX_SBOM_BYTES
@@ -175,6 +177,7 @@ def test_builds_and_verifies_source_bound_engineering_image_sbom(tmp_path):
     assert result["release_authorized"] is False
     assert len(fake.commands) == 5
     assert sum(command[command.index("--predicate-type") + 1] == VERIFIER.SPDX_PREDICATE for command in fake.commands) == 1
+    assert all(option.get("encoding") == "utf-8" and option.get("errors") == "replace" for option in fake.options)
 
 
 def test_pre_attestation_verification_reports_skipped_checks(tmp_path):

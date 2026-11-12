@@ -1,0 +1,85 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      non-major:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      non-major:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /adapters
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      non-major:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /adapters/browser-extension
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      non-major:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /adapters/openclaw-plugin
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      non-major:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: /containers/engineering
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: uv
+    directory: /python
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      non-major:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

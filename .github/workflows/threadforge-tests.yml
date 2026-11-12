@@ -761,6 +761,91 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  license-review-index:
+    name: Verify candidate and publish human license-review evidence
+    needs: [release-candidate-bundle]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the exact candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Resolve candidate version
+        id: release
+        shell: bash
+        env:
+          RELEASE_VERSION_INPUT: ${{ inputs.release_version }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_TYPE" == tag ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$RELEASE_VERSION_INPUT"
+          fi
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Invalid release candidate version." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download verified-input candidate bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: threadforge-release-candidate-${{ steps.release.outputs.version }}
+          path: ${{ runner.temp }}/threadforge-release-candidate
+
+      - name: Verify provenance and build self-contained review evidence
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref }}
+          REPOSITORY: ${{ github.repository }}
+          CANDIDATE_DIR: ${{ runner.temp }}/threadforge-release-candidate
+          REVIEW_DIR: ${{ runner.temp }}/threadforge-license-review
+          SUMMARY_PATH: ${{ runner.temp }}/threadforge-license-review-summary.json
+        run: |
+          set -euo pipefail
+          python scripts/build_license_review_index.py \
+            --bundle-dir "$CANDIDATE_DIR" \
+            --version "$RELEASE_VERSION" \
+            --source-commit "$SOURCE_COMMIT" \
+            --source-ref "$SOURCE_REF" \
+            --repo "$REPOSITORY" \
+            --output-dir "$REVIEW_DIR" > "$SUMMARY_PATH"
+          {
+            echo "## Human license-review evidence"
+            echo
+            cat "$SUMMARY_PATH"
+            echo
+            echo "All evidence remains unreviewed; release clearance and authorization are false."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attest the license-review index
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/threadforge-license-review/license-review-index.json
+
+      - name: Upload self-contained license-review artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: threadforge-license-review-${{ steps.release.outputs.version }}
+          path: ${{ runner.temp }}/threadforge-license-review/
+          if-no-files-found: error
+          retention-days: 90
+
   engineering-runtime-sbom:
     name: Build, inventory, and attest Engineering runtime image
     if: >-

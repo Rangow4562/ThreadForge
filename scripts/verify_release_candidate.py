@@ -970,6 +970,7 @@ def verify_release_candidate(
         "version": version,
         "source_commit": source_commit,
         "source_ref": source_ref,
+        "checksums_sha256": _sha256_file(bundle_dir / "checksums.txt"),
         "payload_count": len(expected),
         "checksum_count": len(checksums),
         "slsa_attestations_verified": len(expected) + 1,

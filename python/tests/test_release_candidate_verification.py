@@ -332,6 +332,9 @@ def test_verifies_exact_bundle_and_all_signed_claims(tmp_path):
     assert result["schema"] == "threadforge.release-candidate-verification.v1"
     assert result["payload_count"] == 27
     assert result["checksum_count"] == 27
+    assert result["checksums_sha256"] == hashlib.sha256(
+        (root / "checksums.txt").read_bytes()
+    ).hexdigest()
     assert result["slsa_attestations_verified"] == 28
     assert result["archive_sbom_attestations_verified"] == 4
     assert result["python_lock_sboms_verified"] == 1

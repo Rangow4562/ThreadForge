@@ -1,5 +1,11 @@
 # Local threat-rule scan
 
+## GitHub dependency and repository automation
+
+Read-only settings audit on November 12, 2026 found vulnerability alerts enabled, automated Dependabot security fixes disabled, secret scanning and push protection enabled, the main branch unprotected, and no repository rulesets. The new .github/dependabot.yml adds weekly version-update checks for GitHub Actions, Go modules, three npm project directories, the Engineering Docker image, and the Python uv lock. Non-major updates are grouped; major updates remain separate pull requests. There is no auto-merge policy. This is a local, uncommitted configuration change and has no effect on GitHub until merged.
+
+Version-update configuration does not enable Dependabot security updates. Repository administrators still need to enable that setting and establish a main-branch ruleset requiring the verified CI checks and review policy. Those controls were not changed because they affect repository write/merge behavior; the chosen reviewer and enforcement policy require owner direction. Secret-scanning generic-pattern and validity-check options also remain disabled in the observed settings.
+
 ## Dependency vulnerability gate
 
 The cross-platform GitHub workflow and local `test.ps1` gate run `govulncheck` v1.9.0 against the Go packages; hosted CI also runs `npm audit --audit-level=moderate` against both checked-in npm lockfiles after installation. The Go build toolchain is pinned by `go.mod`, and the PowerShell gate verifies the module cache with `go mod verify`; these checks block on known moderate-or-higher advisories in the locked dependency graphs and reachable Go code. They do not replace code review, runtime penetration testing, license review, privacy review, or the all-or-nothing cutover assessment. The npm audit includes development dependencies because the build, test, and packaging toolchain executes in CI.

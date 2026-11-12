@@ -124,7 +124,7 @@
     "test:opencode-history-host": "node --experimental-strip-types scripts/opencode-history-host-smoke.mjs"
   },
   "devDependencies": {
-    "@types/node": "22.20.4",
+    "@types/node": "26.6.6",
     "typescript": "5.8.3"
   },
   "engines": {

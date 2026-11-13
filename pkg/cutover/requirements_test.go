@@ -428,6 +428,40 @@ func TestRequiredCIGateIncludesFullPythonOptionalExtrasMatrix(t *testing.T) {
 	}
 }
 
+func TestRepositoryCITriggersCoverPullRequestsMainAndVersionTags(t *testing.T) {
+	data := readRepositoryDocument(t, filepath.Join("..", "..", ".github", "workflows", "threadforge-tests.yml"))
+	var document yaml.Node
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		t.Fatalf("parse Threadforge test workflow: %v", err)
+	}
+	triggers := workflowYAMLValue(document.Content[0], "on")
+	if triggers == nil || triggers.Kind != yaml.MappingNode {
+		t.Fatal("Threadforge test workflow triggers are missing")
+	}
+	if workflowYAMLValue(triggers, "pull_request") == nil {
+		t.Error("Threadforge CI must run for pull requests")
+	}
+	if workflowYAMLValue(triggers, "workflow_dispatch") == nil {
+		t.Error("Threadforge CI must support manual dispatch")
+	}
+	push := workflowYAMLValue(triggers, "push")
+	for key, expected := range map[string][]string{
+		"branches": {"main"},
+		"tags":     {"v*"},
+	} {
+		actual := workflowYAMLValue(push, key)
+		if actual == nil || actual.Kind != yaml.SequenceNode || len(actual.Content) != len(expected) {
+			t.Errorf("push.%s must be restricted to %v", key, expected)
+			continue
+		}
+		for index, value := range expected {
+			if actual.Content[index].Value != value {
+				t.Errorf("push.%s = %q, want %q", key, actual.Content[index].Value, value)
+			}
+		}
+	}
+}
+
 func matchesToSet(matches [][]string) map[string]bool {
 	result := make(map[string]bool, len(matches))
 	for _, match := range matches {

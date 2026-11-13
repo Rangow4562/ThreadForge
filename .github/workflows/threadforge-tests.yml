@@ -18,6 +18,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  workflow-lint:
+    name: Workflow lint (actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Check out Threadforge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Lint all GitHub Actions workflows
+        shell: bash
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
   test:
     name: Required suites (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
@@ -215,7 +237,7 @@ jobs:
   required-ci:
     name: Required CI gate
     if: always()
-    needs: [test, elasticsearch-local-stack]
+    needs: [test, elasticsearch-local-stack, workflow-lint]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
@@ -226,10 +248,12 @@ jobs:
         env:
           TEST_RESULT: ${{ needs.test.result }}
           INGESTION_RESULT: ${{ needs.elasticsearch-local-stack.result }}
+          WORKFLOW_LINT_RESULT: ${{ needs.workflow-lint.result }}
         run: |
           printf 'Required suites result: %s\n' "$TEST_RESULT"
           printf 'Synthetic ingestion result: %s\n' "$INGESTION_RESULT"
-          if [[ "$TEST_RESULT" != "success" || "$INGESTION_RESULT" != "success" ]]; then
+          printf 'Workflow lint result: %s\n' "$WORKFLOW_LINT_RESULT"
+          if [[ "$TEST_RESULT" != "success" || "$INGESTION_RESULT" != "success" || "$WORKFLOW_LINT_RESULT" != "success" ]]; then
             exit 1
           fi
 

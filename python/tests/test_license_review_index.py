@@ -274,7 +274,7 @@ def test_candidate_workflow_publishes_self_contained_review_artifact_without_cha
     assert "contents: write" not in job
     assert "release-publish" not in job
 
-    assert "candidate_payloads=(dist/threadforge_${RELEASE_VERSION}_*" in workflow
+    assert 'candidate_payloads=(dist/threadforge_"$RELEASE_VERSION"_* "dist/threadforge_python-${RELEASE_VERSION}.tar.gz" dist/threadforge_python-"$RELEASE_VERSION"-*.whl)' in workflow
     assert "Expected exactly 27 versioned candidate payload files" in workflow
 
 

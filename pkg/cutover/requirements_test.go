@@ -307,6 +307,135 @@ func TestEngineeringRuntimeSBOMJobIsNonPublishingAndGated(t *testing.T) {
 	}
 }
 
+func TestRequiredCIGateIncludesFullPythonOptionalExtrasMatrix(t *testing.T) {
+	data := readRepositoryDocument(t, filepath.Join("..", "..", ".github", "workflows", "threadforge-tests.yml"))
+	var document yaml.Node
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		t.Fatalf("parse Threadforge test workflow: %v", err)
+	}
+	root := document.Content[0]
+	jobs := workflowYAMLValue(root, "jobs")
+	allExtras := workflowYAMLValue(jobs, "python-all-extras")
+	if allExtras == nil {
+		t.Fatal("required Python all-extras job is missing")
+	}
+	if workflowYAMLValue(allExtras, "if") != nil {
+		t.Error("Python all-extras validation must not be conditionally skipped")
+	}
+
+	strategy := workflowYAMLValue(allExtras, "strategy")
+	matrix := workflowYAMLValue(strategy, "matrix")
+	for key, expected := range map[string][]string{
+		"os":     {"ubuntu-latest", "windows-latest", "macos-latest"},
+		"python": {"3.11", "3.12", "3.13", "3.14"},
+	} {
+		actual := workflowYAMLValue(matrix, key)
+		if actual == nil || actual.Kind != yaml.SequenceNode {
+			t.Errorf("Python all-extras matrix %q is missing or not a sequence", key)
+			continue
+		}
+		values := make([]string, 0, len(actual.Content))
+		for _, item := range actual.Content {
+			values = append(values, item.Value)
+		}
+		if len(values) != len(expected) {
+			t.Errorf("Python all-extras matrix %q = %v, want %v", key, values, expected)
+			continue
+		}
+		for index := range expected {
+			if values[index] != expected[index] {
+				t.Errorf("Python all-extras matrix %q = %v, want %v", key, values, expected)
+				break
+			}
+		}
+	}
+
+	permissions := workflowYAMLValue(allExtras, "permissions")
+	if permissions == nil || permissions.Kind != yaml.MappingNode || workflowYAMLScalar(permissions, "contents") != "read" || len(permissions.Content) != 2 {
+		t.Errorf("Python all-extras job must have only contents:read permission")
+	}
+
+	expectedExtras := map[string]bool{
+		"test": true, "decisions": true, "hf": true, "serving": true,
+		"typed-data": true, "evolution": true, "workspace": true,
+	}
+	extraPattern := regexp.MustCompile(`--extra\s+([^\s]+)`)
+	var syncExtras, testExtras map[string]bool
+	steps := workflowYAMLValue(allExtras, "steps")
+	if steps == nil || steps.Kind != yaml.SequenceNode {
+		t.Fatal("Python all-extras job has no steps")
+	}
+	for _, step := range steps.Content {
+		name := workflowYAMLScalar(step, "name")
+		run := workflowYAMLScalar(step, "run")
+		if strings.Contains(name, "set up locked all-extras") {
+			if !strings.Contains(run, "uv sync --locked") {
+				t.Error("all-extras environment step must use uv sync --locked")
+			}
+			syncExtras = matchesToSet(extraPattern.FindAllStringSubmatch(run, -1))
+		}
+		if strings.Contains(name, "run full python suite") {
+			if !strings.Contains(run, "uv run --locked") || !strings.Contains(run, "python -m pytest -q") {
+				t.Error("all-extras suite must run pytest through the locked environment")
+			}
+			testExtras = matchesToSet(extraPattern.FindAllStringSubmatch(run, -1))
+		}
+	}
+	if !sameStringSet(syncExtras, expectedExtras) {
+		t.Errorf("all-extras environment selects %v, want %v", syncExtras, expectedExtras)
+	}
+	if !sameStringSet(testExtras, expectedExtras) {
+		t.Errorf("all-extras test selects %v, want %v", testExtras, expectedExtras)
+	}
+
+	gate := workflowYAMLValue(jobs, "required-ci")
+	needs := workflowYAMLValue(gate, "needs")
+	if needs == nil || needs.Kind != yaml.SequenceNode {
+		t.Fatal("Required CI gate must declare its dependencies")
+	}
+	gateNeedsExtras := false
+	for _, item := range needs.Content {
+		gateNeedsExtras = gateNeedsExtras || item.Value == "python-all-extras"
+	}
+	if !gateNeedsExtras {
+		t.Error("Required CI gate must depend on the Python all-extras job")
+	}
+	gateSteps := workflowYAMLValue(gate, "steps")
+	if gateSteps == nil || gateSteps.Kind != yaml.SequenceNode || len(gateSteps.Content) == 0 {
+		t.Fatal("Required CI gate must have a result-check step")
+	}
+	env := workflowYAMLValue(gateSteps.Content[0], "env")
+	if !strings.Contains(workflowYAMLScalar(env, "PYTHON_EXTRAS_RESULT"), "needs.python-all-extras.result") {
+		t.Error("Required CI gate must consume the all-extras job result")
+	}
+	run := workflowYAMLScalar(gateSteps.Content[0], "run")
+	if !strings.Contains(run, `"$python_extras_result" != "success"`) {
+		t.Error("Required CI gate must fail when the all-extras job does not succeed")
+	}
+}
+
+func matchesToSet(matches [][]string) map[string]bool {
+	result := make(map[string]bool, len(matches))
+	for _, match := range matches {
+		if len(match) > 1 {
+			result[match[1]] = true
+		}
+	}
+	return result
+}
+
+func sameStringSet(left, right map[string]bool) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for value := range right {
+		if !left[value] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestBrowserReplayProbesChromiumBeforeInstallingLinuxPackages(t *testing.T) {
 	data := readRepositoryDocument(t, filepath.Join("..", "..", ".github", "workflows", "threadforge-tests.yml"))
 	var document yaml.Node

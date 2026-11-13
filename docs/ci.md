@@ -4,7 +4,7 @@ Threadforge currently provides local `ci exec` wrapping, detached `ci start`/`ci
 
 ## Repository workflow gate
 
-The `Threadforge test gates` workflow runs the 12 OS/Python suites, synthetic Elasticsearch ingestion, and a pinned `actionlint` check over all GitHub Actions workflows. Its stable `Required CI gate` check succeeds only when all three inputs succeed; matrix jobs, integration, or workflow-lint failures are propagated as a failure. The check can be required by a `main` branch ruleset, but adding the workflow does not activate or modify repository branch protection.
+The `Threadforge test gates` workflow runs the standard and full all-extras Python suites across Ubuntu, Windows, and macOS with Python 3.11–3.14 (12 profiles each), synthetic Elasticsearch ingestion, and a pinned `actionlint` check over all GitHub Actions workflows. Its stable `Required CI gate` check succeeds only when all four inputs succeed; matrix jobs, integration, or workflow-lint failures are propagated as a failure. The check can be required by a `main` branch ruleset, but adding the workflow does not activate or modify repository branch protection.
 
 ## Wrap one Claude Code command
 

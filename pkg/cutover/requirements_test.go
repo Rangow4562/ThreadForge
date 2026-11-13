@@ -322,6 +322,9 @@ func TestRequiredCIGateIncludesFullPythonOptionalExtrasMatrix(t *testing.T) {
 	if workflowYAMLValue(allExtras, "if") != nil {
 		t.Error("Python all-extras validation must not be conditionally skipped")
 	}
+	if workflowYAMLScalar(workflowYAMLValue(allExtras, "env"), "GOTOOLCHAIN") != "local" {
+		t.Error("Python all-extras job must use the Go version pinned by go.mod")
+	}
 
 	strategy := workflowYAMLValue(allExtras, "strategy")
 	matrix := workflowYAMLValue(strategy, "matrix")
@@ -365,9 +368,17 @@ func TestRequiredCIGateIncludesFullPythonOptionalExtrasMatrix(t *testing.T) {
 	if steps == nil || steps.Kind != yaml.SequenceNode {
 		t.Fatal("Python all-extras job has no steps")
 	}
+	goSetupFound := false
 	for _, step := range steps.Content {
 		name := workflowYAMLScalar(step, "name")
 		run := workflowYAMLScalar(step, "run")
+		if name == "set up go from go.mod" {
+			goSetupFound = true
+			if workflowYAMLScalar(step, "uses") != "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e" ||
+				workflowYAMLScalar(workflowYAMLValue(step, "with"), "go-version-file") != "go.mod" {
+				t.Error("Python all-extras job must install the repository-pinned Go toolchain")
+			}
+		}
 		if strings.Contains(name, "set up locked all-extras") {
 			if !strings.Contains(run, "uv sync --locked") {
 				t.Error("all-extras environment step must use uv sync --locked")
@@ -380,6 +391,9 @@ func TestRequiredCIGateIncludesFullPythonOptionalExtrasMatrix(t *testing.T) {
 			}
 			testExtras = matchesToSet(extraPattern.FindAllStringSubmatch(run, -1))
 		}
+	}
+	if !goSetupFound {
+		t.Error("Python all-extras job must install Go for the Go-license evidence tests")
 	}
 	if !sameStringSet(syncExtras, expectedExtras) {
 		t.Errorf("all-extras environment selects %v, want %v", syncExtras, expectedExtras)

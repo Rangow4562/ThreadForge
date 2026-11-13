@@ -776,7 +776,7 @@ jobs:
               exit 1
             fi
           done
-          candidate_payloads=(dist/threadforge_${RELEASE_VERSION}_* "dist/threadforge_python-${RELEASE_VERSION}.tar.gz" dist/threadforge_python-${RELEASE_VERSION}-*.whl)
+          candidate_payloads=(dist/threadforge_"$RELEASE_VERSION"_* "dist/threadforge_python-${RELEASE_VERSION}.tar.gz" dist/threadforge_python-"$RELEASE_VERSION"-*.whl)
           if [[ ${#candidate_payloads[@]} -ne 27 ]]; then
             echo "Expected exactly 27 versioned candidate payload files, found ${#candidate_payloads[@]}." >&2
             find dist -maxdepth 1 -type f -printf '%f\n' >&2
@@ -951,9 +951,11 @@ jobs:
             echo "Engineering image source must be reachable from origin/main." >&2
             exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
-          echo "image_tag=threadforge-engineering:${version}-candidate" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$version"
+            echo "source_ref=$source_ref"
+            echo "image_tag=threadforge-engineering:${version}-candidate"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build the pinned Engineering image and save its build receipt
         shell: pwsh

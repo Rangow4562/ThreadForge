@@ -28,6 +28,15 @@ REPOSITORY = "Rangow4562/ThreadForge"
 WORKFLOW = ".github/workflows/threadforge-tests.yml"
 SLSA_PREDICATE = "https://slsa.dev/provenance/v1"
 SPDX_PREDICATE = "https://spdx.dev/Document/v2.3"
+LEGACY_V050_VERSION = "0.5.0"
+LEGACY_V050_SOURCE_COMMIT = "1254e70b8a0204f3e4bcd3e8c44afdce8e2a67ec"
+LEGACY_V050_SOURCE_REF = "refs/tags/v0.5.0"
+LEGACY_V050_PYTHON_TARGETS = tuple(
+    (system, version)
+    for system in ("linux", "windows", "darwin")
+    for version in ("3.11", "3.12")
+)
+LEGACY_V050_PYTHON_EXTRAS = ["decisions", "test", "workspace"]
 ATTESTATION_RETRY_DELAYS_SECONDS = (1.0, 2.0)
 TRANSIENT_ATTESTATION_ERROR_MARKERS = (
     "api rate limit exceeded",
@@ -173,6 +182,26 @@ def expected_payload_names(version: str) -> set[str]:
     return names
 
 
+def expected_legacy_v050_payload_names() -> set[str]:
+    names: set[str] = set()
+    for target in GO_TARGETS:
+        suffix = ".zip" if target == "windows_amd64" else ".tar.gz"
+        names.update(
+            {
+                f"threadforge_{LEGACY_V050_VERSION}_{target}{suffix}",
+                f"threadforge_{LEGACY_V050_VERSION}_{target}.spdx.json",
+                f"threadforge_{LEGACY_V050_VERSION}_{target}.go-licenses.tar.gz",
+            }
+        )
+    for system, python_version in LEGACY_V050_PYTHON_TARGETS:
+        names.add(
+            f"threadforge_{LEGACY_V050_VERSION}_python_{system}_py{python_version}.license-evidence.tar.gz"
+        )
+    if len(names) != 18:
+        raise ReleaseCandidateError("internal v0.5.0 legacy payload inventory is invalid")
+    return names
+
+
 def _parse_checksums(path: Path, expected: set[str]) -> dict[str, str]:
     _require_regular_file(path, limit=1024 * 1024)
     try:
@@ -192,7 +221,7 @@ def _parse_checksums(path: Path, expected: set[str]) -> dict[str, str]:
             raise ReleaseCandidateError("checksums.txt contains a duplicate filename")
         checksums[name] = digest
     if set(checksums) != expected:
-        raise ReleaseCandidateError("checksums.txt does not cover exactly the 27 candidate payloads")
+        raise ReleaseCandidateError("checksums.txt does not cover exactly the expected candidate payload set")
     return checksums
 
 
@@ -404,6 +433,102 @@ def _validate_python_evidence(
         "uv_lock_sha256": input_hashes["uv_lock_sha256"],
         "pyproject_sha256": input_hashes["pyproject_sha256"],
         "distributions": distributions,
+    }
+
+
+def _validate_legacy_v050_python_evidence(
+    data: bytes, *, system: str, python_version: str, source_commit: str
+) -> dict[str, Any]:
+    members = _read_tar_bytes(data, expected_prefix="python-license-evidence/")
+    evidence = _decode_json(members["evidence.json"], "legacy Python license evidence")
+    scope = evidence.get("scope")
+    if (
+        evidence.get("schema") != "threadforge.python-license-evidence.v1"
+        or evidence.get("source_commit") != source_commit
+        or evidence.get("release_version") != LEGACY_V050_VERSION
+        or evidence.get("target") != {"os": system, "python_version": python_version}
+        or not isinstance(scope, dict)
+        or scope.get("project") != "threadforge-python"
+        or scope.get("project_version") != LEGACY_V050_VERSION
+        or scope.get("extras") != LEGACY_V050_PYTHON_EXTRAS
+        or not _is_nonnegative_int(evidence.get("unlocked_distribution_count"))
+        or evidence["unlocked_distribution_count"] != 0
+    ):
+        raise ReleaseCandidateError("legacy Python evidence does not match the pinned v0.5.0 profile")
+    _validate_review_status(evidence)
+
+    summary = evidence.get("license_summary")
+    input_hashes = evidence.get("input_hashes")
+    distributions = evidence.get("distributions")
+    installed_count = evidence.get("installed_distribution_count")
+    locked_count = evidence.get("locked_package_count")
+    if (
+        not isinstance(summary, dict)
+        or not isinstance(input_hashes, dict)
+        or set(input_hashes) != {"uv_lock_sha256", "pyproject_sha256"}
+        or any(not isinstance(input_hashes.get(key), str) or not SHA256_RE.fullmatch(input_hashes[key])
+               for key in ("uv_lock_sha256", "pyproject_sha256"))
+        or not isinstance(distributions, list)
+        or not _is_nonnegative_int(installed_count)
+        or installed_count < 1
+        or len(distributions) != installed_count
+        or not _is_nonnegative_int(locked_count)
+        or locked_count < installed_count
+    ):
+        raise ReleaseCandidateError("legacy Python evidence package inventory is malformed")
+
+    expected_license_members: set[str] = set()
+    license_file_count = 0
+    license_file_bytes = 0
+    for distribution in distributions:
+        if (
+            not isinstance(distribution, dict)
+            or not isinstance(distribution.get("normalized_name"), str)
+            or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", distribution["normalized_name"])
+            or not isinstance(distribution.get("version"), str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!+_-]{0,254}", distribution["version"])
+            or distribution.get("locked") is not True
+            or not isinstance(distribution.get("license_files"), list)
+        ):
+            raise ReleaseCandidateError("legacy Python evidence has an invalid package record")
+        for license_file in distribution["license_files"]:
+            if not isinstance(license_file, dict):
+                raise ReleaseCandidateError("legacy Python evidence has an invalid license file record")
+            archive_path = _safe_member_name(str(license_file.get("archive_path", "")))
+            member_path = _safe_member_name(str(license_file.get("path", "")))
+            digest = license_file.get("sha256")
+            size = license_file.get("size_bytes")
+            if (
+                not archive_path.startswith("licenses/")
+                or archive_path in expected_license_members
+                or not archive_path.endswith("/" + member_path)
+                or not isinstance(digest, str)
+                or not SHA256_RE.fullmatch(digest)
+                or not _is_nonnegative_int(size)
+            ):
+                raise ReleaseCandidateError("legacy Python evidence license file metadata is invalid")
+            content = members.get(archive_path)
+            if content is None or len(content) != size or hashlib.sha256(content).hexdigest() != digest:
+                raise ReleaseCandidateError("legacy Python license file does not match its manifest")
+            expected_license_members.add(archive_path)
+            license_file_count += 1
+            license_file_bytes += size
+
+    if (
+        set(members) != {"README.md", "evidence.json", "report.csv", *expected_license_members}
+        or not _is_nonnegative_int(summary.get("license_file_count"))
+        or summary["license_file_count"] != license_file_count
+        or not _is_nonnegative_int(summary.get("license_file_bytes"))
+        or summary["license_file_bytes"] != license_file_bytes
+        or not _is_nonnegative_int(summary.get("distributions_without_license_files"))
+        or not _is_nonnegative_int(summary.get("distributions_without_license_metadata"))
+        or not _is_nonnegative_int(summary.get("malformed_license_metadata_count"))
+    ):
+        raise ReleaseCandidateError("legacy Python evidence archive and summary do not reconcile")
+    return {
+        "locked_package_count": locked_count,
+        "uv_lock_sha256": input_hashes["uv_lock_sha256"],
+        "pyproject_sha256": input_hashes["pyproject_sha256"],
     }
 
 
@@ -812,6 +937,73 @@ def _validate_bundle_files(bundle_dir: Path, version: str, source_commit: str) -
     return expected, checksums
 
 
+def _validate_legacy_v050_bundle_files(
+    bundle_dir: Path, source_commit: str
+) -> tuple[set[str], dict[str, str], dict[str, Any]]:
+    if _is_reparse_or_symlink(bundle_dir) or not bundle_dir.is_dir():
+        raise ReleaseCandidateError("candidate bundle root is unsafe or is not a directory")
+    expected = expected_legacy_v050_payload_names()
+    entries: dict[str, Path] = {}
+    try:
+        with os.scandir(bundle_dir) as scan:
+            for entry in scan:
+                if entry.name in entries or entry.is_symlink() or not entry.is_file(follow_symlinks=False):
+                    raise ReleaseCandidateError("legacy candidate bundle contains an unexpected directory or link")
+                entries[entry.name] = Path(entry.path)
+    except OSError as error:
+        raise ReleaseCandidateError("legacy candidate bundle cannot be listed") from error
+    if set(entries) != expected | {"checksums.txt"}:
+        raise ReleaseCandidateError("v0.5.0 candidate does not contain exactly its pinned 18-payload inventory")
+    checksums = _parse_checksums(entries["checksums.txt"], expected)
+    for name in sorted(expected):
+        if _sha256_file(entries[name]) != checksums[name]:
+            raise ReleaseCandidateError(f"legacy candidate checksum mismatch: {name}")
+
+    for target in GO_TARGETS:
+        evidence_name = f"threadforge_{LEGACY_V050_VERSION}_{target}.go-licenses.tar.gz"
+        evidence_bytes = entries[evidence_name].read_bytes()
+        _validate_go_evidence(evidence_bytes, target=target, source_commit=source_commit)
+
+        suffix = ".zip" if target == "windows_amd64" else ".tar.gz"
+        archive_name = f"threadforge_{LEGACY_V050_VERSION}_{target}{suffix}"
+        binary_name = "threadforge.exe" if target == "windows_amd64" else "threadforge"
+        archive_members = _read_zip(entries[archive_name]) if target == "windows_amd64" else _read_tar(entries[archive_name])
+        if set(archive_members) != {binary_name} or not archive_members[binary_name]:
+            raise ReleaseCandidateError("v0.5.0 candidate archive differs from its pinned historical layout")
+
+        sbom_name = f"threadforge_{LEGACY_V050_VERSION}_{target}.spdx.json"
+        sbom = _decode_json(entries[sbom_name].read_bytes(), "legacy CLI SPDX SBOM")
+        if sbom.get("spdxVersion") != "SPDX-2.3" or sbom.get("name") != binary_name:
+            raise ReleaseCandidateError("legacy CLI SPDX SBOM has an unexpected identity")
+
+    python_profiles = [
+        _validate_legacy_v050_python_evidence(
+            entries[
+                f"threadforge_{LEGACY_V050_VERSION}_python_{system}_py{python_version}.license-evidence.tar.gz"
+            ].read_bytes(),
+            system=system,
+            python_version=python_version,
+            source_commit=source_commit,
+        )
+        for system, python_version in LEGACY_V050_PYTHON_TARGETS
+    ]
+    lock_hashes = {profile["uv_lock_sha256"] for profile in python_profiles}
+    project_hashes = {profile["pyproject_sha256"] for profile in python_profiles}
+    lock_counts = {profile["locked_package_count"] for profile in python_profiles}
+    if len(lock_counts) != 1:
+        raise ReleaseCandidateError("legacy Python profiles do not share one locked package count")
+
+    return expected, checksums, {
+        "candidate_format": "threadforge.release-candidate.legacy-v0.5.0",
+        "go_evidence_profiles_verified": len(GO_TARGETS),
+        "python_evidence_profiles_verified": len(LEGACY_V050_PYTHON_TARGETS),
+        "python_lock_input_fingerprint_groups": len(lock_hashes),
+        "python_project_input_fingerprint_groups": len(project_hashes),
+        "cli_archives_contain_required_legal_payload": False,
+        "candidate_release_contract_compliant": False,
+    }
+
+
 def _canonical_json(value: Any) -> str:
     try:
         return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -955,7 +1147,17 @@ def verify_release_candidate(
         part in {".", ".."} for part in repository.split("/")
     ):
         raise ReleaseCandidateError("repository must use owner/name form")
-    expected, checksums = _validate_bundle_files(bundle_dir, version, source_commit)
+    legacy_details: dict[str, Any] | None = None
+    if version == LEGACY_V050_VERSION:
+        if (
+            repository != REPOSITORY
+            or source_commit != LEGACY_V050_SOURCE_COMMIT
+            or source_ref != LEGACY_V050_SOURCE_REF
+        ):
+            raise ReleaseCandidateError("v0.5.0 legacy verification requires its exact repository, tag, and source commit")
+        expected, checksums, legacy_details = _validate_legacy_v050_bundle_files(bundle_dir, source_commit)
+    else:
+        expected, checksums = _validate_bundle_files(bundle_dir, version, source_commit)
 
     # Check every SLSA statement, including checksums.txt, before any specialized SBOM claims.
     for filename in sorted(expected | {"checksums.txt"}):
@@ -1007,7 +1209,7 @@ def verify_release_candidate(
         if _canonical_json(signed_spdx) != _canonical_json(bundled_spdx):
             raise ReleaseCandidateError("bundled SPDX SBOM differs from the archive-bound attestation")
 
-    return {
+    result = {
         "schema": "threadforge.release-candidate-verification.v1",
         "repository": repository,
         "version": version,
@@ -1018,14 +1220,18 @@ def verify_release_candidate(
         "checksum_count": len(checksums),
         "slsa_attestations_verified": len(expected) + 1,
         "archive_sbom_attestations_verified": len(GO_TARGETS),
-        "python_lock_sboms_verified": 1,
-        "python_distribution_artifacts_verified": 2,
         "integrity_verified": True,
         "provenance_verified": True,
         "license_review_required": True,
         "release_clearance": False,
         "release_authorized": False,
     }
+    if legacy_details is None:
+        result["python_lock_sboms_verified"] = 1
+        result["python_distribution_artifacts_verified"] = 2
+    else:
+        result.update(legacy_details)
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:

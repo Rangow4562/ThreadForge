@@ -36,12 +36,12 @@ def archive_bytes(files, prefix):
     return output.getvalue()
 
 
-def go_evidence(target):
+def go_evidence(target, *, source_commit=SOURCE_COMMIT):
     goos, goarch = target.split("_")
     notice = b"Synthetic notice\n"
     document = {
         "schema": "threadforge.go-license-evidence.v1",
-        "source_commit": SOURCE_COMMIT,
+        "source_commit": source_commit,
         "target": {"goos": goos, "goarch": goarch},
         "main_package": "./cmd/threadforge",
         "scanner": {
@@ -261,6 +261,88 @@ def write_candidate(root):
     return root
 
 
+def legacy_python_evidence(system, python_version):
+    notice = b"Historical, unreviewed package notice\n"
+    archive_path = "licenses/sample/1.0/sample-1.0.dist-info/licenses/LICENSE"
+    relative_path = "sample-1.0.dist-info/licenses/LICENSE"
+    document = {
+        "schema": "threadforge.python-license-evidence.v1",
+        "source_commit": VERIFIER.LEGACY_V050_SOURCE_COMMIT,
+        "release_version": VERIFIER.LEGACY_V050_VERSION,
+        "target": {"os": system, "python_version": python_version},
+        "scope": {
+            "project": "threadforge-python",
+            "project_version": VERIFIER.LEGACY_V050_VERSION,
+            "extras": VERIFIER.LEGACY_V050_PYTHON_EXTRAS,
+        },
+        "locked_package_count": 2,
+        "installed_distribution_count": 1,
+        "unlocked_distribution_count": 0,
+        "license_review_status": "unreviewed",
+        "license_review_required": True,
+        "release_clearance": False,
+        "license_summary": {
+            "license_file_count": 1,
+            "license_file_bytes": len(notice),
+            "distributions_without_license_files": 0,
+            "distributions_without_license_metadata": 0,
+            "malformed_license_metadata_count": 0,
+        },
+        "input_hashes": {"uv_lock_sha256": "d" * 64, "pyproject_sha256": "e" * 64},
+        "distributions": [{
+            "name": "sample",
+            "normalized_name": "sample",
+            "version": "1.0",
+            "locked": True,
+            "license_files": [{
+                "archive_path": archive_path,
+                "path": relative_path,
+                "sha256": hashlib.sha256(notice).hexdigest(),
+                "size_bytes": len(notice),
+            }],
+        }],
+    }
+    return archive_bytes(
+        {
+            "README.md": b"Historical license evidence; unreviewed.\n",
+            "evidence.json": json.dumps(document).encode(),
+            "report.csv": b"distribution,version\nsample,1.0\n",
+            archive_path: notice,
+        },
+        "python-license-evidence",
+    )
+
+
+def write_legacy_candidate(root):
+    root.mkdir()
+    version = VERIFIER.LEGACY_V050_VERSION
+    for target in VERIFIER.GO_TARGETS:
+        evidence = go_evidence(target, source_commit=VERIFIER.LEGACY_V050_SOURCE_COMMIT)
+        (root / f"threadforge_{version}_{target}.go-licenses.tar.gz").write_bytes(evidence)
+        archive_name = f"threadforge_{version}_{target}{'.zip' if target == 'windows_amd64' else '.tar.gz'}"
+        binary_name = "threadforge.exe" if target == "windows_amd64" else "threadforge"
+        if target == "windows_amd64":
+            with zipfile.ZipFile(root / archive_name, "w", compression=zipfile.ZIP_STORED) as archive:
+                archive.writestr(binary_name, b"historical synthetic executable")
+        else:
+            with tarfile.open(root / archive_name, "w:gz") as archive:
+                binary = b"historical synthetic executable"
+                member = tarfile.TarInfo(binary_name)
+                member.size = len(binary)
+                archive.addfile(member, io.BytesIO(binary))
+        (root / f"threadforge_{version}_{target}.spdx.json").write_text(
+            json.dumps({"spdxVersion": "SPDX-2.3", "name": binary_name, "packages": []}),
+            encoding="utf-8",
+        )
+    for system, python_version in VERIFIER.LEGACY_V050_PYTHON_TARGETS:
+        name = f"threadforge_{version}_python_{system}_py{python_version}.license-evidence.tar.gz"
+        (root / name).write_bytes(legacy_python_evidence(system, python_version))
+    payloads = sorted(VERIFIER.expected_legacy_v050_payload_names())
+    lines = [f"{hashlib.sha256((root / name).read_bytes()).hexdigest()}  {name}" for name in payloads]
+    (root / "checksums.txt").write_text("\n".join(lines) + "\n", encoding="ascii")
+    return root
+
+
 class SuccessfulGH:
     def __init__(self, *, wrong_commit=False, wrong_spdx=False):
         self.calls = []
@@ -313,6 +395,50 @@ class SuccessfulGH:
         return subprocess.CompletedProcess(command, 0, stdout=payload, stderr="")
 
 
+class LegacySuccessfulGH:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, command, **kwargs):
+        self.calls.append((command, kwargs))
+        artifact = Path(command[3])
+        predicate_type = command[command.index("--predicate-type") + 1]
+        source_ref = command[command.index("--source-ref") + 1]
+        source_commit = command[command.index("--source-digest") + 1]
+        subject_name = artifact.name
+        digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        predicate = {
+            "buildDefinition": {
+                "buildType": "https://actions.github.io/buildtypes/workflow/v1",
+                "externalParameters": {"workflow": {
+                    "path": VERIFIER.WORKFLOW,
+                    "ref": source_ref,
+                    "repository": f"https://github.com/{VERIFIER.REPOSITORY}",
+                }},
+                "resolvedDependencies": [{
+                    "uri": f"git+https://github.com/{VERIFIER.REPOSITORY}@{source_ref}",
+                    "digest": {"gitCommit": source_commit},
+                }],
+            }
+        }
+        if predicate_type == VERIFIER.SPDX_PREDICATE:
+            target = next(target for target in VERIFIER.GO_TARGETS if f"_{target}." in artifact.name)
+            subject_name = f"threadforge_{VERIFIER.LEGACY_V050_VERSION}_{target}{'.zip' if target == 'windows_amd64' else '.tar.gz'}"
+            archive_path = artifact.parent / subject_name
+            digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+            predicate = json.loads(
+                (artifact.parent / f"threadforge_{VERIFIER.LEGACY_V050_VERSION}_{target}.spdx.json").read_text()
+            )
+        statement = {
+            "_type": "https://in-toto.io/Statement/v1",
+            "predicateType": predicate_type,
+            "subject": [{"name": subject_name, "digest": {"sha256": digest}}],
+            "predicate": predicate,
+        }
+        payload = json.dumps([{"verificationResult": {"statement": statement}}])
+        return subprocess.CompletedProcess(command, 0, stdout=payload, stderr="")
+
+
 def run_verification(root, runner):
     return VERIFIER.verify_release_candidate(
         bundle_dir=root,
@@ -321,6 +447,59 @@ def run_verification(root, runner):
         source_ref=SOURCE_REF,
         run=runner,
     )
+
+
+def test_verifies_pinned_v050_legacy_artifact_without_granting_release_clearance(tmp_path):
+    root = write_legacy_candidate(tmp_path / "legacy-candidate")
+    runner = LegacySuccessfulGH()
+
+    result = VERIFIER.verify_release_candidate(
+        bundle_dir=root,
+        version=VERIFIER.LEGACY_V050_VERSION,
+        source_commit=VERIFIER.LEGACY_V050_SOURCE_COMMIT,
+        source_ref=VERIFIER.LEGACY_V050_SOURCE_REF,
+        repository=VERIFIER.REPOSITORY,
+        run=runner,
+    )
+
+    assert result["payload_count"] == 18
+    assert result["checksum_count"] == 18
+    assert result["slsa_attestations_verified"] == 19
+    assert result["archive_sbom_attestations_verified"] == 4
+    assert result["candidate_format"] == "threadforge.release-candidate.legacy-v0.5.0"
+    assert result["go_evidence_profiles_verified"] == 4
+    assert result["python_evidence_profiles_verified"] == 6
+    assert result["cli_archives_contain_required_legal_payload"] is False
+    assert result["candidate_release_contract_compliant"] is False
+    assert result["release_clearance"] is False
+    assert result["release_authorized"] is False
+    assert len(runner.calls) == 23
+
+
+@pytest.mark.parametrize(
+    ("source_commit", "source_ref", "repository"),
+    [
+        ("b" * 40, VERIFIER.LEGACY_V050_SOURCE_REF, VERIFIER.REPOSITORY),
+        (VERIFIER.LEGACY_V050_SOURCE_COMMIT, "refs/heads/main", VERIFIER.REPOSITORY),
+        (VERIFIER.LEGACY_V050_SOURCE_COMMIT, VERIFIER.LEGACY_V050_SOURCE_REF, "example/threadforge"),
+    ],
+)
+def test_legacy_v050_profile_rejects_other_source_identities(tmp_path, source_commit, source_ref, repository):
+    root = tmp_path / "empty-legacy-candidate"
+    root.mkdir()
+    runner = LegacySuccessfulGH()
+
+    with pytest.raises(VERIFIER.ReleaseCandidateError, match="exact repository, tag, and source commit"):
+        VERIFIER.verify_release_candidate(
+            bundle_dir=root,
+            version=VERIFIER.LEGACY_V050_VERSION,
+            source_commit=source_commit,
+            source_ref=source_ref,
+            repository=repository,
+            run=runner,
+        )
+
+    assert runner.calls == []
 
 
 def test_verifies_exact_bundle_and_all_signed_claims(tmp_path):

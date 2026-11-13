@@ -23,7 +23,6 @@ REPOSITORY = "Rangow4562/ThreadForge"
 VERSION_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-EXPECTED_PAYLOAD_COUNT = 27
 MAX_FILE_BYTES = 512 * 1024 * 1024
 MAX_TOTAL_BYTES = 10 * 1024 * 1024 * 1024
 COMMAND_TIMEOUT_SECONDS = 3600
@@ -179,8 +178,8 @@ def verify_published_release(
     )
 
     candidate_files = _regular_files(bundle_dir)
-    if "checksums.txt" not in candidate_files or len(candidate_files) != EXPECTED_PAYLOAD_COUNT + 1:
-        raise PublishedReleaseVerificationError("verified candidate does not contain the exact 27-payload inventory")
+    if "checksums.txt" not in candidate_files:
+        raise PublishedReleaseVerificationError("verified candidate omits checksums.txt")
 
     tag = f"v{version}"
     view = _run_checked(
@@ -205,8 +204,9 @@ def verify_published_release(
         if not isinstance(asset, dict) or not isinstance(asset.get("name"), str):
             raise PublishedReleaseVerificationError("GitHub release asset inventory is malformed")
         asset_names.append(asset["name"])
-    if len(asset_names) != len(set(asset_names)) or set(asset_names) != set(candidate_files):
-        raise PublishedReleaseVerificationError("published asset names do not exactly match the verified candidate")
+    if len(asset_names) != len(set(asset_names)):
+        raise PublishedReleaseVerificationError("published release metadata contains duplicate asset names")
+    metadata_asset_names = set(asset_names)
 
     commit_result = _run_checked(
         [gh, "api", f"repos/{repository}/commits/{tag}"],
@@ -226,14 +226,25 @@ def verify_published_release(
             stage="published release asset download",
         )
         published_files = _regular_files(download_dir)
-        if set(published_files) != set(candidate_files):
-            raise PublishedReleaseVerificationError("downloaded public asset set differs from the candidate")
-
-        checked_assets = 0
-        for name in sorted(candidate_files):
-            if _sha256(candidate_files[name]) != _sha256(published_files[name]):
-                raise PublishedReleaseVerificationError(f"published asset bytes differ from candidate: {name}")
-            checked_assets += 1
+        candidate_names = set(candidate_files)
+        published_names = set(published_files)
+        metadata_missing = len(candidate_names - metadata_asset_names)
+        metadata_extra = len(metadata_asset_names - candidate_names)
+        downloaded_missing = len(candidate_names - published_names)
+        downloaded_extra = len(published_names - candidate_names)
+        shared_names = candidate_names & published_names
+        byte_differences = sum(
+            _sha256(candidate_files[name]) != _sha256(published_files[name])
+            for name in shared_names
+        )
+        if metadata_missing or metadata_extra or downloaded_missing or downloaded_extra or byte_differences:
+            raise PublishedReleaseVerificationError(
+                "published asset mismatch: "
+                f"metadata missing={metadata_missing}, metadata extra={metadata_extra}, "
+                f"download missing={downloaded_missing}, download extra={downloaded_extra}, "
+                f"byte differences={byte_differences}"
+            )
+        checked_assets = len(candidate_files)
 
     return {
         "schema": "threadforge.published-release-verification.v1",

@@ -35,6 +35,8 @@ class FakeGitHub:
         self.bundle = bundle
         self.files = files
         self.assets = list(files)
+        self.download_files = dict(files)
+        self.download_extras: dict[str, bytes] = {}
         self.download_overrides: dict[str, bytes] = {}
         self.release_commit = SOURCE_COMMIT
         self.is_draft = False
@@ -69,7 +71,7 @@ class FakeGitHub:
             return completed
         if command[1:3] == ["release", "download"]:
             destination = Path(command[command.index("--dir") + 1])
-            for name, content in self.files.items():
+            for name, content in (self.download_files | self.download_extras).items():
                 (destination / name).write_bytes(self.download_overrides.get(name, content))
             return completed
         raise AssertionError(f"unexpected command: {command}")
@@ -118,25 +120,37 @@ def test_rejects_public_asset_with_different_bytes(tmp_path):
     fake = FakeGitHub(bundle, files)
     fake.download_overrides["candidate-payload-03.bin"] = b"tampered\n"
 
-    with pytest.raises(VERIFIER.PublishedReleaseVerificationError, match="bytes differ"):
+    with pytest.raises(VERIFIER.PublishedReleaseVerificationError, match="byte differences=1"):
         verify(bundle, fake)
 
 
-def test_rejects_missing_extra_or_duplicate_public_assets_before_download(tmp_path):
-    for mutation in ("missing", "extra", "duplicate"):
-        bundle = tmp_path / mutation
-        files = candidate_bundle(bundle)
-        fake = FakeGitHub(bundle, files)
-        if mutation == "missing":
-            fake.assets.pop()
-        elif mutation == "extra":
-            fake.assets.append("unverified-extra.zip")
-        else:
-            fake.assets.append(fake.assets[0])
+def test_reports_metadata_and_download_inventory_differences_with_common_asset_hashes(tmp_path):
+    bundle = tmp_path / "candidate"
+    files = candidate_bundle(bundle)
+    fake = FakeGitHub(bundle, files)
+    fake.assets.pop()
+    fake.assets.append("unverified-extra.zip")
+    fake.download_files.pop("candidate-payload-02.bin")
+    fake.download_extras["unverified-extra.zip"] = b"unverified\n"
+    fake.download_overrides["candidate-payload-03.bin"] = b"tampered\n"
 
-        with pytest.raises(VERIFIER.PublishedReleaseVerificationError, match="asset names"):
-            verify(bundle, fake)
-        assert not any(command[1:3] == ["release", "download"] for command in fake.commands)
+    with pytest.raises(
+        VERIFIER.PublishedReleaseVerificationError,
+        match=r"metadata missing=1, metadata extra=1, download missing=1, download extra=1, byte differences=1",
+    ):
+        verify(bundle, fake)
+    assert any(command[1:3] == ["release", "download"] for command in fake.commands)
+
+
+def test_rejects_duplicate_public_asset_names_before_download(tmp_path):
+    bundle = tmp_path / "candidate"
+    files = candidate_bundle(bundle)
+    fake = FakeGitHub(bundle, files)
+    fake.assets.append(fake.assets[0])
+
+    with pytest.raises(VERIFIER.PublishedReleaseVerificationError, match="duplicate asset names"):
+        verify(bundle, fake)
+    assert not any(command[1:3] == ["release", "download"] for command in fake.commands)
 
 
 def test_rejects_tag_pointing_at_a_different_commit(tmp_path):

@@ -2933,6 +2933,74 @@ def test_frontier_inventory_rejects_dirty_checkout_and_colliding_normalized_ids(
         })
 
 
+@pytest.mark.parametrize("source_id", ["gdpval", "apex-agents"])
+def test_external_rrsi_inventory_remains_unanchored_and_uses_only_operator_task_ids(
+    tmp_path, source_id,
+):
+    root = _frontier_checkout(tmp_path / "external-runner", ["Synthetic/RunnerTask"])
+    manifest_path = tmp_path / "operator-task-ids.json"
+    manifest_path.write_text(
+        json.dumps({"task_ids": ["external-task-02", "external-task-01"]}), encoding="utf-8",
+    )
+    params = {
+        "external_runner_root": str(root),
+        "task_id_manifest_file": str(manifest_path),
+        "source_id": source_id,
+    }
+    request_schema_path = Path(__file__).resolve().parents[2] / "schema" / "evolution-rrsi-source-inventory-request-v1.schema.json"
+    request_schema = json.loads(request_schema_path.read_text(encoding="utf-8"))
+    from jsonschema.validators import validator_for
+
+    validator_for(request_schema)(request_schema).validate({
+        "schema_version": "threadforge.evolution-rrsi-source-inventory-request.v1",
+        "params": params,
+    })
+    result = dispatch(request("evolution.inventory.rrsi.derive", params))["result"]
+
+    assert result["status"] == "candidate_unanchored"
+    assert result["source_id"] == source_id
+    assert result["source_revision"] == subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True,
+    ).strip()
+    assert result["source_file"] == protocol.EXTERNAL_RRSI_MANIFEST_SOURCE_FILE
+    assert result["source_file_sha256"] == hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    assert result["benchmark_inventory"]["task_ids"] == ["external-task-01", "external-task-02"]
+    assert result["inventory_commitment"]["task_count"] == 2
+    assert result["trust_anchor_status"] == "uncommitted"
+    assert result["screening_usable"] is False
+    assert result["benchmark_execution_performed"] is False
+    assert result["cutover_evidence_eligible"] is False
+    assert result["execution_authorized"] is False
+    assert str(root) not in json.dumps(result)
+    assert str(manifest_path) not in json.dumps(result)
+
+    schema_path = Path(__file__).resolve().parents[2] / "schema" / "evolution-rrsi-source-inventory-candidate-v1.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    validator_for(schema)(schema).validate(result)
+
+
+def test_external_rrsi_inventory_rejects_untrusted_or_ambiguous_inputs(tmp_path):
+    root = _frontier_checkout(tmp_path / "external-runner", ["Synthetic/RunnerTask"])
+    manifest_path = tmp_path / "operator-task-ids.json"
+    params = {
+        "external_runner_root": str(root),
+        "task_id_manifest_file": str(manifest_path),
+        "source_id": "gdpval",
+    }
+    manifest_path.write_text(json.dumps({"task_ids": ["duplicate-task", "duplicate-task"]}), encoding="utf-8")
+    with pytest.raises(ProtocolError, match="failed local validation"):
+        protocol.derive_external_rrsi_inventory(params)
+
+    manifest_path.write_text(json.dumps({"task_ids": ["external-task-01"], "verified": True}), encoding="utf-8")
+    with pytest.raises(ProtocolError, match="only task_ids"):
+        protocol.derive_external_rrsi_inventory(params)
+
+    manifest_path.write_text(json.dumps({"task_ids": ["external-task-01"]}), encoding="utf-8")
+    (root / "untracked.txt").write_text("runner changed", encoding="utf-8")
+    with pytest.raises(ProtocolError, match="must be clean"):
+        protocol.derive_external_rrsi_inventory(params)
+
+
 def test_rrsi_source_inventory_rejects_dirty_source_files_and_secret_paths_without_echo(
     tmp_path, monkeypatch,
 ):

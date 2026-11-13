@@ -26,7 +26,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Start local telemetry capture
-        uses: $/.github/actions/threadforge-ci
+        uses: ./.github/actions/threadforge-ci
         with:
           mode: start
           min-events: '1'
@@ -44,14 +44,14 @@ jobs:
 
       - name: Stop and validate local capture
         if: always() && env.THREADFORGE_CI_STATE_PATH != ''
-        uses: $/.github/actions/threadforge-ci
+        uses: ./.github/actions/threadforge-ci
         with:
           mode: finish
           upload-summary: 'true'
           security-fail-on: critical
 
       - name: Start local Codex CI capture
-        uses: $/.github/actions/threadforge-ci
+        uses: ./.github/actions/threadforge-ci
         with:
           mode: start
           harness: codex-cli
@@ -73,7 +73,7 @@ jobs:
 
       - name: Stop and validate local Codex capture
         if: always() && env.THREADFORGE_CI_STATE_PATH != ''
-        uses: $/.github/actions/threadforge-ci
+        uses: ./.github/actions/threadforge-ci
         with:
           mode: finish
           harness: codex-cli

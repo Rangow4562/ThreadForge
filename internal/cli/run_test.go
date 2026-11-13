@@ -3559,6 +3559,85 @@ func TestEvolutionFrontierInventoryCLIProducesOnlyUnanchoredCandidate(t *testing
 	}
 }
 
+func TestEvolutionExternalRRSIInventoryCLIProducesOnlyUnanchoredCandidate(t *testing.T) {
+	python, err := exec.LookPath("python")
+	if err != nil {
+		t.Skip("Python runtime is unavailable for the stdio integration test")
+	}
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("Git is unavailable for the local source-checkout integration test")
+	}
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PYTHONPATH", filepath.Join(repositoryRoot, "python"))
+	temp := t.TempDir()
+	root := filepath.Join(temp, "external-runner")
+	makeTreeWritableForCleanup(t, root)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("synthetic runner fixture only\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun := func(args ...string) {
+		t.Helper()
+		command := exec.Command(git, append([]string{"-C", root}, args...)...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v: %s", args, err, output)
+		}
+	}
+	for _, args := range [][]string{
+		{"init"}, {"config", "user.name", "Threadforge test"},
+		{"config", "user.email", "threadforge-test@example.invalid"},
+		{"add", "README.md"}, {"commit", "-m", "synthetic external runner fixture"},
+	} {
+		gitRun(args...)
+	}
+	manifestPath := filepath.Join(temp, "operator-task-ids.json")
+	if err := os.WriteFile(manifestPath, []byte(`{"task_ids":["external-task-02","external-task-01"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	request := map[string]any{
+		"schema_version": "threadforge.evolution-rrsi-source-inventory-request.v1",
+		"params": map[string]string{
+			"external_runner_root": root, "task_id_manifest_file": manifestPath, "source_id": "gdpval",
+		},
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestPath := filepath.Join(temp, "external-rrsi-inventory.json")
+	if err := os.WriteFile(requestPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	code := Run([]string{"evolution", "inventory", "source", "--file", requestPath, "--python", python}, &out, &stderr)
+	var result evolutionRRSISourceInventoryResult
+	if code != 0 || json.Unmarshal(out.Bytes(), &result) != nil ||
+		result.Status != "candidate_unanchored" || result.SourceID != "gdpval" || result.ScreeningUsable ||
+		result.TrustAnchorStatus != "uncommitted" || result.BenchmarkExecutionPerformed ||
+		result.CutoverEvidenceEligible || result.ExecutionAuthorized || len(result.BenchmarkInventory.TaskIDs) != 2 ||
+		strings.Contains(out.String(), root) || strings.Contains(out.String(), manifestPath) ||
+		strings.Contains(stderr.String(), root) || strings.Contains(stderr.String(), manifestPath) {
+		t.Fatalf("external RRSI candidate code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "untracked.txt"), []byte("runner changed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	stderr.Reset()
+	code = Run([]string{"evolution", "inventory", "source", "--file", requestPath, "--python", python}, &out, &stderr)
+	if code == 0 || out.Len() != 0 || !strings.Contains(stderr.String(), "failed safely") ||
+		strings.Contains(stderr.String(), root) || strings.Contains(out.String(), manifestPath) {
+		t.Fatalf("dirty external runner code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+}
+
 func TestEvolutionEngineeringInventoryCLIWritesOnlyVerifiedPrivateBundle(t *testing.T) {
 	python, err := exec.LookPath("python")
 	if err != nil {

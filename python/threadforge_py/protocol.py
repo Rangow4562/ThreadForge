@@ -236,6 +236,9 @@ MAX_SWE_BENCH_PARQUET_BYTES = 64 << 20
 MAX_SWE_BENCH_PARQUET_ROW_GROUPS = 512
 MAX_FRONTIER_GIT_OUTPUT_BYTES = 8 << 20
 MAX_FRONTIER_TASKS = 500
+EXTERNAL_RRSI_TASK_MANIFEST_BYTES = 1 << 20
+EXTERNAL_RRSI_SOURCE_IDS = frozenset({"gdpval", "apex-agents"})
+EXTERNAL_RRSI_MANIFEST_SOURCE_FILE = "operator-supplied-task-id-manifest.v1"
 FRONTIER_MANIFEST_SOURCE_FILE = "benchmarks/frontier-eval-task-manifest.v1"
 
 
@@ -3309,7 +3312,7 @@ def _rrsi_source_git_command(root: Path, *arguments: str) -> str:
     return completed.stdout
 
 
-def _frontier_git_command(root: Path, *arguments: str) -> bytes:
+def _bounded_local_git_command(root: Path, *arguments: str, label: str) -> bytes:
     environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     environment.update({
         "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1",
@@ -3322,44 +3325,58 @@ def _frontier_git_command(root: Path, *arguments: str) -> bytes:
             capture_output=True, timeout=30, check=False, env=environment,
         )
     except (OSError, subprocess.TimeoutExpired):
-        raise ProtocolError("Frontier-Eng checkout could not be verified locally") from None
+        raise ProtocolError(f"{label} checkout could not be verified locally") from None
     if completed.returncode != 0 or len(completed.stdout) > MAX_FRONTIER_GIT_OUTPUT_BYTES:
-        raise ProtocolError("Frontier-Eng checkout could not be verified locally")
+        raise ProtocolError(f"{label} checkout could not be verified locally")
     return completed.stdout
 
 
-def _verify_frontier_checkout(value: Any) -> tuple[Path, str]:
+def _frontier_git_command(root: Path, *arguments: str) -> bytes:
+    return _bounded_local_git_command(root, *arguments, label="Frontier-Eng")
+
+
+def _verify_local_git_checkout(value: Any, label: str) -> tuple[Path, str]:
     if not isinstance(value, str) or not value.strip() or len(value) > MAX_DOMAIN_EVIDENCE_ROOT_CHARS:
-        raise ProtocolError("frontier_source_root must be a bounded absolute local directory")
+        raise ProtocolError(f"{label} source root must be a bounded absolute local directory")
     supplied = Path(value).expanduser()
     if (not supplied.is_absolute() or
             (supplied.drive.startswith("\\\\") if supplied.drive else False)):
-        raise ProtocolError("frontier_source_root must be a bounded absolute local directory")
+        raise ProtocolError(f"{label} source root must be a bounded absolute local directory")
     try:
         current = supplied
         while True:
             info = current.lstat()
             reparse = bool(getattr(info, "st_file_attributes", 0) & 0x400)
             if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or reparse:
-                raise ProtocolError("Frontier-Eng checkout path cannot contain links or reparse points")
+                raise ProtocolError(f"{label} checkout path cannot contain links or reparse points")
             if current == current.parent:
                 break
             current = current.parent
         root = supplied.resolve(strict=True)
-        top_level = _frontier_git_command(root, "rev-parse", "--show-toplevel").decode("utf-8", "strict").strip()
+
+        def git(*arguments: str) -> bytes:
+            return _bounded_local_git_command(root, *arguments, label=label)
+
+        top_level = git("rev-parse", "--show-toplevel").decode("utf-8", "strict").strip()
         top_level_path = Path(top_level).resolve(strict=True)
-        revision = _frontier_git_command(root, "rev-parse", "--verify", "HEAD").decode("ascii", "strict").strip().lower()
+        revision = git("rev-parse", "--verify", "HEAD").decode("ascii", "strict").strip().lower()
     except ProtocolError:
         raise
     except (OSError, UnicodeError):
-        raise ProtocolError("Frontier-Eng checkout could not be verified locally") from None
+        raise ProtocolError(f"{label} checkout could not be verified locally") from None
     if (os.path.normcase(str(top_level_path)) != os.path.normcase(str(root)) or
             not re.fullmatch(r"[a-f0-9]{40}", revision)):
-        raise ProtocolError("frontier_source_root must name a local Git checkout root")
-    status = _frontier_git_command(root, "status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching")
+        raise ProtocolError(f"{label} source root must name a local Git checkout root")
+    status = _bounded_local_git_command(
+        root, "status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching", label=label,
+    )
     if status:
-        raise ProtocolError("Frontier-Eng checkout must be clean, including untracked and ignored files")
+        raise ProtocolError(f"{label} checkout must be clean, including untracked and ignored files")
     return root, revision
+
+
+def _verify_frontier_checkout(value: Any) -> tuple[Path, str]:
+    return _verify_local_git_checkout(value, "Frontier-Eng")
 
 
 def _frontier_task_manifest(root: Path, revision: str) -> tuple[str, list[str]]:
@@ -3431,6 +3448,73 @@ def derive_frontier_inventory(params: dict[str, Any]) -> dict[str, Any]:
         "source_relationship_file_sha256": None,
         "inventory_commitment": {
             "source_id": "frontier-eng",
+            "task_count": len(task_ids),
+            "task_ids_sha256": _canonical_inventory_digest(task_ids),
+        },
+        "benchmark_inventory": inventory,
+        "trust_anchor_status": "uncommitted",
+        "screening_usable": False,
+        "benchmark_execution_performed": False,
+        "cutover_evidence_eligible": False,
+        "execution_authorized": False,
+    }
+
+
+def derive_external_rrsi_inventory(params: dict[str, Any]) -> dict[str, Any]:
+    """Derive an explicitly operator-supplied, permanently unanchored task list."""
+    _only_fields(params, {"external_runner_root", "task_id_manifest_file", "source_id"})
+    source_id = params.get("source_id")
+    if (not isinstance(source_id, str) or source_id not in EXTERNAL_RRSI_SOURCE_IDS or
+            _contains_credential(params)):
+        raise ProtocolError("invalid external RRSI inventory request")
+
+    root_value = params.get("external_runner_root")
+    root, revision = _verify_local_git_checkout(root_value, "external runner")
+    manifest_value = params.get("task_id_manifest_file")
+    raw = _read_local_unlinked_file(
+        manifest_value, EXTERNAL_RRSI_TASK_MANIFEST_BYTES, "task_id_manifest_file",
+    )
+    try:
+        manifest = json.loads(raw.decode("utf-8", "strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ProtocolError("operator-supplied task ID manifest is malformed") from None
+    if not isinstance(manifest, dict) or set(manifest) != {"task_ids"}:
+        raise ProtocolError("operator-supplied task ID manifest must contain only task_ids")
+    task_ids = manifest["task_ids"]
+    if (not isinstance(task_ids, list) or not task_ids or len(task_ids) > MAX_FRONTIER_TASKS or
+            any(not isinstance(task_id, str) or
+                not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}", task_id)
+                for task_id in task_ids) or
+            len({task_id.casefold() for task_id in task_ids}) != len(task_ids) or
+            _contains_credential(manifest)):
+        raise ProtocolError("operator-supplied task ID manifest failed local validation")
+    task_ids = sorted(task_ids, key=lambda task_id: (task_id.casefold(), task_id))
+    source_file_sha256 = hashlib.sha256(raw).hexdigest()
+
+    root_after, revision_after = _verify_local_git_checkout(root_value, "external runner")
+    raw_after = _read_local_unlinked_file(
+        manifest_value, EXTERNAL_RRSI_TASK_MANIFEST_BYTES, "task_id_manifest_file",
+    )
+    if root_after != root or revision_after != revision or raw_after != raw:
+        raise ProtocolError("external RRSI inventory inputs changed during derivation")
+
+    inventory = {
+        "source_id": source_id,
+        "source_revision": revision,
+        "source_file_sha256": source_file_sha256,
+        "task_ids": task_ids,
+    }
+    return {
+        "schema_version": "threadforge.rrsi-source-inventory-candidate.v1",
+        "status": "candidate_unanchored",
+        "source_id": source_id,
+        "source_revision": revision,
+        "source_file": EXTERNAL_RRSI_MANIFEST_SOURCE_FILE,
+        "source_file_sha256": source_file_sha256,
+        "source_relationship_file": None,
+        "source_relationship_file_sha256": None,
+        "inventory_commitment": {
+            "source_id": source_id,
             "task_count": len(task_ids),
             "task_ids_sha256": _canonical_inventory_digest(task_ids),
         },
@@ -3675,6 +3759,8 @@ def derive_rrsi_source_inventory(params: dict[str, Any]) -> dict[str, Any]:
     """Derive locally pinned RRSI source task sets without modifying the checkout."""
     if params.get("source_id") == "frontier-eng":
         return derive_frontier_inventory(params)
+    if isinstance(params.get("source_id"), str) and params.get("source_id") in EXTERNAL_RRSI_SOURCE_IDS:
+        return derive_external_rrsi_inventory(params)
     if params.get("source_id") == "swe-bench/swe-bench-verified":
         _only_fields(params, {"source_id", "swe_bench_dataset_file"})
         if _contains_credential(params):

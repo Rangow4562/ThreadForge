@@ -41,13 +41,14 @@
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
     "sourceId": {
-      "enum": ["terminal-bench/terminal-bench-2-1", "engdesign-open", "engdesign-v1", "frontier-eng"]
+      "enum": ["terminal-bench/terminal-bench-2-1", "engdesign-open", "engdesign-v1", "frontier-eng", "gdpval", "apex-agents"]
     },
     "sourceFile": {
       "enum": [
         "domains/coding/data/tb21_tasks.txt",
         "domains/eng/data/split_engd.json",
-        "benchmarks/frontier-eval-task-manifest.v1"
+        "benchmarks/frontier-eval-task-manifest.v1",
+        "operator-supplied-task-id-manifest.v1"
       ]
     },
     "taskId": {
@@ -126,7 +127,11 @@
       "else": {
         "if": { "properties": { "source_id": { "const": "frontier-eng" } }, "required": ["source_id"] },
         "then": { "properties": { "source_file": { "const": "benchmarks/frontier-eval-task-manifest.v1" } } },
-        "else": { "properties": { "source_file": { "const": "domains/eng/data/split_engd.json" } } }
+        "else": {
+          "if": { "properties": { "source_id": { "enum": ["gdpval", "apex-agents"] } }, "required": ["source_id"] },
+          "then": { "properties": { "source_file": { "const": "operator-supplied-task-id-manifest.v1" } } },
+          "else": { "properties": { "source_file": { "const": "domains/eng/data/split_engd.json" } } }
+        }
       }
     },
     {

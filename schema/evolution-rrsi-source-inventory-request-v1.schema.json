@@ -24,15 +24,40 @@
           "maxLength": 4096,
           "description": "Absolute local root of a clean Frontier-Eng Git checkout. Used only to create an unanchored local candidate; the path is never returned."
         },
+        "external_runner_root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Absolute local root of a clean external benchmark runner Git checkout. Its revision is recorded only as local context, not as proof of benchmark provenance."
+        },
+        "task_id_manifest_file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Absolute local path to an operator-supplied JSON object containing only task_ids. The file is hashed and never treated as a trusted source manifest."
+        },
         "source_id": {
-          "enum": ["terminal-bench/terminal-bench-2-1", "engdesign-open", "engdesign-v1", "frontier-eng"]
+          "enum": ["terminal-bench/terminal-bench-2-1", "engdesign-open", "engdesign-v1", "frontier-eng", "gdpval", "apex-agents"]
         }
       },
       "allOf": [
         {
-          "if": { "properties": { "source_id": { "const": "frontier-eng" } }, "required": ["source_id"] },
-          "then": { "required": ["frontier_source_root"], "not": { "required": ["rrsi_source_root"] } },
-          "else": { "required": ["rrsi_source_root"], "not": { "required": ["frontier_source_root"] } }
+          "if": { "properties": { "source_id": { "enum": ["gdpval", "apex-agents"] } }, "required": ["source_id"] },
+          "then": {
+            "required": ["external_runner_root", "task_id_manifest_file"],
+            "not": { "anyOf": [{ "required": ["rrsi_source_root"] }, { "required": ["frontier_source_root"] }] }
+          },
+          "else": {
+            "if": { "properties": { "source_id": { "const": "frontier-eng" } }, "required": ["source_id"] },
+            "then": {
+              "required": ["frontier_source_root"],
+              "not": { "anyOf": [{ "required": ["rrsi_source_root"] }, { "required": ["external_runner_root"] }, { "required": ["task_id_manifest_file"] }] }
+            },
+            "else": {
+              "required": ["rrsi_source_root"],
+              "not": { "anyOf": [{ "required": ["frontier_source_root"] }, { "required": ["external_runner_root"] }, { "required": ["task_id_manifest_file"] }] }
+            }
+          }
         }
       ]
     }

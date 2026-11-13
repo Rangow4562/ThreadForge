@@ -241,6 +241,8 @@ const (
 	jobBenchSourceFileCount = 566
 )
 
+const externalRRSIManifestSourceFile = "operator-supplied-task-id-manifest.v1"
+
 const (
 	harveyLabPinnedRevision    = "1da4750171bc5a534960b3d82d15ba7fd2cf653f"
 	harveyRRSIPinnedRevision   = "be50316e1db05914068a973f322770ef08ed7ba1"
@@ -1325,6 +1327,9 @@ func validRRSISourceInventoryEnvelope(raw []byte) bool {
 }
 
 func validRRSISourceInventoryResult(result evolutionRRSISourceInventoryResult) bool {
+	if result.SourceID == "gdpval" || result.SourceID == "apex-agents" {
+		return validExternalRRSISourceInventoryResult(result)
+	}
 	pin, ok := rrsiSourceInventoryPins[result.SourceID]
 	expectedRevision := pin.SourceRevision
 	if expectedRevision == "" {
@@ -1365,6 +1370,26 @@ func validRRSISourceInventoryResult(result evolutionRRSISourceInventoryResult) b
 		return false
 	}
 	return pin.RelationshipFile == "" || *result.SourceRelationshipFileSHA256 == pin.RelationshipSHA256
+}
+
+func validExternalRRSISourceInventoryResult(result evolutionRRSISourceInventoryResult) bool {
+	if (result.SourceID != "gdpval" && result.SourceID != "apex-agents") ||
+		result.SchemaVersion != "threadforge.rrsi-source-inventory-candidate.v1" ||
+		result.Status != "candidate_unanchored" || result.SourceFile != externalRRSIManifestSourceFile ||
+		!validLowerHex(result.SourceRevision, 40) || !validLowerHex(result.SourceFileSHA256, 64) ||
+		result.SourceRelationshipFile != nil || result.SourceRelationshipFileSHA256 != nil ||
+		result.TrustAnchorStatus != "uncommitted" || result.ScreeningUsable ||
+		result.BenchmarkExecutionPerformed || result.CutoverEvidenceEligible || result.ExecutionAuthorized ||
+		result.BenchmarkInventory.SourceID != result.SourceID ||
+		result.BenchmarkInventory.SourceRevision != result.SourceRevision ||
+		result.BenchmarkInventory.SourceFileSHA256 != result.SourceFileSHA256 ||
+		result.InventoryCommitment.SourceID != result.SourceID ||
+		result.InventoryCommitment.TaskCount < 1 || result.InventoryCommitment.TaskCount > 500 ||
+		result.InventoryCommitment.TaskCount != len(result.BenchmarkInventory.TaskIDs) {
+		return false
+	}
+	digest, valid := harveyInventoryDigest(result.BenchmarkInventory.TaskIDs)
+	return valid && result.InventoryCommitment.TaskIDsSHA256 == digest
 }
 
 func validJobBenchInventoryEnvelope(raw []byte) bool {
@@ -1458,7 +1483,7 @@ func runEvolutionRRSISourceInventory(args []string, stdout, stderr io.Writer) in
 		return 1
 	}
 	var params map[string]json.RawMessage
-	if err := decodeJSONBytes(request.Params, &params); err != nil || len(params) != 2 {
+	if err := decodeJSONBytes(request.Params, &params); err != nil || len(params) < 2 || len(params) > 3 {
 		_, _ = fmt.Fprintln(stderr, "invalid RRSI source inventory parameters")
 		return 1
 	}
@@ -1467,12 +1492,31 @@ func runEvolutionRRSISourceInventory(args []string, stdout, stderr io.Writer) in
 		_, _ = fmt.Fprintln(stderr, "RRSI source inventory requires a supported source_id")
 		return 1
 	}
-	if _, ok := rrsiSourceInventoryPins[sourceID]; !ok {
+	externalRRSI := sourceID == "gdpval" || sourceID == "apex-agents"
+	if _, ok := rrsiSourceInventoryPins[sourceID]; !ok && !externalRRSI {
 		_, _ = fmt.Fprintln(stderr, "RRSI source inventory source_id is not supported")
 		return 1
 	}
-	var localSource string
-	if sourceID == "swe-bench/swe-bench-verified" {
+	var localSource, localManifest string
+	if externalRRSI {
+		var hasUnexpected bool
+		for key := range params {
+			if key != "source_id" && key != "external_runner_root" && key != "task_id_manifest_file" {
+				hasUnexpected = true
+			}
+		}
+		if len(params) != 3 || hasUnexpected ||
+			decodeJSONBytes(params["external_runner_root"], &localSource) != nil ||
+			!filepath.IsAbs(localSource) || len(localSource) > 4096 || strings.HasPrefix(localSource, `\\`) ||
+			decodeJSONBytes(params["task_id_manifest_file"], &localManifest) != nil ||
+			!filepath.IsAbs(localManifest) || len(localManifest) > 4096 || strings.HasPrefix(localManifest, `\\`) {
+			_, _ = fmt.Fprintln(stderr, "external RRSI inventory requires an absolute local runner checkout and task ID manifest")
+			return 1
+		}
+	} else if len(params) != 2 {
+		_, _ = fmt.Fprintln(stderr, "invalid RRSI source inventory parameters")
+		return 1
+	} else if sourceID == "swe-bench/swe-bench-verified" {
 		if _, hasRRSIRoot := params["rrsi_source_root"]; hasRRSIRoot {
 			_, _ = fmt.Fprintln(stderr, "SWE-bench source inventory requires its pinned local Parquet file")
 			return 1
@@ -1520,7 +1564,8 @@ func runEvolutionRRSISourceInventory(args []string, stdout, stderr io.Writer) in
 	}
 	var result evolutionRRSISourceInventoryResult
 	if !validRRSISourceInventoryEnvelope(response.Result) || decodeJSONBytes(response.Result, &result) != nil ||
-		!validRRSISourceInventoryResult(result) || strings.Contains(string(response.Result), localSource) {
+		!validRRSISourceInventoryResult(result) || strings.Contains(string(response.Result), localSource) ||
+		(localManifest != "" && strings.Contains(string(response.Result), localManifest)) {
 		_, _ = fmt.Fprintln(stderr, "Python returned an invalid or unsafe RRSI source inventory candidate")
 		return 1
 	}

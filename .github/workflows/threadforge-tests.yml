@@ -212,6 +212,27 @@ jobs:
         shell: bash
         run: bash scripts/test-elasticsearch-stack.sh "$RUNNER_TEMP/threadforge" "$RUNNER_TEMP/threadforge-elasticsearch-pack"
 
+  required-ci:
+    name: Required CI gate
+    if: always()
+    needs: [test, elasticsearch-local-stack]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    steps:
+      - name: Require every test and integration job to succeed
+        shell: bash
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          INGESTION_RESULT: ${{ needs.elasticsearch-local-stack.result }}
+        run: |
+          printf 'Required suites result: %s\n' "$TEST_RESULT"
+          printf 'Synthetic ingestion result: %s\n' "$INGESTION_RESULT"
+          if [[ "$TEST_RESULT" != "success" || "$INGESTION_RESULT" != "success" ]]; then
+            exit 1
+          fi
+
   python-license-evidence:
     name: Python license evidence (${{ matrix.target_os }}, Python ${{ matrix.python }})
     if: >-

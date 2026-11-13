@@ -98,12 +98,16 @@ if ($env:OS -eq 'Windows_NT') {
     Invoke-Check -Label 'Windows user-local release installer' -Executable 'pwsh' `
         -Arguments @('-NoProfile', '-File', (Join-Path $RepositoryRoot 'packaging/windows/test-install.ps1')) -WorkingDirectory $RepositoryRoot
 }
+Invoke-Check -Label 'TypeScript adapter dependency audit (moderate and above)' -Executable 'npm' `
+    -Arguments @('audit', '--audit-level=moderate') -WorkingDirectory (Join-Path $RepositoryRoot 'adapters')
 Invoke-Check -Label 'TypeScript adapter type check' -Executable 'npm' -Arguments @('run', 'check') -WorkingDirectory (Join-Path $RepositoryRoot 'adapters')
 Invoke-Check -Label 'TypeScript adapter tests' -Executable 'npm' -Arguments @('test') -WorkingDirectory (Join-Path $RepositoryRoot 'adapters')
 Invoke-Check -Label 'TypeScript adapter package contents' -Executable 'npm' -Arguments @('run', 'test:package') -WorkingDirectory (Join-Path $RepositoryRoot 'adapters')
 $BrowserExtensionRoot = Join-Path $RepositoryRoot 'adapters/browser-extension'
 $BrowserValidationRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("threadforge-browser-validation-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $BrowserValidationRoot | Out-Null
+Invoke-Check -Label 'Browser extension dependency audit (moderate and above)' -Executable 'npm' `
+    -Arguments @('audit', '--audit-level=moderate') -WorkingDirectory $BrowserExtensionRoot
 Invoke-Check -Label 'Browser extension type check' -Executable 'npm' -Arguments @('run', 'check') -WorkingDirectory $BrowserExtensionRoot
 Invoke-Check -Label 'Browser extension unit tests' -Executable 'npm' -Arguments @('run', 'test:unit') -WorkingDirectory $BrowserExtensionRoot
 Invoke-Check -Label 'Chromium browser extension build' -Executable 'npm' -Arguments @('run', 'build') -WorkingDirectory $BrowserExtensionRoot

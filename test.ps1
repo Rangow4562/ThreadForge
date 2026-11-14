@@ -69,6 +69,8 @@ Invoke-Check -Label 'Go vulnerability scan (govulncheck v1.9.0)' -Executable 'go
     -Arguments @('run', 'golang.org/x/vuln/cmd/govulncheck@v1.9.0', './...') -WorkingDirectory $RepositoryRoot
 if (Get-Command 'uv' -ErrorAction SilentlyContinue) {
     Invoke-Check -Label 'Python dependency lock freshness' -Executable 'uv' -Arguments @('lock', '--check') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
+    Invoke-Check -Label 'Python dependency vulnerability audit (uv 0.11.7)' -Executable 'uv' `
+        -Arguments @('audit', '--locked', '--preview-features', 'audit') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
     $PythonProjectDirectory = Join-Path $RepositoryRoot 'python'
     foreach ($platform in @('linux', 'windows', 'macos')) {
         Invoke-Check -Label "Python serving extra resolution ($platform, Python 3.11)" -Executable 'uv' `

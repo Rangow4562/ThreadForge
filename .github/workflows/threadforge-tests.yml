@@ -89,10 +89,16 @@ jobs:
 
       - name: Run isolated V2 memory/context smoke with loopback provider
         shell: bash
-        working-directory: adapters
         env:
           THREADFORGE_OPENCODE_V2_VERSION: '2.3.0'
-        run: npm run test:opencode-v2-plugin
+        run: |
+          smoke_workspace="$(mktemp -d /tmp/threadforge-opencode-v2-workspace.XXXXXX)"
+          case "$smoke_workspace/" in
+            "$HOME/"*) echo "OpenCode V2 smoke workspace must be outside runner home" >&2; exit 1 ;;
+          esac
+          cp -a "$GITHUB_WORKSPACE/." "$smoke_workspace/"
+          cd "$smoke_workspace/adapters"
+          npm run test:opencode-v2-plugin
 
   vector-config-validation:
     name: Vector forwarding config validation (0.58.0)
@@ -384,10 +390,33 @@ jobs:
           THREADFORGE_REQUIRE_ENGINEERING_GATEWAY_HTTP: "1"
         run: uv run --locked --extra test --extra decisions --extra hf --extra serving --extra typed-data --extra evolution --extra workspace python -m pytest -q
 
+  python-vulnerability-audit:
+    name: Python dependency vulnerability audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out Threadforge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Audit the locked Python dependency graph
+        shell: bash
+        working-directory: python
+        run: |
+          python -m pip install uv==0.11.7
+          uv --version
+          uv audit --locked --preview-features audit
+
   required-ci:
     name: Required CI gate
     if: always()
-    needs: [test, python-all-extras, elasticsearch-local-stack, workflow-lint, opencode-v2-plugin, vector-config-validation]
+    needs: [test, python-all-extras, python-vulnerability-audit, elasticsearch-local-stack, workflow-lint, opencode-v2-plugin, vector-config-validation]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
@@ -402,6 +431,7 @@ jobs:
           WORKFLOW_LINT_RESULT: ${{ needs.workflow-lint.result }}
           OPENCODE_V2_RESULT: ${{ needs.opencode-v2-plugin.result }}
           VECTOR_CONFIG_RESULT: ${{ needs.vector-config-validation.result }}
+          PYTHON_AUDIT_RESULT: ${{ needs.python-vulnerability-audit.result }}
         run: |
           printf 'Required suites result: %s\n' "$TEST_RESULT"
           printf 'All-extras Python suites result: %s\n' "$PYTHON_EXTRAS_RESULT"
@@ -409,7 +439,8 @@ jobs:
           printf 'Workflow lint result: %s\n' "$WORKFLOW_LINT_RESULT"
           printf 'OpenCode V2 plugin smoke result: %s\n' "$OPENCODE_V2_RESULT"
           printf 'Vector config validation result: %s\n' "$VECTOR_CONFIG_RESULT"
-          if [[ "$TEST_RESULT" != "success" || "$PYTHON_EXTRAS_RESULT" != "success" || "$INGESTION_RESULT" != "success" || "$WORKFLOW_LINT_RESULT" != "success" || "$OPENCODE_V2_RESULT" != "success" || "$VECTOR_CONFIG_RESULT" != "success" ]]; then
+          printf 'Python dependency vulnerability audit result: %s\n' "$PYTHON_AUDIT_RESULT"
+          if [[ "$TEST_RESULT" != "success" || "$PYTHON_EXTRAS_RESULT" != "success" || "$INGESTION_RESULT" != "success" || "$WORKFLOW_LINT_RESULT" != "success" || "$OPENCODE_V2_RESULT" != "success" || "$VECTOR_CONFIG_RESULT" != "success" || "$PYTHON_AUDIT_RESULT" != "success" ]]; then
             exit 1
           fi
 
@@ -633,7 +664,7 @@ jobs:
     if: >-
       (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
       || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
-    needs: [test, elasticsearch-local-stack, python-license-evidence, opencode-v2-plugin, vector-config-validation]
+    needs: [test, elasticsearch-local-stack, python-license-evidence, opencode-v2-plugin, vector-config-validation, python-vulnerability-audit]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:

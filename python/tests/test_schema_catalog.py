@@ -375,6 +375,61 @@ def test_opencode_read_only_plan_agent_smoke_records_resolved_permissions_withou
         validator.validate({**result, "real_model_invocations": 1})
 
 
+def test_opencode_v2_plugin_smoke_proves_fixture_context_delivery_not_real_inference_or_authorization():
+    schema = json.loads((SCHEMA_DIRECTORY / "opencode-v2-plugin-smoke-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.opencode-v2-plugin-smoke.v1",
+        "status": "verified",
+        "host_cli_version": "opencode v2.3.0",
+        "isolated_storage_paths_verified": True,
+        "agent_config_free_temp_ancestors_verified": True,
+        "real_user_home_path_in_host_logs": False,
+        "approved_fixture_procedure_readback_verified": True,
+        "project_plugin_setup_invoked": True,
+        "registered_hooks": ["session.prompt", "session.context", "tool.execute.before", "tool.execute.after"],
+        "context_hook_invoked_with_memory": True,
+        "retrieved_memory_received_by_loopback_provider": True,
+        "loopback_provider_requests": 3,
+        "telemetry_events_received": 1,
+        "package_manager_invocations": 0,
+        "external_proxy_attempts": 0,
+        "real_model_invocations": 0,
+        "real_credentials_used": False,
+        "execution_authorized": False,
+    }
+    validator.validate(result)
+    validator.validate({**result, "registered_hooks": list(reversed(result["registered_hooks"]))})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "real_model_invocations": 1})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "external_proxy_attempts": 1})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "real_credentials_used": True})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "real_user_home_path_in_host_logs": True})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "agent_config_free_temp_ancestors_verified": False})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "context_hook_invoked_with_memory": False})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "retrieved_memory_received_by_loopback_provider": False})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "loopback_provider_requests": 0})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "telemetry_events_received": 0})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "registered_hooks": ["session.prompt"]})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "registered_hooks": [*result["registered_hooks"][:-1], "session.prompt"]})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "execution_authorized": True})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "project_root": "C:/private/project"})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "host_cli_version": "opencode v1.18.31"})
+
+
 def test_opencode_procedure_freshness_smoke_requires_fresh_and_stale_withholding_evidence():
     schema = json.loads((SCHEMA_DIRECTORY / "opencode-procedure-freshness-smoke-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

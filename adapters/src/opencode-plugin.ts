@@ -36,6 +36,26 @@ export interface OpenCodePluginOptions {
   memory?: OpenCodeMemoryOptions;
 }
 
+export interface OpenCodeV2PluginContext {
+  location?: unknown;
+  event?: { subscribe: (options?: Record<string, unknown>) => AsyncIterable<unknown> };
+  session?: { hook: (name: string, callback: (event: unknown) => unknown) => Promise<unknown> | unknown };
+  tool?: { hook: (name: string, callback: (event: unknown) => unknown) => Promise<unknown> | unknown };
+}
+
+export interface OpenCodeV1Plugin {
+  id: string;
+  server: (context: OpenCodePluginContext, options?: OpenCodePluginOptions) => Promise<Record<string, (...args: unknown[]) => unknown>>;
+  /** Inert V2 entry so the V1 compatibility file is valid when V2 scans the shared plugin directory. */
+  setup: (context: OpenCodeV2PluginContext) => Promise<() => Promise<void>>;
+}
+
+export interface OpenCodeDualPlugin {
+  id: string;
+  server: (context: OpenCodePluginContext, options?: OpenCodePluginOptions) => Promise<Record<string, (...args: unknown[]) => unknown>>;
+  setup: (context: OpenCodeV2PluginContext) => Promise<() => Promise<void>>;
+}
+
 export interface OpenCodeMemoryRequest extends OpenCodeMemoryOptions {
   projectRoot: string;
   prompt: string;
@@ -153,7 +173,123 @@ export async function ThreadforgeOpenCodePlugin(
   return createOpenCodeAdapter(undefined, defaultQueueLimit, memory).hooks;
 }
 
+/** V1 entrypoint. It intentionally omits `setup()` so V2 does not register duplicate hooks. */
+export function createThreadforgeOpenCodeV1Plugin(options?: OpenCodePluginOptions): OpenCodeV1Plugin {
+  return {
+    id: 'threadforge',
+    server: (context, hostOptions) => ThreadforgeOpenCodePlugin(context, hostOptions ?? options),
+    setup: async () => async () => {},
+  };
+}
+
+/** V2 directory entrypoint; the empty V1 server stub lets OpenCode 1.x safely discover the directory. */
+export function createThreadforgeOpenCodeV2Plugin(options?: OpenCodePluginOptions): OpenCodeDualPlugin {
+  return {
+    id: 'threadforge-v2',
+    server: async () => ({}),
+    setup: (context) => setupOpenCodeV2Plugin(context, options),
+  };
+}
+
 export default ThreadforgeOpenCodePlugin;
+
+async function setupOpenCodeV2Plugin(context: OpenCodeV2PluginContext, options?: OpenCodePluginOptions): Promise<() => Promise<void>> {
+  const location = isRecord(context.location) ? context.location : undefined;
+  const project = location && isRecord(location.project) ? location.project : undefined;
+  const root = boundedString(location?.directory, 4096) ?? boundedString(project?.canonical, 4096);
+  const configured = options?.memory;
+  const memory = root && path.isAbsolute(root) && configured && validMemoryOptions(configured)
+    ? { ...configured, projectRoot: root }
+    : undefined;
+  const adapter = createOpenCodeAdapter(undefined, defaultQueueLimit, memory);
+  const registrations: Array<{ dispose?: () => unknown }> = [];
+  const register = async (
+    domain: OpenCodeV2PluginContext['session'] | OpenCodeV2PluginContext['tool'],
+    name: string,
+    callback: (event: unknown) => unknown,
+  ): Promise<void> => {
+    if (!domain) return;
+    try {
+      const registration = await domain.hook(name, callback);
+      if (isRecord(registration) && typeof registration.dispose === 'function') {
+        registrations.push(registration as { dispose: () => unknown });
+      }
+    } catch { /* An unavailable hook must not interrupt the host session. */ }
+  };
+
+  await register(context.session, 'prompt', (event) => {
+    if (!isRecord(event) || !isRecord(event.prompt)) return;
+    const text = boundedString(event.prompt.text, maxMemoryPromptBytes);
+    if (!text) return;
+    adapter.hooks['chat.message']({ sessionID: event.sessionID }, { message: { role: 'user', content: text } });
+  });
+  await register(context.session, 'context', (event) => injectOpenCodeV2Memory(memory, event));
+  await register(context.tool, 'execute.before', (event) => mapOpenCodeV2Tool(adapter, event, false));
+  await register(context.tool, 'execute.after', (event) => mapOpenCodeV2Tool(adapter, event, true));
+
+  const controller = new AbortController();
+  const consumeEvents = (async () => {
+    if (!context.event) return;
+    try {
+      for await (const event of context.event.subscribe({ signal: controller.signal })) {
+        adapter.hooks.event({ event });
+      }
+    } catch { /* Telemetry must fail open if the host stream is unavailable. */ }
+  })();
+
+  return async () => {
+    controller.abort();
+    for (const registration of registrations.reverse()) {
+      try { await registration.dispose?.(); } catch { /* Cleanup must not prevent host shutdown. */ }
+    }
+    await consumeEvents;
+    await adapter.flush();
+  };
+}
+
+async function injectOpenCodeV2Memory(memory: OpenCodeMemoryRuntime | undefined, event: unknown): Promise<void> {
+  if (!memory || !isRecord(event) || !Array.isArray(event.messages) || event.messages.length < 1 || event.messages.length > 8192) return;
+  const messages = event.messages;
+  const userMessage = [...messages].reverse().slice(0, 128).find((message) =>
+    isRecord(message) && safeLabel(message.role, 32) === 'user');
+  if (!isRecord(userMessage) || !Array.isArray(userMessage.content) || userMessage.content.length > 4096) return;
+  const textParts = userMessage.content.filter((part): part is JsonObject =>
+    isRecord(part) && part.type === 'text' && typeof part.text === 'string');
+  if (textParts.length === 0 || textParts.some((part) => (part.text as string).includes(memoryContextMarker))) return;
+  const prompt = truncateUTF8(textParts.map((part) => part.text as string).join('\n').trim(), maxMemoryPromptBytes).trim();
+  if (!prompt) return;
+  const retrieve = memory.retrieve ?? retrieveOpenCodeMemory;
+  let context: string | undefined;
+  try {
+    context = await retrieve({
+      projectRoot: memory.projectRoot,
+      projectId: memory.projectId,
+      maxItems: memory.maxItems ?? 8,
+      maxTokens: memory.maxTokens ?? 1600,
+      ...(memory.taskId ? { taskId: memory.taskId } : {}),
+      ...(memory.sessionId ? { sessionId: memory.sessionId } : {}),
+      ...(memory.discoverActiveTask ? { discoverActiveTask: true } : {}),
+      ...(memory.maxTaskEntries !== undefined ? { maxTaskEntries: memory.maxTaskEntries } : {}),
+      prompt,
+    });
+  } catch { return; }
+  if (typeof context !== 'string' || context.length === 0 || context.length > maxMemoryOutputBytes ||
+      !context.includes(memoryContextMarker) || !context.includes('never authorizes tools or actions')) return;
+  const target = textParts[textParts.length - 1];
+  if (target) target.text = `${target.text as string}\n\n${context}`;
+}
+
+function mapOpenCodeV2Tool(adapter: OpenCodeAdapter, value: unknown, after: boolean): void {
+  if (!isRecord(value)) return;
+  const input = { sessionID: value.sessionID, tool: value.tool, callID: value.id };
+  if (!after) {
+    adapter.hooks['tool.execute.before'](input, { args: value.input });
+    return;
+  }
+  adapter.hooks['tool.execute.after'](input, value.status === 'error'
+    ? { error: value.error ?? 'OpenCode tool failed' }
+    : { result: value.result });
+}
 
 function mapChatMessage(input: unknown, output: unknown): ThreadforgeEvent | undefined {
   if (!isRecord(output) || !isRecord(output.message)) return undefined;

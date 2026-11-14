@@ -1,6 +1,12 @@
 import { appendFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { ThreadforgeOpenCodePlugin as createThreadforgeOpenCodePlugin, type OpenCodePluginContext } from '../src/opencode-plugin.ts';
+import {
+  createThreadforgeOpenCodeV1Plugin as createThreadforgeOpenCodeV1Runtime,
+  createThreadforgeOpenCodeV2Plugin as createThreadforgeOpenCodeV2Runtime,
+  ThreadforgeOpenCodePlugin as createThreadforgeOpenCodePlugin,
+  type OpenCodePluginContext,
+  type OpenCodeV2PluginContext,
+} from '../src/opencode-plugin.ts';
 
 export async function ThreadforgeOpenCodePlugin(
   context: OpenCodePluginContext,
@@ -45,6 +51,97 @@ export async function ThreadforgeOpenCodePlugin(
     summarize();
     return result;
   }]));
+}
+
+export function createThreadforgeOpenCodeV1Plugin(options?: unknown) {
+  const plugin = createThreadforgeOpenCodeV1Runtime(options as Parameters<typeof createThreadforgeOpenCodeV1Runtime>[0]);
+  return {
+    id: plugin.id,
+    server: (context: OpenCodePluginContext, hostOptions?: unknown) =>
+      ThreadforgeOpenCodePlugin(context, hostOptions ?? options),
+    setup: plugin.setup,
+  };
+}
+
+export function createThreadforgeOpenCodeV2Plugin(options?: unknown) {
+  const plugin = createThreadforgeOpenCodeV2Runtime(options as Parameters<typeof createThreadforgeOpenCodeV2Runtime>[0]);
+  return {
+    ...plugin,
+    setup: async (context: OpenCodeV2PluginContext) => {
+      const location = isRecord(context.location) ? context.location : undefined;
+      const project = location && isRecord(location.project) ? location.project : undefined;
+      const projectRoot = typeof location?.directory === 'string' ? location.directory :
+        typeof project?.canonical === 'string' ? project.canonical : undefined;
+      const marker = projectRoot ? path.join(projectRoot, '.threadforge-opencode-v2-plugin-loaded') : undefined;
+      const callbackMarker = projectRoot ? path.join(projectRoot, '.threadforge-opencode-v2-callbacks.jsonl') : undefined;
+      if (callbackMarker) writeFileSync(callbackMarker, '', { mode: 0o600 });
+      const expectedMemoryMarker = process.env.THREADFORGE_OPENCODE_V2_EXPECTED_MEMORY_MARKER;
+      const registeredHooks: string[] = [];
+      const instrumentedContext = Object.create(context) as OpenCodeV2PluginContext;
+      Object.defineProperty(instrumentedContext, 'session', {
+        enumerable: true,
+        value: instrumentOpenCodeV2HookDomain(
+          'session', context.session, registeredHooks, callbackMarker, expectedMemoryMarker,
+        ),
+      });
+      Object.defineProperty(instrumentedContext, 'tool', {
+        enumerable: true,
+        value: instrumentOpenCodeV2HookDomain(
+          'tool', context.tool, registeredHooks, callbackMarker, expectedMemoryMarker,
+        ),
+      });
+      const cleanup = await plugin.setup(instrumentedContext);
+      if (typeof marker === 'string' && marker.length > 0) {
+        writeFileSync(marker, [
+          'threadforge-opencode-v2-plugin-invoked-v1',
+          ...registeredHooks,
+          '',
+        ].join('\n'), { mode: 0o600 });
+      }
+      return cleanup;
+    },
+  };
+}
+
+function instrumentOpenCodeV2HookDomain(
+  domainName: 'session' | 'tool',
+  domain: OpenCodeV2PluginContext['session'] | OpenCodeV2PluginContext['tool'] | undefined,
+  registeredHooks: string[],
+  callbackMarker: string | undefined,
+  expectedMemoryMarker: string | undefined,
+): OpenCodeV2PluginContext['session'] | OpenCodeV2PluginContext['tool'] | undefined {
+  if (!domain) return undefined;
+  const originalHook = domain.hook;
+  let recordedCallbacks = 0;
+  const instrumented = Object.create(domain) as NonNullable<typeof domain>;
+  Object.defineProperty(instrumented, 'hook', {
+    enumerable: true,
+    value: async (name: string, callback: (event: unknown) => unknown) => {
+      const observedCallback = async (event: unknown): Promise<unknown> => {
+        const result = await callback(event);
+        if (callbackMarker && recordedCallbacks < 256) {
+          recordedCallbacks++;
+          appendFileSync(callbackMarker, `${JSON.stringify({
+            hook: `${domainName}.${name}`,
+            completed: true,
+            memory_context_marker_present: domainName === 'session' && name === 'context' &&
+              eventContainsMemoryMarker(event, expectedMemoryMarker),
+          })}\n`, { mode: 0o600 });
+        }
+        return result;
+      };
+      const result = await originalHook.call(domain, name, observedCallback);
+      registeredHooks.push(`${domainName}.${name}`);
+      return result;
+    },
+  });
+  return instrumented;
+}
+
+function eventContainsMemoryMarker(event: unknown, marker: string | undefined): boolean {
+  if (!marker || !isRecord(event) || !Array.isArray(event.messages)) return false;
+  return event.messages.some((message) => isRecord(message) && Array.isArray(message.content) &&
+    message.content.some((part) => isRecord(part) && typeof part.text === 'string' && part.text.includes(marker)));
 }
 
 function summarizeCallback(name: string, args: unknown[]): Record<string, unknown> {

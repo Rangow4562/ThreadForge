@@ -276,7 +276,9 @@ function tryCopilotProjectMcpDiscovery(cwd) {
   };
   let version;
   try {
-    version = runCopilotCli(['--version'], { cwd, env, timeout: 20_000 }).trim().split(/\r?\n/, 1)[0];
+    // The Windows npm-loader entrypoint can cold-start slowly when the full
+    // validation suite has just exercised several resource-heavy host probes.
+    version = runCopilotCli(['--version'], { cwd, env, timeout: 60_000 }).trim().split(/\r?\n/, 1)[0];
   } catch (error) {
     if (/could not run the local smoke command \(ENOENT\)/i.test(String(error?.message ?? error))) {
       return { status: 'not-installed', model_invocations: 0 };

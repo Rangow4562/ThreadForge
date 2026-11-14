@@ -6,12 +6,15 @@ import test from 'node:test';
 import {
   installOpenCodeProjectPlugin,
   opencodeManagedMarker,
+  opencodeV2ManagedMarker,
   removeOpenCodeProjectPlugin,
   renderOpenCodePlugin,
+  renderOpenCodeV2Plugin,
 } from '../src/opencode-plugin-config.ts';
 
 const packageSpecifier = '@threadforge/adapter-contracts/opencode-plugin';
 const pluginPath = (root: string) => path.join(root, '.opencode', 'plugins', 'threadforge.ts');
+const v2PluginPath = (root: string) => path.join(root, '.opencode', 'plugins', 'threadforge-v2', 'index.ts');
 
 async function withProject(run: (root: string) => Promise<void>): Promise<void> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-opencode-config-'));
@@ -19,29 +22,42 @@ async function withProject(run: (root: string) => Promise<void>): Promise<void> 
   finally { await rm(root, { recursive: true, force: true }); }
 }
 
-test('installs and idempotently updates an isolated OpenCode plugin file', async () => {
+test('installs and idempotently updates an isolated dual-version OpenCode plugin file', async () => {
   await withProject(async (root) => {
     assert.equal(await installOpenCodeProjectPlugin(root, packageSpecifier), 'installed');
     const file = pluginPath(root);
     const first = await readFile(file, 'utf8');
     assert.equal(first, renderOpenCodePlugin(packageSpecifier));
     assert.equal(first.includes(opencodeManagedMarker), true);
+    const v2First = await readFile(v2PluginPath(root), 'utf8');
+    assert.equal(v2First, renderOpenCodeV2Plugin(packageSpecifier));
+    assert.equal(v2First.includes(opencodeV2ManagedMarker), true);
     assert.equal(await installOpenCodeProjectPlugin(root, packageSpecifier), 'unchanged');
     assert.equal(await readFile(file, 'utf8'), first);
+    assert.equal(await readFile(v2PluginPath(root), 'utf8'), v2First);
   });
 });
 
 test('renders explicitly configured bounded project-memory retrieval without enabling it by default', () => {
   const defaultPlugin = renderOpenCodePlugin(packageSpecifier);
+  const defaultV2Plugin = renderOpenCodeV2Plugin(packageSpecifier);
   const memoryPlugin = renderOpenCodePlugin(packageSpecifier, { projectId: 'parser-project', maxItems: 4, maxTokens: 900 });
+  const memoryV2Plugin = renderOpenCodeV2Plugin(packageSpecifier, { projectId: 'parser-project', maxItems: 4, maxTokens: 900 });
   const taskMemoryPlugin = renderOpenCodePlugin(packageSpecifier, {
     projectId: 'parser-project', taskId: 'task-parser', sessionId: 'session-parser', maxTaskEntries: 3,
   });
   assert.doesNotMatch(defaultPlugin, /experimental\.chat\.system\.transform|memory:/);
+  assert.doesNotMatch(defaultPlugin, /setup/);
+  assert.doesNotMatch(defaultV2Plugin, /memory:/);
+  assert.match(defaultV2Plugin, /createThreadforgeOpenCodeV2Plugin/);
   assert.match(memoryPlugin, /projectId":"parser-project"/);
+  assert.match(memoryV2Plugin, /projectId":"parser-project"/);
   assert.match(memoryPlugin, /maxItems":4/);
   assert.match(memoryPlugin, /maxTokens":900/);
-  assert.match(memoryPlugin, /ThreadforgeOpenCodePlugin\(context/);
+  assert.match(memoryPlugin, /createThreadforgeOpenCodeV1Plugin/);
+  assert.doesNotMatch(memoryPlugin, /setup/);
+  assert.match(memoryPlugin, /export const ThreadforgeOpenCode = threadforgePlugin/);
+  assert.match(memoryPlugin, /export default threadforgePlugin/);
   assert.match(taskMemoryPlugin, /taskId":"task-parser"/);
   assert.match(taskMemoryPlugin, /sessionId":"session-parser"/);
   assert.match(taskMemoryPlugin, /maxTaskEntries":3/);
@@ -67,15 +83,31 @@ test('refuses to overwrite an unmanaged plugin and leaves its bytes unchanged', 
   });
 });
 
+test('preflights an unmanaged V2 entry before writing the V1 plugin', async () => {
+  await withProject(async (root) => {
+    const v2File = v2PluginPath(root);
+    await mkdir(path.dirname(v2File), { recursive: true });
+    const original = 'export default { id: "user-plugin", setup() {} };\n';
+    await writeFile(v2File, original);
+    await assert.rejects(installOpenCodeProjectPlugin(root, packageSpecifier), /unmanaged OpenCode V2 plugin/);
+    assert.equal(await readFile(v2File, 'utf8'), original);
+    await assert.rejects(readFile(pluginPath(root), 'utf8'), { code: 'ENOENT' });
+  });
+});
+
 test('updates and removes only the marked Threadforge plugin file', async () => {
   await withProject(async (root) => {
     assert.equal(await installOpenCodeProjectPlugin(root, packageSpecifier), 'installed');
     assert.equal(await installOpenCodeProjectPlugin(root, 'file:///opt/threadforge/opencode-plugin.ts'), 'updated');
     const sibling = path.join(root, '.opencode', 'plugins', 'user-plugin.ts');
+    const v2Sibling = path.join(root, '.opencode', 'plugins', 'threadforge-v2', 'user-plugin.ts');
     await writeFile(sibling, 'export const UserPlugin = async () => ({});');
+    await writeFile(v2Sibling, 'export const UserPlugin = async () => ({});');
     assert.equal(await removeOpenCodeProjectPlugin(root), 'removed');
     await assert.rejects(readFile(pluginPath(root), 'utf8'), { code: 'ENOENT' });
+    await assert.rejects(readFile(v2PluginPath(root), 'utf8'), { code: 'ENOENT' });
     assert.equal(await readFile(sibling, 'utf8'), 'export const UserPlugin = async () => ({});');
+    assert.equal(await readFile(v2Sibling, 'utf8'), 'export const UserPlugin = async () => ({});');
     assert.equal(await removeOpenCodeProjectPlugin(root), 'absent');
   });
 });

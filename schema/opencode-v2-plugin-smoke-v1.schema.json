@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/opencode-v2-plugin-smoke-v1.schema.json",
+  "title": "Threadforge OpenCode V2 memory and context delivery smoke v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "host_cli_version", "isolated_storage_paths_verified",
+    "agent_config_free_temp_ancestors_verified", "real_user_home_path_in_host_logs",
+    "approved_fixture_procedure_readback_verified", "project_plugin_setup_invoked", "registered_hooks",
+    "context_hook_invoked_with_memory", "retrieved_memory_received_by_loopback_provider",
+    "loopback_provider_requests", "telemetry_events_received", "package_manager_invocations",
+    "external_proxy_attempts", "real_model_invocations", "real_credentials_used", "execution_authorized"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.opencode-v2-plugin-smoke.v1" },
+    "status": { "const": "verified" },
+    "host_cli_version": { "type": "string", "pattern": "^opencode v2\\.[0-9]+\\.[0-9]+$", "maxLength": 128 },
+    "isolated_storage_paths_verified": { "const": true },
+    "agent_config_free_temp_ancestors_verified": { "const": true },
+    "real_user_home_path_in_host_logs": { "const": false },
+    "approved_fixture_procedure_readback_verified": { "const": true },
+    "project_plugin_setup_invoked": { "const": true },
+    "registered_hooks": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": { "enum": ["session.prompt", "session.context", "tool.execute.before", "tool.execute.after"] }
+    },
+    "context_hook_invoked_with_memory": { "const": true },
+    "retrieved_memory_received_by_loopback_provider": { "const": true },
+    "loopback_provider_requests": { "type": "integer", "minimum": 1, "maximum": 64 },
+    "telemetry_events_received": { "type": "integer", "minimum": 1, "maximum": 256 },
+    "package_manager_invocations": { "const": 0 },
+    "external_proxy_attempts": { "const": 0 },
+    "real_model_invocations": { "const": 0 },
+    "real_credentials_used": { "const": false },
+    "execution_authorized": { "const": false }
+  }
+}

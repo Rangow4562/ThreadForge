@@ -1,9 +1,10 @@
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, realpath, rename, rmdir, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 export const opencodeManagedMarker = 'threadforge-managed-opencode-plugin:v1';
+export const opencodeV2ManagedMarker = 'threadforge-managed-opencode-v2-plugin:v1';
 const maxPluginBytes = 256 << 10;
 
 export interface OpenCodeMemoryPluginSettings {
@@ -18,7 +19,7 @@ export interface OpenCodeMemoryPluginSettings {
 
 export type OpenCodePluginChange = 'installed' | 'updated' | 'unchanged' | 'removed' | 'absent';
 
-/** Installs Threadforge as a separate project plugin file, leaving other plugins untouched. */
+/** Installs the V1 file and V2 directory adapters without replacing unrelated OpenCode plugins. */
 export async function installOpenCodeProjectPlugin(
   projectRoot: string,
   moduleSpecifier: string,
@@ -28,44 +29,52 @@ export async function installOpenCodeProjectPlugin(
   if (memory) validateMemorySettings(memory);
   const filePath = await pluginPath(projectRoot, true);
   if (!filePath) throw new Error('unable to resolve OpenCode project plugin path');
+  const v2FilePath = await openCodeV2PluginPath(projectRoot, true);
+  if (!v2FilePath) throw new Error('unable to resolve OpenCode V2 project plugin path');
   return withLock(filePath, async () => {
-    let existing: string | undefined;
-    try {
-      const stat = await lstat(filePath);
-      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('OpenCode Threadforge plugin target must be a regular file');
-      if (stat.size > maxPluginBytes) throw new Error('OpenCode plugin target exceeds the local size limit');
-      existing = await readFile(filePath, 'utf8');
-    } catch (error) {
-      if (!isCode(error, 'ENOENT')) throw error;
-    }
+    const existing = await readPluginFile(filePath);
+    const existingV2 = await readPluginFile(v2FilePath);
     if (existing !== undefined && !existing.includes(opencodeManagedMarker)) {
       throw new Error('refusing to overwrite unmanaged OpenCode plugin file');
     }
+    if (existingV2 !== undefined && !existingV2.includes(opencodeV2ManagedMarker)) {
+      throw new Error('refusing to overwrite unmanaged OpenCode V2 plugin file');
+    }
     const next = renderOpenCodePlugin(moduleSpecifier, memory);
-    if (existing === next) return 'unchanged';
-    await atomicWrite(filePath, next);
-    return existing === undefined ? 'installed' : 'updated';
+    const nextV2 = renderOpenCodeV2Plugin(moduleSpecifier, memory);
+    if (existing === next && existingV2 === nextV2) return 'unchanged';
+    if (existing !== next) await atomicWrite(filePath, next);
+    try {
+      if (existingV2 !== nextV2) await atomicWrite(v2FilePath, nextV2);
+    } catch (error) {
+      await restorePluginFileIfUnchanged(filePath, next, existing).catch(() => {});
+      throw error;
+    }
+    return existing === undefined || existingV2 === undefined ? 'installed' : 'updated';
   });
 }
 
-/** Removes only the isolated plugin file that contains Threadforge's ownership marker. */
+/** Removes only the two isolated plugin entrypoints that carry Threadforge ownership markers. */
 export async function removeOpenCodeProjectPlugin(projectRoot: string): Promise<OpenCodePluginChange> {
   const filePath = await pluginPath(projectRoot, false);
   if (filePath === undefined) return 'absent';
+  const v2FilePath = await openCodeV2PluginPath(projectRoot, false);
   return withLock(filePath, async () => {
-    let text: string;
-    try {
-      const stat = await lstat(filePath);
-      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('OpenCode Threadforge plugin target must be a regular file');
-      if (stat.size > maxPluginBytes) throw new Error('OpenCode plugin target exceeds the local size limit');
-      text = await readFile(filePath, 'utf8');
-    } catch (error) {
-      if (isCode(error, 'ENOENT')) return 'absent';
-      throw error;
+    const existing = await readPluginFile(filePath);
+    const existingV2 = v2FilePath ? await readPluginFile(v2FilePath) : undefined;
+    let removed = false;
+    if (existing?.includes(opencodeManagedMarker)) {
+      await unlink(filePath);
+      removed = true;
     }
-    if (!text.includes(opencodeManagedMarker)) return 'absent';
-    await unlink(filePath);
-    return 'removed';
+    if (v2FilePath && existingV2?.includes(opencodeV2ManagedMarker)) {
+      await unlink(v2FilePath);
+      removed = true;
+      await rmdir(path.dirname(v2FilePath)).catch((error) => {
+        if (!isCode(error, 'ENOENT') && !isCode(error, 'ENOTEMPTY') && !isCode(error, 'EEXIST')) throw error;
+      });
+    }
+    return removed ? 'removed' : 'absent';
   });
 }
 
@@ -85,17 +94,42 @@ export function renderOpenCodePlugin(moduleSpecifier: string, memory?: OpenCodeM
     } });
     return [
       `// ${opencodeManagedMarker}`,
-      'import { ThreadforgeOpenCodePlugin } from ' + quoted + ';',
-      'export const ThreadforgeOpenCode = (context) => ThreadforgeOpenCodePlugin(context, ' + options + ');',
-      'export default ThreadforgeOpenCode;',
+      'import { createThreadforgeOpenCodeV1Plugin } from ' + quoted + ';',
+      'const threadforgePlugin = createThreadforgeOpenCodeV1Plugin(' + options + ');',
+      'export const ThreadforgeOpenCode = threadforgePlugin;',
+      'export default threadforgePlugin;',
       '',
     ].join('\n');
   }
   return [
     `// ${opencodeManagedMarker}`,
-    'import { ThreadforgeOpenCodePlugin } from ' + quoted + ';',
-    'export const ThreadforgeOpenCode = ThreadforgeOpenCodePlugin;',
-    'export default ThreadforgeOpenCodePlugin;',
+    'import { createThreadforgeOpenCodeV1Plugin } from ' + quoted + ';',
+    'const threadforgePlugin = createThreadforgeOpenCodeV1Plugin();',
+    'export const ThreadforgeOpenCode = threadforgePlugin;',
+    'export default threadforgePlugin;',
+    '',
+  ].join('\n');
+}
+
+export function renderOpenCodeV2Plugin(moduleSpecifier: string, memory?: OpenCodeMemoryPluginSettings): string {
+  validateModuleSpecifier(moduleSpecifier);
+  if (memory) validateMemorySettings(memory);
+  const quoted = JSON.stringify(moduleSpecifier);
+  const options = memory ? JSON.stringify({ memory: {
+    projectId: memory.projectId,
+    maxItems: memory.maxItems ?? 8,
+    maxTokens: memory.maxTokens ?? 1600,
+    ...(memory.taskId ? { taskId: memory.taskId } : {}),
+    ...(memory.sessionId ? { sessionId: memory.sessionId } : {}),
+    ...(memory.discoverActiveTask ? { discoverActiveTask: true } : {}),
+    ...((memory.taskId || memory.discoverActiveTask) ? { maxTaskEntries: memory.maxTaskEntries ?? 6 } : {}),
+  } }) : undefined;
+  return [
+    `// ${opencodeV2ManagedMarker}`,
+    'import { createThreadforgeOpenCodeV2Plugin } from ' + quoted + ';',
+    'const threadforgePlugin = createThreadforgeOpenCodeV2Plugin(' + (options ?? '') + ');',
+    'export const ThreadforgeOpenCodeV2 = threadforgePlugin;',
+    'export default threadforgePlugin;',
     '',
   ].join('\n');
 }
@@ -154,6 +188,42 @@ async function pluginPath(projectRoot: string, createDirectory: boolean): Promis
     if (!pluginsStat.isDirectory() || pluginsStat.isSymbolicLink()) throw new Error('OpenCode plugin path contains a symbolic link or non-directory');
   }
   return path.join(pluginsDir, 'threadforge.ts');
+}
+
+async function openCodeV2PluginPath(projectRoot: string, createDirectory: boolean): Promise<string | undefined> {
+  const legacyPath = await pluginPath(projectRoot, createDirectory);
+  if (!legacyPath) return undefined;
+  const root = await realpath(projectRoot).catch(() => { throw new Error('project root must exist and be accessible'); });
+  const pluginDirectory = path.join(path.dirname(legacyPath), 'threadforge-v2');
+  if (createDirectory) {
+    await ensureDirectory(root, pluginDirectory);
+  } else {
+    const stat = await lstat(pluginDirectory).catch(() => null);
+    if (!stat) return undefined;
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error('OpenCode V2 plugin path contains a symbolic link or non-directory');
+    }
+  }
+  return path.join(pluginDirectory, 'index.ts');
+}
+
+async function readPluginFile(filePath: string): Promise<string | undefined> {
+  try {
+    const stat = await lstat(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('OpenCode Threadforge plugin target must be a regular file');
+    if (stat.size > maxPluginBytes) throw new Error('OpenCode plugin target exceeds the local size limit');
+    return await readFile(filePath, 'utf8');
+  } catch (error) {
+    if (isCode(error, 'ENOENT')) return undefined;
+    throw error;
+  }
+}
+
+async function restorePluginFileIfUnchanged(filePath: string, expected: string, previous: string | undefined): Promise<void> {
+  const current = await readPluginFile(filePath);
+  if (current !== expected) return;
+  if (previous === undefined) await unlink(filePath);
+  else await atomicWrite(filePath, previous);
 }
 
 async function ensureDirectory(root: string, target: string): Promise<void> {

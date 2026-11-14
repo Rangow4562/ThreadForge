@@ -103,6 +103,13 @@ Invoke-Check -Label 'TypeScript adapter dependency audit (moderate and above)' -
 Invoke-Check -Label 'TypeScript adapter type check' -Executable 'npm' -Arguments @('run', 'check') -WorkingDirectory (Join-Path $RepositoryRoot 'adapters')
 Invoke-Check -Label 'TypeScript adapter tests' -Executable 'npm' -Arguments @('test') -WorkingDirectory (Join-Path $RepositoryRoot 'adapters')
 Invoke-Check -Label 'TypeScript adapter package contents' -Executable 'npm' -Arguments @('run', 'test:package') -WorkingDirectory (Join-Path $RepositoryRoot 'adapters')
+if ($env:THREADFORGE_OPENCODE_V2_BIN) {
+    Invoke-Check -Label 'OpenCode V2 isolated plugin smoke' -Executable 'npm' `
+        -Arguments @('run', 'test:opencode-v2-plugin') -WorkingDirectory (Join-Path $RepositoryRoot 'adapters')
+}
+else {
+    Write-Host 'OPTIONAL: OpenCode V2 smoke — set THREADFORGE_OPENCODE_V2_BIN to a checksum-verified OpenCode V2 executable.'
+}
 $BrowserExtensionRoot = Join-Path $RepositoryRoot 'adapters/browser-extension'
 $BrowserValidationRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("threadforge-browser-validation-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $BrowserValidationRoot | Out-Null

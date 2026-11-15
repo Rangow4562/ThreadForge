@@ -1,0 +1,8 @@
+{
+  "name": "threadforge-command-code-telemetry",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.ts",
+  "files": ["index.ts", "telemetry.ts"]
+}

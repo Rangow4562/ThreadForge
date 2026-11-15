@@ -24,7 +24,7 @@ Antigravity CLI task-plan gate probe (October 20, 2026): smoke v31 on installed 
 
 ## Additional requested harnesses (outside legacy-source parity)
 
-Command Code refresh (November 15, 2026): installed CLI `1.89.1` in smoke v48 listed the isolated project `.mcp.json` Threadforge server and discovered both approved skills. Its agent MCP read was skipped at the login gate (`provider_requests=0`, `real_model_invocations=0`); `cmdc mcp --help` exposes server management, not a standalone tool-call command. This does not verify host-mediated `threadforge_procedure_get` dispatch.
+Command Code refresh (November 15, 2026): installed CLI `1.89.1` in smoke v48 listed the isolated project `.mcp.json` Threadforge server and discovered both approved skills. Its agent MCP read was skipped at the login gate (`provider_requests=0`, `real_model_invocations=0`); `cmdc mcp --help` exposes server management, not a standalone tool-call command. The separate isolated mod smoke verifies local-source recording/removal and `cmdc mods inspect` reports the read-only `cmd.on` event subscription with no behavior hooks; `cmdc mods list` outside an agent session reports zero loaded mods. Active TUI discovery/callback execution remains unverified. This does not verify host-mediated `threadforge_procedure_get` dispatch or complete Command Code parity.
 
 | Harness | Implemented slice | Verified evidence | Still unverified |
 | --- | --- | --- | --- |

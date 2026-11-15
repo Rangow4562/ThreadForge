@@ -31,6 +31,13 @@ const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'),
 const files = packed[0].files;
 assert.ok(Array.isArray(files), 'npm did not return package file inventory');
 const paths = new Set(files.map((file) => file.path));
+for (const modFile of [
+  'command-code-mod/package.json',
+  'command-code-mod/index.ts',
+  'command-code-mod/telemetry.ts',
+]) {
+  assert.ok(paths.has(modFile), `packaged Command Code mod file is missing: ${modFile}`);
+}
 const bundledDependencies = new Set(manifest.bundleDependencies ?? []);
 for (const dependency of bundledDependencies) {
   assert.ok(manifest.dependencies?.[dependency], `bundled dependency is not declared as a runtime dependency: ${dependency}`);
@@ -90,6 +97,14 @@ try {
   const installedRoot = path.join(installRoot, 'node_modules', '@threadforge', 'adapter-contracts');
   const installedManifest = JSON.parse(readFileSync(path.join(installedRoot, 'package.json'), 'utf8'));
   assert.deepEqual(installedManifest.bin, manifest.bin, 'installed package lost its command mapping');
+  for (const modFile of [
+    'command-code-mod/package.json',
+    'command-code-mod/index.ts',
+    'command-code-mod/telemetry.ts',
+  ]) {
+    assert.ok(readFileSync(path.join(installedRoot, modFile), 'utf8').length > 0,
+      `installed Command Code mod file is empty: ${modFile}`);
+  }
   const exportedSpecifiers = Object.keys(manifest.exports).map((subpath) => `${manifest.name}/${subpath.slice(2)}`);
   const importAllExports = spawnSync(process.execPath, [
     '--input-type=module', '--eval',

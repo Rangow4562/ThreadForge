@@ -5,6 +5,7 @@
   "type": "module",
   "files": [
     "dist/**",
+    "command-code-mod/**",
     "openclaw-plugin/**"
   ],
   "bin": {
@@ -120,6 +121,7 @@
     "pretest:package": "npm run build:package",
     "test:package": "node scripts/package-smoke.mjs",
     "test:installed-skills": "node --experimental-strip-types scripts/live-skill-smoke.mjs",
+    "test:command-code-mod-host": "node scripts/command-code-mod-smoke.mjs",
     "test:opencode-v2-plugin": "node --experimental-strip-types scripts/opencode-v2-plugin-smoke.mjs",
     "test:opencode-memory": "node --experimental-strip-types scripts/opencode-memory-smoke.mjs",
     "test:opencode-history-host": "node --experimental-strip-types scripts/opencode-history-host-smoke.mjs"

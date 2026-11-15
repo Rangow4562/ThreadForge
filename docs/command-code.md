@@ -46,6 +46,25 @@ npm.cmd --prefix adapters run adapter -- mcp uninstall `
 
 For the reversible advisory instruction block, `bootstrap instructions plan|install|update|uninstall --hosts command-code --project-root <absolute-project-root>` manages a marked block in `AGENTS.md`. It does not install Command Code-native commands, skills, MCP, hooks, permissions, or trust.
 
+## Optional local telemetry observer
+
+The adapter package includes a project-scoped Command Code mod at `command-code-mod/`. It subscribes to the documented `AgentEvent` stream with `cmd.on(...)`; it does not register behavior-changing `cmd.hooks(...)`. Install only after reviewing the mod source because host mods execute code inside Command Code:
+
+```powershell
+cmdc mods add <path-to-threadforge-adapter-package>/command-code-mod
+cmdc mods list
+cmdc mods inspect <path-to-threadforge-adapter-package>/command-code-mod
+
+# Remove the project-scoped telemetry mod when no longer wanted.
+cmdc mods remove <path-to-threadforge-adapter-package>/command-code-mod
+```
+
+The observer allowlists session/run/turn/model/tool/subagent/compaction lifecycle events. It ignores each event payload and sends only normalized event type/action, category, observed timestamp, OS, and a process-generated session correlation ID to the loopback-only `http://127.0.0.1:4318/v1/events` endpoint. Prompt text, tool inputs/results, paths, model and tool names, host IDs, errors, permission/config values, and arbitrary event fields are not read or forwarded. The queue is capped at 64 in-flight requests, requests time out after 1.5 seconds by default, delivery failures are ignored, and removal disposes event subscriptions. This is opt-in local telemetry, not a policy hook or security boundary.
+
+`npm run test:command-code-mod-host` uses an isolated home and disposable Git project. On Command Code CLI `1.89.1`, the host accepted the local mod source, recorded it in project `.commandcode/settings.json`, and `cmdc mods inspect` reported `registers: event subscription` and `hooks: none`; removing the same local source cleared the mod setting. A one-shot `cmdc mods list` outside an agent session reported zero loaded mods, so active TUI discovery and callback execution remain unverified. The smoke does not log in or start an agent run.
+
+This integration follows Command Code's [Mods API](https://commandcode.ai/docs/mods), which distinguishes observer subscriptions from behavior-changing hooks. Command Code currently labels the ModApi experimental and warns that surfaces/signatures may change; treat CLI mod inspection and installed-version smoke as required when upgrading Command Code.
+
 ## Verification and limits
 
 Installed-host refresh (November 15, 2026): the Windows installed-skill smoke v48 ran against Command Code CLI `1.89.1`. It verified project `.mcp.json` discovery with `cmdc mcp list` and discovery of the approved procedure plus portable memory-continuity skills. The isolated agent MCP probe returned `skipped` with reason `isolated_command_code_cli_requires_login_for_agent_run`; `provider_requests=0` and `real_model_invocations=0`. A separate help probe under a temporary home showed `cmdc mcp` exposes server management only, not a direct tool-call command. Thus host-mediated `threadforge_procedure_get` dispatch remains unverified; no user credentials or hosted model were used.

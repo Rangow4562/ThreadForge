@@ -143,6 +143,15 @@ else {
     Write-Host "SKIPPED: Installed skill discovery — $message" -ForegroundColor DarkYellow
     $script:CheckResults.Add([pscustomobject]@{ Label = 'Installed host smoke (OpenCode/Gemini/Codex/Claude/Antigravity/Command Code)'; Status = 'skipped'; Detail = $message })
 }
+if (Get-Command 'cmdc.ps1' -ErrorAction SilentlyContinue) {
+    Invoke-Check -Label 'Command Code telemetry mod install/inspect/remove smoke (isolated project; no agent run)' -Executable 'npm' `
+        -Arguments @('run', 'test:command-code-mod-host') -WorkingDirectory (Join-Path $RepositoryRoot 'adapters')
+}
+else {
+    $message = 'The Command Code CLI is not installed; host mod source packaging and unit tests still run.'
+    Write-Host "SKIPPED: Command Code telemetry mod host smoke — $message" -ForegroundColor DarkYellow
+    $script:CheckResults.Add([pscustomobject]@{ Label = 'Command Code telemetry mod host smoke'; Status = 'skipped'; Detail = $message })
+}
 Invoke-Check -Label 'Vendored Beacon Go tests' -Executable 'go' -Arguments @('test', './...') -WorkingDirectory (Join-Path $RepositoryRoot 'third_party/agent-beacon/pkg/asymptoteobserve')
 Invoke-Check -Label 'Beacon native session-reader tests' -Executable 'go' -Arguments @('test', './...') -WorkingDirectory (Join-Path $RepositoryRoot 'third_party/beacon-sessionreaders')
 

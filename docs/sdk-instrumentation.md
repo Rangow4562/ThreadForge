@@ -32,7 +32,7 @@ try {
 }
 ```
 
-The adapter-contracts package is currently private and unpublished. This export is available from a Threadforge source checkout/workspace; a public npm release remains behind the repository's release, dependency, and licensing gates.
+The adapter-contracts package remains `private` and unpublished. A release-candidate workflow retains a separate 14-day, provenance-attested package artifact for candidate testing; see the [release-candidate build process](release-process.md). The artifact is not an npm or GitHub Release asset, and its availability follows repository read permissions. It does not clear the repository's dependency, licensing, or product-release gates.
 
 `instrumentOpenAI(client, options)` wraps available `responses.create`, `chat.completions.create`, and `completions.create` methods. `instrumentAnthropic(client, options)` wraps `messages.create`. The return value contains the same client instance and an idempotent `dispose()` method. Disposal restores a method only if Threadforge still owns the installed wrapper; application changes made after installation are preserved.
 

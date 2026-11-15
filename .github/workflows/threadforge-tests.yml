@@ -872,6 +872,81 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      - name: Check out the exact tested source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify adapter source identity
+        shell: bash
+        run: |
+          if [[ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]]; then
+            echo "Adapter package source does not match the tested workflow commit." >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js for the adapter package
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.19.0'
+
+      - name: Build and smoke-test the private adapter package
+        shell: bash
+        working-directory: adapters
+        run: |
+          npm ci
+          npm run test:package
+
+      - name: Create adapter package, SPDX inventory, and checksums
+        id: adapter-package
+        shell: bash
+        working-directory: adapters
+        env:
+          ADAPTER_ARTIFACT_DIR: ${{ runner.temp }}/threadforge-adapter-package
+        run: |
+          set -euo pipefail
+          mkdir -p "$ADAPTER_ARTIFACT_DIR"
+          npm pack --json --pack-destination "$ADAPTER_ARTIFACT_DIR" > "$RUNNER_TEMP/threadforge-adapter-pack.json"
+          package_name="$(node -e 'const p = require("./package.json"); process.stdout.write(`${p.name.replace(/^@/, "").replaceAll("/", "-")}-${p.version}.tgz`)')"
+          sbom_name="$(node -e 'const p = require("./package.json"); process.stdout.write(`threadforge_adapter_contracts_${p.version}.spdx.json`)')"
+          if [[ ! -f "$ADAPTER_ARTIFACT_DIR/$package_name" ]]; then
+            echo "npm pack did not create the expected adapter tarball." >&2
+            exit 1
+          fi
+          npm sbom --package-lock-only --omit=dev --sbom-format spdx > "$ADAPTER_ARTIFACT_DIR/$sbom_name"
+          (
+            cd "$ADAPTER_ARTIFACT_DIR"
+            sha256sum "$package_name" "$sbom_name" > checksums.txt
+            sha256sum --check checksums.txt
+          )
+          echo "package_path=$ADAPTER_ARTIFACT_DIR/$package_name" >> "$GITHUB_OUTPUT"
+          echo "sbom_path=$ADAPTER_ARTIFACT_DIR/$sbom_name" >> "$GITHUB_OUTPUT"
+          echo "checksums_path=$ADAPTER_ARTIFACT_DIR/checksums.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Attest private adapter package
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.adapter-package.outputs.package_path }}
+
+      - name: Attest adapter package SPDX inventory
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.adapter-package.outputs.sbom_path }}
+
+      - name: Attest adapter package checksums
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.adapter-package.outputs.checksums_path }}
+
+      - name: Upload separate adapter package CI artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: threadforge-adapter-package-${{ steps.release.outputs.version }}
+          path: ${{ runner.temp }}/threadforge-adapter-package/
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Download architecture-specific candidate files
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:

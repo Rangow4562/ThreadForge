@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "ThreadForge Migration Pipeline",
+    "output": "docs/diagrams/threadforge-migration-dataflow-diagram.html",
+    "viewBox": [1080, 520],
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "snapshot-path", "label": "Snapshot path", "focus": ["legacy", "snapshot", "backup", "verify"], "note": "A bounded allowlist is copied to a private backup before anything is staged." },
+      { "id": "source-authority", "label": "Source authority", "focus": ["verify", "sourceinv", "authority"], "note": "The source-set inventory is signed with a migration-reviewer key outside the repo." },
+      { "id": "staged-apply", "label": "Staged apply", "focus": ["authority", "apply", "pending"], "note": "Apply re-verifies the backup, then stages records as local_pending_review." }
+    ]
+  },
+  "stages": [
+    { "label": "Sources" },
+    { "label": "Snapshot" },
+    { "label": "Coverage" },
+    { "label": "Authority" },
+    { "label": "Apply" }
+  ],
+  "nodes": [
+    { "id": "legacy", "type": "external", "label": "Legacy Sources", "sublabel": "Beacon · Mancode", "stage": 0, "row": 1, "tag": "allowlist" },
+    { "id": "snapshot", "type": "backend", "label": "migrate snapshot", "stage": 1, "row": 0 },
+    { "id": "backup", "type": "database", "label": "Private Backup", "sublabel": "local directory", "stage": 1, "row": 2, "tag": "pre-apply proof" },
+    { "id": "verify", "type": "backend", "label": "backup-verify", "sublabel": "coverage receipts", "stage": 2, "row": 1, "width": 130 },
+    { "id": "sourceinv", "type": "database", "label": "Source-Set Inventory", "sublabel": "inventory digest", "stage": 3, "row": 0, "width": 150 },
+    { "id": "authority", "type": "security", "label": "Source Authority", "sublabel": "attest-source-set", "stage": 3, "row": 2, "width": 150, "tag": "signed" },
+    { "id": "apply", "type": "backend", "label": "migrate apply", "stage": 4, "row": 1, "width": 130 },
+    { "id": "pending", "type": "database", "label": "local_pending_review", "sublabel": "sanitized records", "stage": 4, "row": 2, "width": 150, "tag": "never auto-activated" }
+  ],
+  "flows": [
+    { "id": "legacy-snapshot", "from": "legacy", "to": "snapshot", "label": "snapshot files", "classification": "bounded copy", "variant": "emphasis" },
+    { "id": "snapshot-backup", "from": "snapshot", "to": "backup", "label": "backup before staging", "classification": "private local dir", "route": "straight", "labelAt": [315, 200] },
+    { "id": "backup-verify", "from": "backup", "to": "verify", "label": "backup-verify receipt", "classification": "verified receipt" },
+    { "id": "verify-sourceinv", "from": "verify", "to": "sourceinv", "label": "source-set digest", "classification": "inventory", "variant": "emphasis" },
+    { "id": "sourceinv-authority", "from": "sourceinv", "to": "authority", "label": "attest-source-set", "classification": "Ed25519 signed", "variant": "security", "route": "straight", "labelAt": [745, 200] },
+    { "id": "authority-apply", "from": "authority", "to": "apply", "label": "attested inputs", "classification": "gate", "variant": "emphasis" },
+    { "id": "apply-pending", "from": "apply", "to": "pending", "label": "sanitized records", "classification": "staged", "variant": "dashed", "route": "straight", "labelAt": [960, 314] }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Snapshot First", "items": ["Only a bounded allowlist of legacy files is ever copied", "The private local backup is proven before any apply", "migrate coverage emits threadforge.migration-format-coverage.v1"] },
+    { "dot": "rose", "title": "Signed Authority", "items": ["migrate sources and source-set build the authoritative root inventory", "attest-source-set signs with a key scoped to mancode_source_authority", "Reviewer trust lives in an out-of-band policy outside the repo"] },
+    { "dot": "orange", "title": "Staged, Never Live", "items": ["migrate apply re-verifies the backup and requires coverage receipts", "Sanitized records land as local_pending_review", "Nothing auto-activates; human review is required"] }
+  ]
+}

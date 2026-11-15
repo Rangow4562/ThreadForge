@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/threadforge-banner.png" alt="Threadforge — Local-First Memory, Task Continuity, Calibrated Decisions & Harness Evolution for AI Coding Agents" width="100%" style="border-radius: 8px;" />
+<img src="assets/banner.gif" alt="ThreadForge — Local-First Memory, Task Continuity, Calibrated Decisions & Harness Evolution for AI Coding Agents" width="100%" />
 
 # Threadforge
 
@@ -22,6 +22,8 @@
 [Harness Matrix](#agent-harness-integrations) •
 [Contributing](contributor.md) •
 [Commit Guide](commit.md)
+
+<a href="https://github.com/Rangow4562/ThreadForge"><img src="assets/star.gif" width="380" alt="Please star the repo. It helps other people find ThreadForge."></a>
 
 </div>
 

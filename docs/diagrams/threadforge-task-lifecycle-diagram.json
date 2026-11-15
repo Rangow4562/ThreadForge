@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "ThreadForge Task Handoff Lifecycle",
+    "output": "docs/diagrams/threadforge-task-lifecycle-diagram.html",
+    "viewBox": [1080, 630],
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "task-rail", "label": "Task rail", "focus": ["open", "in_progress", "completed"], "note": "Every task mutation is a compare-and-swap with snapshot and append-only audit." },
+      { "id": "handoff-chain", "label": "Handoff chain", "focus": ["in_progress", "draft", "offered", "accepted"], "note": "Accept is one SQLite transaction that transfers head, owner, and claim." },
+      { "id": "exits", "label": "Terminal exits", "focus": ["in_progress", "abandoned", "rejected", "cancelled"], "note": "Abandoned, rejected, and cancelled tasks end permanently." }
+    ]
+  },
+  "lanes": [
+    { "id": "main", "label": "Task rail" },
+    { "id": "handoff", "label": "Handoff chain" },
+    { "id": "terminal", "label": "Terminal exits" }
+  ],
+  "states": [
+    { "id": "open", "type": "start", "label": "Open", "sublabel": "task created", "lane": "main", "col": 0, "step": "01", "tag": "entry" },
+    { "id": "in_progress", "type": "active", "label": "In Progress", "sublabel": "claim acquired", "lane": "main", "col": 1, "step": "02", "tag": "running" },
+    { "id": "completed", "type": "success", "label": "Completed", "sublabel": "final entry", "lane": "main", "col": 4, "step": "03", "tag": "terminal" },
+    { "id": "draft", "type": "neutral", "label": "Draft", "sublabel": "handoff prepared", "lane": "handoff", "col": 0, "tag": "local", "width": 118 },
+    { "id": "offered", "type": "waiting", "label": "Offered", "sublabel": "pending accept", "lane": "handoff", "col": 1, "tag": "pause", "width": 118 },
+    { "id": "accepted", "type": "neutral", "label": "Accepted", "sublabel": "single SQLite tx", "lane": "handoff", "col": 2, "tag": "CAS transfer", "width": 118 },
+    { "id": "abandoned", "type": "failure", "label": "Abandoned", "sublabel": "stalled", "lane": "terminal", "col": 0, "tag": "terminal" },
+    { "id": "rejected", "type": "failure", "label": "Rejected", "sublabel": "terminal event", "lane": "terminal", "col": 1, "tag": "terminal" },
+    { "id": "cancelled", "type": "failure", "label": "Cancelled", "sublabel": "terminal event", "lane": "terminal", "col": 2, "tag": "terminal" }
+  ],
+  "transitions": [
+    { "from": "open", "to": "in_progress", "label": "claim acquire", "variant": "emphasis", "labelAt": [171, 202] },
+    { "from": "in_progress", "to": "completed", "label": "review + verification", "variant": "emphasis" },
+    { "from": "in_progress", "to": "draft", "label": "handoff draft", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "labelAt": [430, 248] },
+    { "from": "draft", "to": "offered", "label": "offer", "route": "bottom-channel" },
+    { "from": "offered", "to": "accepted", "label": "accept", "variant": "emphasis", "route": "bottom-channel", "labelAt": [604, 352] },
+    { "from": "accepted", "to": "in_progress", "label": "ownership transferred", "variant": "emphasis", "fromSide": "top", "toSide": "bottom" },
+    { "from": "offered", "to": "rejected", "label": "reject", "variant": "security", "labelAt": [556, 352] },
+    { "from": "offered", "to": "cancelled", "label": "cancel", "variant": "security", "labelDy": 8 },
+    { "from": "in_progress", "to": "abandoned", "label": "stalled", "variant": "security", "route": "bottom-channel" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Task Rail", "items": ["open → in_progress → completed, CAS-guarded", "blocked waits, then unblocks back to work"] },
+    { "dot": "amber", "title": "Handoff Chain", "items": ["draft → offered → accepted", "Accept moves head, owner, claim in one tx"] },
+    { "dot": "rose", "title": "Explicit Endings", "items": ["Abandoned ends a stalled task", "Rejected and cancelled are final"] }
+  ]
+}

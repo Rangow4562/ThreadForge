@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "ThreadForge Release Candidate Pipeline",
+    "output": "docs/diagrams/threadforge-release-pipeline-diagram.html",
+    "viewBox": [1100, 560],
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "tag-to-build", "label": "Tag to green matrix", "focus": ["tag", "matrix", "artifacts"], "note": "A stable tag reachable from main starts the 12-cell OS × Python matrix." },
+      { "id": "evidence-bundle", "label": "Evidence bundle", "focus": ["artifacts", "sbom", "attest", "verify"], "note": "Six payloads grow into 27 verified payloads plus 28 SLSA attestations." },
+      { "id": "human-gate", "label": "Human publish gate", "focus": ["verify", "publish", "audit"], "note": "Publishing stays a separate human-approved operation after fail-closed verification." }
+    ]
+  },
+  "lanes": [
+    { "id": "build", "label": "Trigger + Build" },
+    { "id": "evidence", "label": "Evidence + Audit" },
+    { "id": "gate", "label": "Verify + Publish" }
+  ],
+  "phases": [
+    { "id": "change", "label": "Change", "fromCol": 0, "toCol": 1 },
+    { "id": "assemble", "label": "Assemble candidate", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "gate", "label": "Verify + publish", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "candidate_assembly", "label": "27 payloads", "lane": "evidence", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "fail_closed", "label": "Fail-closed gate", "lane": "gate", "fromCol": 4, "toCol": 5, "variant": "security" }
+  ],
+  "mainPath": ["tag", "matrix", "artifacts", "sbom", "attest", "verify", "publish", "audit"],
+  "nodes": [
+    { "id": "tag", "lane": "build", "col": 0, "type": "frontend", "label": "Tag v0.5.x", "sublabel": "from main" },
+    { "id": "matrix", "lane": "build", "col": 1, "type": "backend", "label": "12-cell Matrix", "sublabel": "3 OS × Python", "tag": "green", "width": 100 },
+    { "id": "attest", "lane": "build", "col": 4, "type": "security", "label": "SLSA Attestations", "sublabel": "28 signed payloads", "width": 124 },
+    { "id": "artifacts", "lane": "evidence", "col": 2, "type": "backend", "label": "Build Artifacts", "sublabel": "6 payloads", "width": 102 },
+    { "id": "sbom", "lane": "evidence", "col": 3, "type": "backend", "label": "SBOM + Licenses", "sublabel": "SPDX receipts", "width": 100 },
+    { "id": "audit", "lane": "evidence", "col": 5, "type": "backend", "label": "Publish Audit", "sublabel": "published", "width": 110 },
+    { "id": "verify", "lane": "gate", "col": 4, "type": "security", "label": "Verify Candidate", "sublabel": "27 payloads", "tag": "fail-closed", "width": 110 },
+    { "id": "publish", "lane": "gate", "col": 5, "type": "frontend", "label": "Human Publish", "sublabel": "human gate", "width": 84 }
+  ],
+  "edges": [
+    { "from": "tag", "to": "matrix", "label": "tag push", "variant": "emphasis", "labelAt": [130, 163] },
+    { "from": "matrix", "to": "artifacts", "label": "green", "variant": "emphasis" },
+    { "from": "artifacts", "to": "sbom" },
+    { "from": "sbom", "to": "attest" },
+    { "from": "attest", "to": "verify", "label": "candidate bundle", "variant": "emphasis", "route": "drop", "fromSide": "bottom", "toSide": "top", "labelAt": [500, 290] },
+    { "from": "verify", "to": "publish", "variant": "security", "labelDy": -24 },
+    { "from": "publish", "to": "audit", "label": "published", "route": "up-channel", "fromSide": "top", "toSide": "top" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "One Happy Path", "items": ["A stable tag from main starts the 12-cell OS × Python matrix", "Six built payloads grow into 27 evidence payloads + 28 SLSA attestations", "scripts/verify_release_candidate.py checks the 27-payload inventory"] },
+    { "dot": "rose", "title": "Fail-Closed Gate", "items": ["The verifier always reports release_clearance=false and release_authorized=false", "Publishing is a separate human-approved operation", "Any payload or attestation mismatch rejects the candidate"] },
+    { "dot": "cyan", "title": "After Publish", "items": ["release.published triggers the published-release verification workflow", "SBOM reconciliation runs against the published release", "The workflow itself never holds contents:write"] }
+  ]
+}

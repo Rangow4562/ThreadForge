@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "ThreadForge Context Retrieval v2",
+    "output": "docs/diagrams/threadforge-context-retrieval-diagram.html",
+    "viewBox": [1085, 510],
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "request-and-rank", "label": "Request and rank", "focus": ["client", "handler", "ranker", "store"], "note": "Follow the deterministic ranking query against approved records." },
+      { "id": "freshness-gate", "label": "Freshness gate", "focus": ["ranker", "hash"], "note": "SHA-256 re-hashing withholds stale records when a project root is configured." },
+      { "id": "receipt-and-reply", "label": "Receipt and reply", "focus": ["ranker", "store", "handler", "client"], "note": "Retrieval receipts are append-only and the reply always stays guidance-only." }
+    ]
+  },
+  "participants": [
+    { "id": "client", "type": "external", "label": "MCP Client", "sublabel": "AI harness" },
+    { "id": "handler", "type": "backend", "label": "MCP Handler", "sublabel": "context tool" },
+    { "id": "ranker", "type": "backend", "label": "Ranker", "sublabel": "context_rank" },
+    { "id": "store", "type": "database", "label": "SQLite", "sublabel": "approved records" },
+    { "id": "hash", "type": "security", "label": "Fingerprint", "sublabel": "SHA-256 re-hash" }
+  ],
+  "segments": [
+    { "from": 150, "to": 235, "label": "Request" },
+    { "from": 245, "to": 320, "label": "Rank + verify" },
+    { "from": 330, "to": 412, "label": "Receipt + reply" }
+  ],
+  "messages": [
+    { "id": "ctx-request", "from": "client", "to": "handler", "y": 170, "label": "threadforge_context_get", "variant": "default" },
+    { "id": "rank-query", "from": "handler", "to": "ranker", "y": 199, "label": "rank project memory", "variant": "emphasis" },
+    { "id": "load-records", "from": "ranker", "to": "store", "y": 227, "label": "load approved records", "variant": "default" },
+    { "id": "records-returned", "from": "store", "to": "ranker", "y": 256, "label": "records + supersession", "variant": "return" },
+    { "id": "fingerprint-check", "from": "ranker", "to": "hash", "y": 284, "label": "re-hash source_files", "variant": "security" },
+    { "id": "stale-verdict", "from": "hash", "to": "ranker", "y": 313, "label": "stale → withhold", "variant": "return" },
+    { "id": "append-receipt", "from": "ranker", "to": "store", "y": 341, "label": "append retrieval receipt", "variant": "dashed" },
+    { "id": "ranked-context", "from": "ranker", "to": "handler", "y": 370, "label": "ranked context", "variant": "return" },
+    { "id": "ctx-reply", "from": "handler", "to": "client", "y": 394, "label": "guidance_only=true", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "handler", "from": 170, "to": 396, "type": "backend" },
+    { "participant": "ranker", "from": 199, "to": 377, "type": "backend" },
+    { "participant": "store", "from": 227, "to": 348, "type": "database" },
+    { "participant": "hash", "from": 284, "to": 320, "type": "security" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Deterministic Ranking", "items": ["Exact phrase beats title beats applicability beats body; ties break by record ID", "Supersession, conflict, and privacy checks run before token bounds", "Legacy POST /v1/context stays procedure-only for compatibility"] },
+    { "dot": "rose", "title": "Freshness Gate", "items": ["Each record's source_files is re-hashed with SHA-256", "A mismatch marks the record stale and withholds it", "Without a project root the record stays unverified or incomplete"] },
+    { "dot": "orange", "title": "Guidance Boundary", "items": ["Task-scoped retrievals append threadforge.memory-retrieval-receipt.v1/v2", "The reply always carries action_ready=false and execution_authorized=false", "Receipts are append-only; nothing in this path executes"] }
+  ]
+}

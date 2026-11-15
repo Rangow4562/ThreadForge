@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ThreadForge Local Architecture",
+    "output": "docs/diagrams/threadforge-architecture-diagram.html",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "event-path", "label": "Event intake path", "focus": ["harness", "adapters", "intake", "traces", "dashboard"], "note": "Follow hook events from the AI harness into the append-only trace." },
+      { "id": "mcp-path", "label": "MCP context path", "focus": ["harness", "mcp", "sqlite"], "note": "See how the stdio MCP server reads approved memory without writing the store." },
+      { "id": "cli-egress", "label": "CLI control and egress", "focus": ["cli", "sqlite", "projrecs", "python", "siem", "cloud"], "note": "The Go CLI is the only writer for proposals, project records, and outbound pulls." }
+    ]
+  },
+  "components": [
+    { "id": "harness", "type": "external", "label": "AI Harness", "sublabel": "Claude Code · Codex · 31 hosts", "pos": [40, 280], "size": [140, 64] },
+    { "id": "adapters", "type": "frontend", "label": "Adapter SDK", "sublabel": "hook handlers · emit.ts", "pos": [250, 280], "size": [140, 64] },
+    { "id": "intake", "type": "backend", "label": "Loopback Intake", "sublabel": "OTLP :4318 · gRPC :4317", "pos": [470, 280], "size": [150, 64], "tag": "loopback only" },
+    { "id": "traces", "type": "database", "label": "Trace JSONL", "sublabel": "traces/events.jsonl", "pos": [470, 440], "size": [150, 60], "tag": "append-only" },
+    { "id": "dashboard", "type": "backend", "label": "Dashboard", "sublabel": "/v1/dashboard", "pos": [250, 440], "size": [140, 60], "tag": "16 MiB tail" },
+    { "id": "mcp", "type": "backend", "label": "MCP Server", "sublabel": "stdio JSON-RPC 2.0", "pos": [250, 120], "size": [140, 64] },
+    { "id": "sqlite", "type": "database", "label": "SQLite Store", "sublabel": "schema v12–v14", "pos": [470, 120], "size": [150, 64], "tag": "CAS audit" },
+    { "id": "cli", "type": "backend", "label": "Go CLI", "sublabel": "internal/cli dispatch", "pos": [690, 280], "size": [140, 64] },
+    { "id": "siem", "type": "messagebus", "label": "SIEM Packs", "sublabel": "11 vendors via Vector", "pos": [690, 120], "size": [140, 60], "tag": "metadata only" },
+    { "id": "python", "type": "external", "label": "Python Engines", "sublabel": "anyjev · rrsi", "pos": [690, 440], "size": [140, 60], "tag": "JSON stdio" },
+    { "id": "cloud", "type": "cloud", "label": "Devin Cloud", "sublabel": "HTTPS pull", "pos": [900, 280], "size": [140, 60], "tag": "explicit consent" },
+    { "id": "projrecs", "type": "database", "label": ".threadforge Records", "sublabel": "memory · procedures · skills", "pos": [900, 440], "size": [160, 64], "tag": "SHA-256 chained" }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Local machine · loopback only", "wraps": ["harness", "adapters", "intake", "traces", "dashboard", "mcp", "sqlite", "cli", "siem", "python", "projrecs"] },
+    { "kind": "region", "label": "Project repo · .threadforge/", "wraps": ["projrecs"] }
+  ],
+  "connections": [
+    { "id": "harness-adapters", "from": "harness", "to": "adapters", "label": "hook events", "variant": "emphasis", "labelDy": 14 },
+    { "id": "harness-mcp", "from": "harness", "to": "mcp", "label": "MCP stdio" },
+    { "id": "adapters-intake", "from": "adapters", "to": "intake", "label": "POST /v1/events", "variant": "emphasis" },
+    { "id": "intake-traces", "from": "intake", "to": "traces", "label": "redact + append", "fromSide": "bottom", "toSide": "top", "labelDy": 24 },
+    { "id": "traces-dashboard", "from": "traces", "to": "dashboard", "label": "bounded tail" },
+    { "id": "mcp-sqlite", "from": "mcp", "to": "sqlite", "label": "read-only" },
+    { "id": "cli-sqlite", "from": "cli", "to": "sqlite", "label": "CAS proposals", "fromSide": "top", "toSide": "right" },
+    { "id": "cli-projrecs", "from": "cli", "to": "projrecs", "label": "publish", "fromSide": "bottom", "toSide": "left" },
+    { "id": "cli-python", "from": "cli", "to": "python", "label": "JSON lines", "labelDy": 24, "labelDx": -30 },
+    { "id": "cli-siem", "from": "cli", "to": "siem", "label": "packs", "fromSide": "top", "toSide": "bottom", "labelDx": 16 },
+    { "id": "cli-cloud", "from": "cli", "to": "cloud", "label": "pull" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Local-First Intake", "items": ["Adapters never write the Go database; they only emit loopback events", "OTLP intake redacts credentials, then appends to traces/events.jsonl", "The dashboard reads a bounded 16 MiB JSONL tail"] },
+    { "dot": "emerald", "title": "Single Writer", "items": ["The Go CLI is the only writer for SQLite proposals and project records", "Python engines are stateless and talk JSON over stdio", "The MCP server reads SQLite and freshness-checked .threadforge/ records"] },
+    { "dot": "rose", "title": "Egress Boundaries", "items": ["Devin Cloud pulls require explicit consent", "SIEM packs forward metadata only through Vector", "Team sync carries privacy-reviewed procedure records only"] }
+  ]
+}

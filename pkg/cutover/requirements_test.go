@@ -2,8 +2,10 @@ package cutover
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -175,10 +177,8 @@ func TestReleaseCandidateWorkflowCannotPublishPublicReleases(t *testing.T) {
 			break
 		}
 	}
-	if !strings.Contains(sourceCheck, `"$github_ref" != "refs/heads/main"`) ||
-		!strings.Contains(sourceCheck, `git merge-base --is-ancestor "$github_sha" fetch_head`) ||
-		!strings.Contains(sourceCheck, "git fetch origin main --no-tags") {
-		t.Fatalf("release source policy must restrict workflow_dispatch to main and require tagged commits to be ancestors of origin/main; script=%q", sourceCheck)
+	if sourceCheck != "bash scripts/verify_release_source.sh" {
+		t.Fatalf("release source policy must execute its separately tested verifier, got %q", sourceCheck)
 	}
 
 	for _, jobName := range []string{"python-license-evidence", "release-candidate", "release-candidate-bundle", "engineering-runtime-sbom"} {
@@ -256,6 +256,97 @@ func TestReleaseCandidateWorkflowCannotPublishPublicReleases(t *testing.T) {
 	if uploadActions == 0 {
 		t.Error("release candidates must remain available as temporary workflow artifacts")
 	}
+}
+
+func TestReleaseSourcePolicyScript(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("release source policy script is executed by the Ubuntu release-source-policy job")
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is unavailable")
+	}
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(repositoryRoot, "scripts", "verify_release_source.sh")
+	temporaryRoot := t.TempDir()
+	origin := filepath.Join(temporaryRoot, "origin.git")
+	repository := filepath.Join(temporaryRoot, "repository")
+	runReleasePolicyGit(t, temporaryRoot, "init", "--bare", "--initial-branch=main", origin)
+	runReleasePolicyGit(t, temporaryRoot, "init", "--initial-branch=main", repository)
+	runReleasePolicyGit(t, repository, "config", "user.name", "Threadforge Release Policy Test")
+	runReleasePolicyGit(t, repository, "config", "user.email", "release-policy-test@example.invalid")
+	if err := os.WriteFile(filepath.Join(repository, "source.txt"), []byte("main source\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runReleasePolicyGit(t, repository, "add", "source.txt")
+	runReleasePolicyGit(t, repository, "commit", "-m", "main source")
+	runReleasePolicyGit(t, repository, "remote", "add", "origin", origin)
+	runReleasePolicyGit(t, repository, "push", "-u", "origin", "main")
+	mainSHA := runReleasePolicyGit(t, repository, "rev-parse", "HEAD")
+
+	if output, err := runReleaseSourcePolicy(bash, script, repository, "workflow_dispatch", "refs/heads/main", mainSHA); err != nil {
+		t.Fatalf("main rehearsal was rejected: %v: %s", err, output)
+	}
+	if output, err := runReleaseSourcePolicy(bash, script, repository, "push", "refs/tags/v1.2.3", mainSHA); err != nil {
+		t.Fatalf("tagged main commit was rejected: %v: %s", err, output)
+	}
+
+	runReleasePolicyGit(t, repository, "checkout", "-b", "feature/unmerged")
+	if err := os.WriteFile(filepath.Join(repository, "feature.txt"), []byte("feature source\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runReleasePolicyGit(t, repository, "add", "feature.txt")
+	runReleasePolicyGit(t, repository, "commit", "-m", "unmerged feature")
+	featureSHA := runReleasePolicyGit(t, repository, "rev-parse", "HEAD")
+	if output, err := runReleaseSourcePolicy(bash, script, repository, "workflow_dispatch", "refs/heads/feature/unmerged", featureSHA); err == nil || !strings.Contains(output, "must be dispatched from refs/heads/main") {
+		t.Fatalf("feature-branch rehearsal should be rejected, err=%v output=%q", err, output)
+	}
+	if output, err := runReleaseSourcePolicy(bash, script, repository, "push", "refs/tags/v1.2.4", featureSHA); err == nil || !strings.Contains(output, "not reachable from origin/main") {
+		t.Fatalf("tag on unmerged feature commit should be rejected, err=%v output=%q", err, output)
+	}
+	if output, err := runReleaseSourcePolicy(bash, script, repository, "workflow_dispatch", "refs/heads/feature/unmerged", mainSHA); err == nil || !strings.Contains(output, "does not match GITHUB_SHA") {
+		t.Fatalf("mismatched checked-out SHA should be rejected, err=%v output=%q", err, output)
+	}
+}
+
+func runReleasePolicyGit(t *testing.T, directory string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = directory
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v: %s", args, err, output)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func runReleaseSourcePolicy(bash, script, directory, event, ref, sha string) (string, error) {
+	command := exec.Command(bash, script)
+	command.Dir = directory
+	command.Env = releasePolicyEnvironment(os.Environ(), map[string]string{
+		"GITHUB_EVENT_NAME": event,
+		"GITHUB_REF":        ref,
+		"GITHUB_SHA":        sha,
+	})
+	output, err := command.CombinedOutput()
+	return string(output), err
+}
+
+func releasePolicyEnvironment(environment []string, overrides map[string]string) []string {
+	result := make([]string, 0, len(environment)+len(overrides))
+	for _, variable := range environment {
+		key, _, _ := strings.Cut(variable, "=")
+		if _, overridden := overrides[key]; !overridden {
+			result = append(result, variable)
+		}
+	}
+	for key, value := range overrides {
+		result = append(result, key+"="+value)
+	}
+	return result
 }
 
 func TestEngineeringRuntimeSBOMJobIsNonPublishingAndGated(t *testing.T) {

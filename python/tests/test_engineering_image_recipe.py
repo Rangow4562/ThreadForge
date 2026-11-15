@@ -46,10 +46,29 @@ def test_engineering_image_inputs_are_digest_pinned_and_hash_locked():
     runtime_packages = _assert_hash_locked_requirements(
         IMAGE_ROOT / "requirements-linux-x86_64-py312.lock", minimum_packages=100,
     )
+    runtime_lock = (IMAGE_ROOT / "requirements-linux-x86_64-py312.lock").read_text(
+        encoding="utf-8"
+    )
+    opentelemetry_version = re.search(
+        r"(?m)^opentelemetry-api==([0-9]+(?:\.[0-9]+){2}) \\$", runtime_lock
+    )
+    assert opentelemetry_version is not None
+    assert tuple(map(int, opentelemetry_version.group(1).split("."))) >= (1, 45, 2)
+    assert "opentelemetry-api>=1.45.2,<2" in (
+        IMAGE_ROOT / "constraints.txt"
+    ).read_text(encoding="utf-8")
     build_packages = _assert_hash_locked_requirements(
         IMAGE_ROOT / "build-requirements.lock", minimum_packages=3,
     )
-    assert {"datadog-api-client", "fastmcp", "litellm", "mcp", "pymupdf", "uvicorn"} <= runtime_packages
+    assert {
+        "datadog-api-client",
+        "fastmcp",
+        "litellm",
+        "mcp",
+        "opentelemetry-api",
+        "pymupdf",
+        "uvicorn",
+    } <= runtime_packages
     assert {"setuptools", "wheel"} <= build_packages
 
     dockerfile = (IMAGE_ROOT / "Dockerfile").read_text(encoding="utf-8")

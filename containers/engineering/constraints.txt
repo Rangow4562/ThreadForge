@@ -2,3 +2,5 @@
 fastmcp<3
 litellm<2
 datadog-api-client==2.61.0
+# Require the OpenTelemetry traceparent parsing fix (GHSA-mf5v-w3w3-f6cg).
+opentelemetry-api>=1.45.2,<2

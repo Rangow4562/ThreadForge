@@ -155,11 +155,47 @@ func TestReleaseCandidateWorkflowCannotPublishPublicReleases(t *testing.T) {
 	if jobs == nil || jobs.Kind != yaml.MappingNode {
 		t.Fatal("release-candidate workflow jobs are missing")
 	}
-	for _, jobName := range []string{"python-license-evidence", "release-candidate", "release-candidate-bundle"} {
+	for _, jobName := range []string{"release-source-policy", "python-license-evidence", "release-candidate", "release-candidate-bundle", "engineering-runtime-sbom"} {
 		job := workflowYAMLValue(jobs, jobName)
 		jobPermissions := workflowYAMLValue(job, "permissions")
 		if job == nil || jobPermissions == nil || workflowYAMLScalar(jobPermissions, "contents") != "read" {
 			t.Errorf("candidate job %q must explicitly keep repository contents read-only", jobName)
+		}
+	}
+
+	sourcePolicy := workflowYAMLValue(jobs, "release-source-policy")
+	sourceSteps := workflowYAMLValue(sourcePolicy, "steps")
+	if sourceSteps == nil || sourceSteps.Kind != yaml.SequenceNode {
+		t.Fatal("release source policy steps are missing")
+	}
+	var sourceCheck string
+	for _, step := range sourceSteps.Content {
+		if workflowYAMLScalar(step, "name") == "enforce tag ancestry and main-only rehearsal policy" {
+			sourceCheck = workflowYAMLScalar(step, "run")
+			break
+		}
+	}
+	if !strings.Contains(sourceCheck, `"$github_ref" != "refs/heads/main"`) ||
+		!strings.Contains(sourceCheck, `git merge-base --is-ancestor "$github_sha" fetch_head`) ||
+		!strings.Contains(sourceCheck, "git fetch origin main --no-tags") {
+		t.Fatalf("release source policy must restrict workflow_dispatch to main and require tagged commits to be ancestors of origin/main; script=%q", sourceCheck)
+	}
+
+	for _, jobName := range []string{"python-license-evidence", "release-candidate", "release-candidate-bundle", "engineering-runtime-sbom"} {
+		job := workflowYAMLValue(jobs, jobName)
+		condition := workflowYAMLScalar(job, "if")
+		if !strings.Contains(condition, "github.ref == 'refs/heads/main'") {
+			t.Errorf("release job %q must only run a workflow_dispatch rehearsal from main", jobName)
+		}
+		needs := workflowYAMLValue(job, "needs")
+		dependsOnPolicy := false
+		if needs != nil && needs.Kind == yaml.SequenceNode {
+			for _, need := range needs.Content {
+				dependsOnPolicy = dependsOnPolicy || need.Value == "release-source-policy"
+			}
+		}
+		if !dependsOnPolicy {
+			t.Errorf("release job %q must wait for the release-source-policy gate", jobName)
 		}
 	}
 

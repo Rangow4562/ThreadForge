@@ -44,6 +44,46 @@ jobs:
         shell: bash
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
+  release-source-policy:
+    name: Verify release candidate source policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out candidate commit with complete history
+        if: >-
+          (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
+          || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Enforce tag ancestry and main-only rehearsal policy
+        if: >-
+          (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
+          || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]]; then
+            echo "Checked-out release candidate does not match GITHUB_SHA." >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+              echo "Release-pipeline rehearsals must be dispatched from refs/heads/main." >&2
+              exit 1
+            fi
+            exit 0
+          fi
+          git fetch origin main --no-tags
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "Tagged release commit is not reachable from origin/main." >&2
+            exit 1
+          fi
+
   opencode-v2-plugin:
     name: OpenCode V2 memory/context delivery (2.3.0)
     runs-on: ubuntu-latest
@@ -448,8 +488,8 @@ jobs:
     name: Python license evidence (${{ matrix.target_os }}, Python ${{ matrix.python }})
     if: >-
       (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
-      || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
-    needs: [test, elasticsearch-local-stack, workflow-lint]
+      || (github.event_name == 'workflow_dispatch' && inputs.release_version != '' && github.ref == 'refs/heads/main')
+    needs: [test, elasticsearch-local-stack, workflow-lint, release-source-policy]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -663,8 +703,8 @@ jobs:
     name: Build and attest release candidates (${{ matrix.goos }}/${{ matrix.goarch }})
     if: >-
       (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
-      || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
-    needs: [test, elasticsearch-local-stack, python-license-evidence, opencode-v2-plugin, vector-config-validation, python-vulnerability-audit]
+      || (github.event_name == 'workflow_dispatch' && inputs.release_version != '' && github.ref == 'refs/heads/main')
+    needs: [test, elasticsearch-local-stack, python-license-evidence, opencode-v2-plugin, vector-config-validation, python-vulnerability-audit, release-source-policy]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -846,8 +886,8 @@ jobs:
     name: Assemble, checksum, and attest release-candidate bundle
     if: >-
       (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
-      || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
-    needs: [release-candidate, python-license-evidence, engineering-runtime-sbom]
+      || (github.event_name == 'workflow_dispatch' && inputs.release_version != '' && github.ref == 'refs/heads/main')
+    needs: [release-candidate, python-license-evidence, engineering-runtime-sbom, release-source-policy]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1159,8 +1199,8 @@ jobs:
     name: Build, inventory, and attest Engineering runtime image
     if: >-
       (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
-      || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
-    needs: [test, elasticsearch-local-stack, python-license-evidence]
+      || (github.event_name == 'workflow_dispatch' && inputs.release_version != '' && github.ref == 'refs/heads/main')
+    needs: [test, elasticsearch-local-stack, python-license-evidence, release-source-policy]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

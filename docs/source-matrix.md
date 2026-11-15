@@ -24,6 +24,8 @@ Antigravity CLI task-plan gate probe (October 20, 2026): smoke v31 on installed 
 
 ## Additional requested harnesses (outside legacy-source parity)
 
+Command Code refresh (November 15, 2026): installed CLI `1.89.1` in smoke v48 listed the isolated project `.mcp.json` Threadforge server and discovered both approved skills. Its agent MCP read was skipped at the login gate (`provider_requests=0`, `real_model_invocations=0`); `cmdc mcp --help` exposes server management, not a standalone tool-call command. This does not verify host-mediated `threadforge_procedure_get` dispatch.
+
 | Harness | Implemented slice | Verified evidence | Still unverified |
 | --- | --- | --- | --- |
 | Aider | Digest-checked portable approved procedure export to `.agents/skills/`, explicit read-only `aider --read`, or explicit managed project `.aider.conf.yml` `read` entry | Local CLI tests verify exact-byte export, explicit per-run command, opt-in YAML config install/update/uninstall, ownership, user-setting preservation, and non-authorization; no Aider executable is required for these fixtures | Installed Aider version behavior, actual file loading/model use, task outcomes, and cross-harness acceptance remain unverified. Auto-read is not enabled by skill export/install alone. See [Aider procedure access](aider.md) |

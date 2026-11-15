@@ -1,5 +1,5 @@
-// Package migrationreview defines signed, human-review evidence for legacy
-// Mancode plans whose original format did not bind the plan body to a version.
+// Package migrationreview defines purpose-scoped, signed human-review
+// evidence for Mancode plan bindings and authoritative source inventories.
 package migrationreview
 
 import (
@@ -24,6 +24,8 @@ const (
 	TrustStoreSchemaVersion  = "threadforge.mancode-plan-review-trust.v1"
 	AttestationSchemaVersion = "threadforge.mancode-plan-review-attestation.v1"
 	ReviewDecision           = "pairing_and_declared_version_confirmed"
+	PurposePlanReview        = "mancode_plan_review"
+	PurposeSourceAuthority   = "mancode_source_authority"
 	maxTrustStoreBytes       = 1 << 20
 )
 
@@ -40,6 +42,7 @@ type ReviewerKey struct {
 	PublicKey string   `json:"public_key"`
 	Reviewer  string   `json:"reviewer_id"`
 	Products  []string `json:"products"`
+	Purposes  []string `json:"purposes,omitempty"`
 	NotBefore string   `json:"not_before"`
 	NotAfter  string   `json:"not_after"`
 }
@@ -106,12 +109,22 @@ func ValidateTrustStore(trust TrustStore) error {
 		if !reviewerPattern.MatchString(key.Reviewer) || len(key.Products) == 0 || len(key.Products) > 4 {
 			return fmt.Errorf("reviewer key %s has invalid reviewer or product scope", key.KeyID)
 		}
+		if (key.Purposes != nil && len(key.Purposes) == 0) || len(key.Purposes) > 2 {
+			return fmt.Errorf("reviewer key %s has invalid purpose scope", key.KeyID)
+		}
 		seenProduct := make(map[string]bool, len(key.Products))
 		for _, product := range key.Products {
 			if product != "mancode" || seenProduct[product] {
 				return fmt.Errorf("reviewer key %s has unknown or duplicate product scope", key.KeyID)
 			}
 			seenProduct[product] = true
+		}
+		seenPurpose := make(map[string]bool)
+		for _, purpose := range key.Purposes {
+			if (purpose != PurposePlanReview && purpose != PurposeSourceAuthority) || seenPurpose[purpose] {
+				return fmt.Errorf("reviewer key %s has unknown or duplicate purpose scope", key.KeyID)
+			}
+			seenPurpose[purpose] = true
 		}
 		before, beforeErr := time.Parse(time.RFC3339Nano, key.NotBefore)
 		after, afterErr := time.Parse(time.RFC3339Nano, key.NotAfter)
@@ -130,6 +143,8 @@ func TrustStoreSHA256(trust TrustStore) (string, error) {
 	for index := range canonical.Keys {
 		canonical.Keys[index].Products = append([]string(nil), canonical.Keys[index].Products...)
 		sort.Strings(canonical.Keys[index].Products)
+		canonical.Keys[index].Purposes = append([]string(nil), canonical.Keys[index].Purposes...)
+		sort.Strings(canonical.Keys[index].Purposes)
 	}
 	sort.Slice(canonical.Keys, func(i, j int) bool { return canonical.Keys[i].KeyID < canonical.Keys[j].KeyID })
 	encoded, err := json.Marshal(canonical)
@@ -230,8 +245,8 @@ func Verify(attestation Attestation, trust TrustStore, expected Binding) error {
 			break
 		}
 	}
-	if trusted == nil || trusted.Reviewer != attestation.Reviewer || !contains(trusted.Products, expected.Product) {
-		return errors.New("Mancode plan-review signing key is not trusted for this reviewer and product")
+	if trusted == nil || trusted.Reviewer != attestation.Reviewer || !contains(trusted.Products, expected.Product) || !hasPurpose(*trusted, PurposePlanReview) {
+		return errors.New("Mancode plan-review signing key is not trusted for this reviewer, product, and purpose")
 	}
 	notBefore, _ := time.Parse(time.RFC3339Nano, trusted.NotBefore)
 	notAfter, _ := time.Parse(time.RFC3339Nano, trusted.NotAfter)
@@ -248,6 +263,15 @@ func Verify(attestation Attestation, trust TrustStore, expected Binding) error {
 		return errors.New("Mancode plan-review signature verification failed")
 	}
 	return nil
+}
+
+func hasPurpose(key ReviewerKey, purpose string) bool {
+	if len(key.Purposes) == 0 {
+		// Legacy trust entries remain plan-review-only; source authority requires
+		// an explicit, separately reviewed purpose assignment.
+		return purpose == PurposePlanReview
+	}
+	return contains(key.Purposes, purpose)
 }
 
 func signingBytes(attestation Attestation) ([]byte, error) {

@@ -4989,3 +4989,72 @@ def test_mancode_source_set_and_cutover_v6_require_per_root_evidence():
     invalid_non_mancode["migrations"][0]["product"] = "beacon"
     with pytest.raises(ValidationError):
         validator.validate(invalid_non_mancode)
+
+    v7_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v7.schema.json").read_text(encoding="utf-8"))
+    v7_registry = Registry().with_resources([
+        (v7_schema["$id"], Resource.from_contents(v7_schema)),
+        (v3_schema["$id"], Resource.from_contents(v3_schema)),
+        (v2_schema["$id"], Resource.from_contents(v2_schema)),
+    ])
+    v7_validator = validator_for(v7_schema)(v7_schema, registry=v7_registry)
+    v7_report = json.loads(json.dumps(report))
+    v7_report["schema_version"] = "threadforge.cutover-evidence.v7"
+    v7_report["migrations"][0]["mancode_source_authority"] = {
+        "path": "source-authority.json", "sha256": "a" * 64
+    }
+    v7_validator.validate(v7_report)
+    missing_source_authority = json.loads(json.dumps(v7_report))
+    missing_source_authority["migrations"][0].pop("mancode_source_authority")
+    with pytest.raises(ValidationError):
+        v7_validator.validate(missing_source_authority)
+    invalid_non_mancode_v7 = json.loads(json.dumps(v7_report))
+    invalid_non_mancode_v7["migrations"][0]["product"] = "beacon"
+    with pytest.raises(ValidationError):
+        v7_validator.validate(invalid_non_mancode_v7)
+
+    trust_schema = json.loads((SCHEMA_DIRECTORY / "mancode-plan-review-trust-v1.schema.json").read_text(encoding="utf-8"))
+    trust_validator = validator_for(trust_schema)(trust_schema)
+    trust_document = {
+        "schema_version": "threadforge.mancode-plan-review-trust.v1",
+        "keys": [{
+            "key_id": "b" * 64, "public_key": "A" * 44, "reviewer_id": "migration-reviewer",
+            "products": ["mancode"], "not_before": "2026-01-01T00:00:00Z", "not_after": "2027-01-01T00:00:00Z"
+        }]
+    }
+    trust_validator.validate(trust_document)
+    scoped_trust = json.loads(json.dumps(trust_document))
+    scoped_trust["keys"][0]["purposes"] = ["mancode_plan_review", "mancode_source_authority"]
+    trust_validator.validate(scoped_trust)
+    invalid_trust = json.loads(json.dumps(scoped_trust))
+    invalid_trust["keys"][0]["purposes"] = ["mancode_source_authority", "unknown"]
+    with pytest.raises(ValidationError):
+        trust_validator.validate(invalid_trust)
+
+    authority_schema = json.loads((SCHEMA_DIRECTORY / "mancode-source-authority-attestation-v1.schema.json").read_text(encoding="utf-8"))
+    result_schema = json.loads((SCHEMA_DIRECTORY / "mancode-source-authority-result-v1.schema.json").read_text(encoding="utf-8"))
+    authority_registry = Registry().with_resources([
+        (authority_schema["$id"], Resource.from_contents(authority_schema)),
+        (result_schema["$id"], Resource.from_contents(result_schema)),
+    ])
+    authority = {
+        "schema_version": "threadforge.mancode-source-authority-attestation.v1",
+        "reviewer_id": "source-authority-reviewer", "key_id": "1" * 64, "product": "mancode",
+        "source_set_artifact_sha256": "2" * 64, "inventory_sha256": "3" * 64,
+        "project_source_fingerprint": "4" * 64, "project_snapshot_sha256": "5" * 64,
+        "component_count": 2, "decision": "authoritative_source_inventory_confirmed",
+        "issued_at": "2026-11-15T12:00:00Z", "signature": "A" * 88,
+    }
+    validator_for(authority_schema)(authority_schema, registry=authority_registry).validate(authority)
+    result_schema_value = {
+        "schema_version": "threadforge.mancode-source-authority-result.v1", "product": "mancode",
+        "reviewer_id": "source-authority-reviewer", "key_id": "1" * 64, "attestation": authority,
+        "attestation_path": "mancode/source-authority.json", "attestation_artifact_sha256": "6" * 64,
+        "source_set_artifact_sha256": "2" * 64, "inventory_sha256": "3" * 64, "component_count": 2,
+        "source_set_recomputed": True, "trusted_signature_verified": True, "reviewer_assertion_signed": True,
+        "human_review_required": True, "execution_authorized": False, "cutover_ready": False,
+    }
+    validator_for(result_schema)(result_schema, registry=authority_registry).validate(result_schema_value)
+    unsafe_result = json.loads(json.dumps(result_schema_value))
+    unsafe_result["cutover_ready"] = True
+    with pytest.raises(ValidationError):
+        validator_for(result_schema)(result_schema, registry=authority_registry).validate(unsafe_result)

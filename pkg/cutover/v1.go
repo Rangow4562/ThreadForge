@@ -21,7 +21,7 @@ import (
 	"github.com/threadforge-ai/threadforge/pkg/privacy"
 )
 
-const SchemaVersion = "threadforge.cutover-evidence.v6"
+const SchemaVersion = "threadforge.cutover-evidence.v7"
 
 const (
 	maxArtifactBytes = 128 << 20
@@ -68,6 +68,7 @@ type MigrationEvidence struct {
 	FormatCoverage             Evidence                  `json:"format_coverage"`
 	SourceBackupVerification   Evidence                  `json:"source_backup_verification"`
 	MancodeSourceSet           Evidence                  `json:"mancode_source_set,omitempty"`
+	MancodeSourceAuthority     Evidence                  `json:"mancode_source_authority,omitempty"`
 	Sources                    []MigrationSourceEvidence `json:"sources,omitempty"`
 	SourceRecords              int                       `json:"source_records"`
 	ImportedRecords            int                       `json:"imported_records"`
@@ -266,7 +267,7 @@ func AssessWithTrustAndMigrationReviewers(report Report, evidenceRoot string, tr
 		if product == "mancode" {
 			validateMancodeSourceSetMigration(&assessment, verifier, migration, trustedMigrationReviewers)
 		} else {
-			if migration.MancodeSourceSet.Path != "" || migration.Sources != nil {
+			if migration.MancodeSourceSet.Path != "" || migration.MancodeSourceAuthority.Path != "" || migration.Sources != nil {
 				assessment.Blockers = append(assessment.Blockers, "migration "+product+" contains Mancode-only source-set evidence")
 			}
 			verifyEvidence(&assessment, verifier, "migration "+product+" format coverage", []Evidence{migration.FormatCoverage})
@@ -451,6 +452,7 @@ func validateMancodeSourceSetMigration(assessment *Assessment, verifier *artifac
 	if sourceSet.ProjectSourceFingerprint != migration.SourceFingerprint || sourceSet.ProjectSnapshotSHA256 != migration.SnapshotSHA256 {
 		assessment.Blockers = append(assessment.Blockers, "migration mancode source-set inventory does not bind the project snapshot")
 	}
+	validateMancodeSourceAuthority(assessment, verifier, migration.MancodeSourceAuthority, content, actual, sourceSet, trustedMigrationReviewers)
 
 	sourceEvidenceByID := make(map[string]MigrationSourceEvidence, len(migration.Sources))
 	for _, source := range migration.Sources {
@@ -516,6 +518,46 @@ func validateMancodeSourceSetMigration(assessment *Assessment, verifier *artifac
 	}
 	if totalFiles == 0 {
 		assessment.Blockers = append(assessment.Blockers, "migration mancode source set contains no scanned source files")
+	}
+}
+
+func validateMancodeSourceAuthority(assessment *Assessment, verifier *artifactVerifier, evidence Evidence, sourceSetContent []byte,
+	sourceSetArtifactSHA256 string, sourceSet migrationsources.MancodeReport, trustedReviewers migrationreview.TrustStore) {
+	if evidence.Path == "" {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode is missing a trusted authoritative-source-set attestation")
+		return
+	}
+	verifyEvidence(assessment, verifier, "migration mancode source-authority attestation", []Evidence{evidence})
+	content, actual, err := verifier.readEvidence(evidence)
+	if err != nil {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source-authority attestation: "+err.Error())
+		return
+	}
+	if actual != evidence.SHA256 {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source-authority attestation digest mismatch")
+		return
+	}
+	var attestation migrationreview.SourceAuthorityAttestation
+	if err := decodeUniqueJSON(content, &attestation); err != nil {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source-authority attestation is invalid JSON")
+		return
+	}
+	if err := migrationreview.ValidateSourceAuthorityAttestation(attestation); err != nil {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source-authority attestation is invalid: "+err.Error())
+		return
+	}
+	expected, err := migrationreview.SourceAuthorityBindingForArtifact(sourceSetContent, sourceSet.InventorySHA256,
+		sourceSet.ProjectSourceFingerprint, sourceSet.ProjectSnapshotSHA256, len(sourceSet.Components))
+	if err != nil || expected.SourceSetArtifactSHA256 != sourceSetArtifactSHA256 {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source-authority binding could not be established")
+		return
+	}
+	if len(trustedReviewers.Keys) == 0 {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source-authority attestation has no separately trusted authority policy")
+		return
+	}
+	if err := migrationreview.VerifySourceAuthority(attestation, trustedReviewers, expected); err != nil {
+		assessment.Blockers = append(assessment.Blockers, "migration mancode source-authority attestation is not trusted: "+err.Error())
 	}
 }
 

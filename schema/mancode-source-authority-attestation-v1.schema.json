@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-source-authority-attestation-v1.schema.json",
+  "title": "Threadforge signed Mancode authoritative source-set attestation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "reviewer_id", "key_id", "product", "source_set_artifact_sha256",
+    "inventory_sha256", "project_source_fingerprint", "project_snapshot_sha256", "component_count",
+    "decision", "issued_at", "signature"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-source-authority-attestation.v1" },
+    "reviewer_id": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._@/-]{0,127}$" },
+    "key_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "product": { "const": "mancode" },
+    "source_set_artifact_sha256": { "$ref": "#/$defs/sha256" },
+    "inventory_sha256": { "$ref": "#/$defs/sha256" },
+    "project_source_fingerprint": { "$ref": "#/$defs/sha256" },
+    "project_snapshot_sha256": { "$ref": "#/$defs/sha256" },
+    "component_count": { "type": "integer", "minimum": 1, "maximum": 1024 },
+    "decision": { "const": "authoritative_source_inventory_confirmed" },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "contentEncoding": "base64", "minLength": 88, "maxLength": 88 }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

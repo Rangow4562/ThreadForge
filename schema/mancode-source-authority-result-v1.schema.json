@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/mancode-source-authority-result-v1.schema.json",
+  "title": "Threadforge Mancode source-authority signing result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "product", "reviewer_id", "key_id", "attestation", "attestation_path",
+    "attestation_artifact_sha256", "source_set_artifact_sha256", "inventory_sha256", "component_count",
+    "source_set_recomputed", "trusted_signature_verified", "reviewer_assertion_signed", "human_review_required",
+    "execution_authorized", "cutover_ready"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.mancode-source-authority-result.v1" },
+    "product": { "const": "mancode" },
+    "reviewer_id": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._@/-]{0,127}$" },
+    "key_id": { "$ref": "mancode-source-authority-attestation-v1.schema.json#/$defs/sha256" },
+    "attestation": { "$ref": "mancode-source-authority-attestation-v1.schema.json" },
+    "attestation_path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "attestation_artifact_sha256": { "$ref": "mancode-source-authority-attestation-v1.schema.json#/$defs/sha256" },
+    "source_set_artifact_sha256": { "$ref": "mancode-source-authority-attestation-v1.schema.json#/$defs/sha256" },
+    "inventory_sha256": { "$ref": "mancode-source-authority-attestation-v1.schema.json#/$defs/sha256" },
+    "component_count": { "type": "integer", "minimum": 1, "maximum": 1024 },
+    "source_set_recomputed": { "const": true },
+    "trusted_signature_verified": { "const": true },
+    "reviewer_assertion_signed": { "const": true },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "cutover_ready": { "const": false }
+  }
+}

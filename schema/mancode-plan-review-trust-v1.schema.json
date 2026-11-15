@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://threadforge.dev/schema/mancode-plan-review-trust-v1.schema.json",
-  "title": "Threadforge trusted Mancode plan reviewers v1",
+  "title": "Threadforge trusted Mancode migration reviewers and source authorities v1",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "keys"],
@@ -17,6 +17,7 @@
           "public_key": { "type": "string", "contentEncoding": "base64", "minLength": 44, "maxLength": 44 },
           "reviewer_id": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._@/-]{0,127}$" },
           "products": { "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": { "const": "mancode" } },
+          "purposes": { "type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": { "enum": ["mancode_plan_review", "mancode_source_authority"] } },
           "not_before": { "type": "string", "format": "date-time" },
           "not_after": { "type": "string", "format": "date-time" }
         }

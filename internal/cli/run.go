@@ -361,13 +361,13 @@ func runCutover(args []string, stdout, stderr io.Writer) int {
 	reportPath := fs.String("report", "", "cutover evidence report JSON")
 	evidenceRoot := fs.String("evidence-root", "", "directory containing report evidence artifacts")
 	trustedEvaluatorPath := fs.String("trusted-evaluators", "", "out-of-repository evaluator trust policy JSON")
-	trustedMigrationReviewerPath := fs.String("trusted-migration-reviewers", "", "out-of-repository trusted Mancode plan-reviewer policy JSON")
+	trustedMigrationReviewerPath := fs.String("trusted-migration-reviewers", "", "out-of-repository trusted Mancode migration-review and source-authority policy JSON")
 	repositoryRoot := fs.String("repository-root", ".", "clean Threadforge git checkout under assessment")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
 	if *reportPath == "" || *evidenceRoot == "" || fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-trust.json>] [--repository-root <clean-checkout>]")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-and-source-authority-trust.json>] [--repository-root <clean-checkout>]")
 		return 2
 	}
 	reportContent, err := readBoundedJSONContent(*reportPath, 32<<20)
@@ -2916,7 +2916,7 @@ func historyProjectMemory(args []string, stdout, stderr io.Writer) int {
 
 func runMigrate(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "migration action required: inspect, snapshot, sources, source-set, backup-verify, coverage, review-plan, apply, verify, rollback, status, or records")
+		_, _ = fmt.Fprintln(stderr, "migration action required: inspect, snapshot, sources, source-set, attest-source-set, backup-verify, coverage, review-plan, apply, verify, rollback, status, or records")
 		return 2
 	}
 	switch args[0] {
@@ -2928,6 +2928,8 @@ func runMigrate(args []string, stdout, stderr io.Writer) int {
 		return listMancodeMigrationSources(args[1:], stdout, stderr)
 	case "source-set":
 		return mancodeMigrationSourceSet(args[1:], stdout, stderr)
+	case "attest-source-set":
+		return attestMancodeSourceSetAuthority(args[1:], stdout, stderr)
 	case "coverage":
 		return migrationFormatCoverage(args[1:], stdout, stderr)
 	case "review-plan":
@@ -4517,6 +4519,7 @@ Commands:
   migrate snapshot --product <beacon|mancode|anyjev|rrsi> --root <path>
   migrate sources --root <mancode-project-root>
   migrate source-set --root <mancode-project-root> --manifest <snapshot\\manifest.json> [--manifest <snapshot\\manifest.json> ...]
+  migrate attest-source-set --root <mancode-project-root> --manifest <snapshot\\manifest.json> [--manifest <snapshot\\manifest.json> ...] --source-set <source-set.json> --evidence-root <cutover-evidence-dir> --attestation-path <new-relative-path.json> --identity-key <private-key.json> --trusted-reviewers <external-trust.json> --confirm-authoritative-root-inventory
   migrate coverage --manifest <snapshot\\manifest.json>
   migrate review-plan --manifest <snapshot\\manifest.json> --backup-root <independent-copy> [--previous-coverage <reviewed-coverage.json>] --output <new-coverage.json> --workflow-id-sha256 <digest> --identity-key <private-key.json> --trusted-reviewers <trust.json> --confirm-reviewed-pairing
   migrate backup-verify --manifest <snapshot\\manifest.json> --backup-root <independent-copy>
@@ -4586,7 +4589,7 @@ Commands:
   session update --id <id> --expected-revision <n> [--close] [--summary <text>] [--next-action <text>] [--identity-key <private-key.json>]
   session history --id <id> [--db <path>]
   handoff list|export|resume ...
-  cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-trust.json>] [--repository-root <clean-checkout>]
+  cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-and-source-authority-trust.json>] [--repository-root <clean-checkout>]
   cutover attest-evaluation --report <report.json> --domain <domain> --evidence-root <artifacts-dir> --candidate-root <clean-checkout> --legacy-root <clean-checkout> --identity <private-identity.json> --trusted-evaluators <external-trust.json> --attestation-path <relative-new-path.json> --output-report <new-report.json> --confirm-evaluator-assertion
   evolution domain-verify --file <domain-verification-request.v1-or-v2.json> [--python python]
   security scan [--traces <events.jsonl>] [--rules-dir <path>] [--rules-store <path>] [--min-severity info] [--session <id-substring>] [--fail-on <severity>]

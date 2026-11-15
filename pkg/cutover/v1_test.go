@@ -24,7 +24,7 @@ import (
 func TestAssessRequiresAllParityMigrationAdaptersAndEvaluations(t *testing.T) {
 	root := t.TempDir()
 	report, evidence, trust := completeFixture(t, root)
-	assessment, err := AssessWithTrust(report, root, trust)
+	assessment, err := AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestAssessBlocksIncompleteMancodePrivacyBindingCoverage(t *testing.T) {
 		mancodeMigration.FormatCoverage.SHA256 = hex.EncodeToString(digest[:])
 	}
 	writeCoverage()
-	assessment, err := AssessWithTrust(report, root, trust)
+	assessment, err := AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
 	if err != nil || !assessment.Ready {
 		t.Fatalf("verified Mancode privacy binding blocked a complete report: %#v, %v", assessment, err)
 	}
@@ -424,6 +424,7 @@ func TestAssessBlocksMancodeLegacyPlanWithoutSourceVersionBinding(t *testing.T) 
 		Products: []string{"mancode"}, NotBefore: issuedAt.Add(-time.Hour).Format(time.RFC3339Nano),
 		NotAfter: issuedAt.Add(time.Hour).Format(time.RFC3339Nano),
 	}}}
+	reviewers.Keys = append(reviewers.Keys, fixtureMigrationAuthorityTrustStore().Keys...)
 	check := &coverage.MancodeLegacyWorkflowChecks[0]
 	binding := migrationreview.Binding{
 		Product: coverage.Product, SourceFingerprint: coverage.SourceFingerprint, SnapshotSHA256: coverage.SnapshotSHA256,
@@ -662,12 +663,12 @@ func TestAssessDerivesMetricsFromTrialsAndNormalizesOverheadPerRun(t *testing.T)
 	if evaluation.BaselineRuns != 8 || evaluation.CandidateRuns != 4 || evaluation.CandidateCostUSD >= evaluation.BaselineCostUSD || evaluation.CandidateTokens >= evaluation.BaselineTokens {
 		t.Fatalf("fixture must have fewer candidate total cost/tokens because it has fewer runs: %#v", evaluation)
 	}
-	assessment, err := AssessWithTrust(report, root, trust)
+	assessment, err := AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
 	if err != nil || !assessment.Ready {
 		t.Fatalf("run-normalized fixture should pass: %#v, %v", assessment, err)
 	}
 	evaluation.CandidateTokens++
-	assessment, err = AssessWithTrust(report, root, trust)
+	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
 	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "declared metrics do not match") {
 		t.Fatalf("caller-edited metrics should be rejected: %#v, %v", assessment, err)
 	}
@@ -679,7 +680,7 @@ func TestAssessDerivesMetricsFromTrialsAndNormalizesOverheadPerRun(t *testing.T)
 		}
 	}
 	refreshEvaluation(t, root, evaluation, trials)
-	assessment, err = AssessWithTrust(report, root, trust)
+	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
 	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "over-budget measured USD cost") {
 		t.Fatalf("candidate per-run cost regression must be blocked despite lower total cost: %#v, %v", assessment, err)
 	}
@@ -691,7 +692,7 @@ func TestAssessDerivesMetricsFromTrialsAndNormalizesOverheadPerRun(t *testing.T)
 		}
 	}
 	refreshEvaluation(t, root, evaluation, trials)
-	assessment, err = AssessWithTrust(report, root, trust)
+	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
 	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "measured token usage") {
 		t.Fatalf("candidate per-run token regression must be blocked despite lower total tokens: %#v, %v", assessment, err)
 	}
@@ -732,7 +733,7 @@ func TestAssessmentRequiresExternalTrustedEvaluatorAndValidSignature(t *testing.
 	wrongScope := trust
 	wrongScope.Keys = append([]TrustedEvaluatorKey(nil), trust.Keys...)
 	wrongScope.Keys[0].Domains = []string{"mancode"}
-	assessment, err = AssessWithTrust(report, root, wrongScope)
+	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, wrongScope, fixtureMigrationAuthorityTrustStore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -742,7 +743,7 @@ func TestAssessmentRequiresExternalTrustedEvaluatorAndValidSignature(t *testing.
 	expiredKey := trust
 	expiredKey.Keys = append([]TrustedEvaluatorKey(nil), trust.Keys...)
 	expiredKey.Keys[0].NotAfter = "2026-10-01T11:00:00Z"
-	assessment, err = AssessWithTrust(report, root, expiredKey)
+	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, expiredKey, fixtureMigrationAuthorityTrustStore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -750,13 +751,13 @@ func TestAssessmentRequiresExternalTrustedEvaluatorAndValidSignature(t *testing.
 		t.Fatalf("expired evaluator key was accepted: %#v", assessment)
 	}
 
-	assessment, err = AssessWithTrust(report, root, trust)
+	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
 	if err != nil || !assessment.Ready {
 		t.Fatalf("correctly scoped signature was rejected: %#v, %v", assessment, err)
 	}
 	wrongCandidate := report
 	wrongCandidate.Candidate = strings.Repeat("c", 40)
-	assessment, err = AssessWithTrust(wrongCandidate, root, trust)
+	assessment, err = AssessWithTrustAndMigrationReviewers(wrongCandidate, root, trust, fixtureMigrationAuthorityTrustStore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -983,8 +984,9 @@ func TestAssessReconcilesEveryMancodeSourceSetComponent(t *testing.T) {
 		FilesScanned: 1, SnapshotFiles: 1, SourceRecords: 4, ImportedRecords: 3, CredentialExclusions: 1,
 	})
 	migration.MancodeSourceSet = writeMancodeSourceSetReportFixture(t, root, "mancode-source-set-complete.json", sourceSet)
+	migration.MancodeSourceAuthority = writeMancodeSourceAuthorityFixture(t, root, *migration)
 
-	assessment, err := AssessWithTrust(report, root, trust)
+	assessment, err := AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
 	if err != nil || !assessment.Ready {
 		t.Fatalf("fully reconciled multi-root Mancode evidence was rejected: %#v, %v", assessment, err)
 	}
@@ -1036,6 +1038,75 @@ func TestAssessReconcilesEveryMancodeSourceSetComponent(t *testing.T) {
 	}
 }
 
+func TestAssessRequiresTrustedMancodeSourceAuthorityBoundToExactInventory(t *testing.T) {
+	root := t.TempDir()
+	report, _, evaluatorTrust := completeFixture(t, root)
+	authorityTrust := fixtureMigrationAuthorityTrustStore()
+	assessment, err := AssessWithTrustAndMigrationReviewers(report, root, evaluatorTrust, authorityTrust)
+	if err != nil || !assessment.Ready {
+		t.Fatalf("fixture source-authority attestation should verify: %#v, %v", assessment, err)
+	}
+	withoutAuthorityPolicy, err := AssessWithTrust(report, root, evaluatorTrust)
+	if err != nil || withoutAuthorityPolicy.Ready || !hasBlocker(withoutAuthorityPolicy.Blockers, "no separately trusted authority policy") {
+		t.Fatalf("source-authority signature was accepted without its out-of-band trust policy: %#v, %v", withoutAuthorityPolicy, err)
+	}
+
+	missing := cloneCutoverReport(t, report)
+	for index := range missing.Migrations {
+		if missing.Migrations[index].Product == "mancode" {
+			missing.Migrations[index].MancodeSourceAuthority = Evidence{}
+		}
+	}
+	assessment, err = AssessWithTrustAndMigrationReviewers(missing, root, evaluatorTrust, authorityTrust)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "missing a trusted authoritative-source-set attestation") {
+		t.Fatalf("missing source-authority attestation did not fail closed: %#v, %v", assessment, err)
+	}
+
+	planReviewOnly := fixtureMigrationAuthorityTrustStore()
+	planReviewOnly.Keys[0].Purposes = []string{migrationreview.PurposePlanReview}
+	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, evaluatorTrust, planReviewOnly)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "not trusted for this reviewer, product, and purpose") {
+		t.Fatalf("plan-review-only key authorized source inventory completeness: %#v, %v", assessment, err)
+	}
+
+	tampered := cloneCutoverReport(t, report)
+	var sourceEvidence *Evidence
+	for index := range tampered.Migrations {
+		if tampered.Migrations[index].Product == "mancode" {
+			sourceEvidence = &tampered.Migrations[index].MancodeSourceSet
+			break
+		}
+	}
+	if sourceEvidence == nil {
+		t.Fatal("complete fixture omitted Mancode source-set evidence")
+	}
+	path := filepath.Join(root, sourceEvidence.Path)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content = append(content, ' ')
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(content)
+	sourceEvidence.SHA256 = hex.EncodeToString(digest[:])
+	assessment, err = AssessWithTrustAndMigrationReviewers(tampered, root, evaluatorTrust, authorityTrust)
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "source-authority attestation does not match the expected source inventory") {
+		t.Fatalf("source-authority signature replayed after source-set artifact changed: %#v, %v", assessment, err)
+	}
+}
+
+func TestAssessRejectsCutoverEvidenceV6WithoutSourceAuthority(t *testing.T) {
+	root := t.TempDir()
+	report, _, evaluatorTrust := completeFixture(t, root)
+	report.SchemaVersion = "threadforge.cutover-evidence.v6"
+	assessment, err := AssessWithTrustAndMigrationReviewers(report, root, evaluatorTrust, fixtureMigrationAuthorityTrustStore())
+	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "unsupported cutover evidence schema") {
+		t.Fatalf("legacy v6 evidence bypassed the v7 source-authority gate: %#v, %v", assessment, err)
+	}
+}
+
 func cloneCutoverReport(t *testing.T, source Report) Report {
 	t.Helper()
 	encoded, err := json.Marshal(source)
@@ -1063,6 +1134,7 @@ func completeFixture(t *testing.T, root string) (Report, Evidence, EvaluatorTrus
 		report.Migrations[i].SourceBackupVerification = writeMigrationBackupFixture(t, root, report.Migrations[i])
 		if report.Migrations[i].Product == "mancode" {
 			report.Migrations[i].MancodeSourceSet = writeMancodeSourceSetFixture(t, root, report.Migrations[i])
+			report.Migrations[i].MancodeSourceAuthority = writeMancodeSourceAuthorityFixture(t, root, report.Migrations[i])
 		}
 	}
 	trust := fixtureTrustStore()
@@ -1089,6 +1161,54 @@ func writeMancodeSourceSetFixture(t *testing.T, root string, migration Migration
 		}},
 	}
 	return writeMancodeSourceSetReportFixture(t, root, "mancode-source-set.json", report)
+}
+
+func writeMancodeSourceAuthorityFixture(t *testing.T, root string, migration MigrationEvidence) Evidence {
+	t.Helper()
+	path := filepath.Join(root, migration.MancodeSourceSet.Path)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sourceSet migrationsources.MancodeReport
+	if err := json.Unmarshal(content, &sourceSet); err != nil {
+		t.Fatal(err)
+	}
+	binding, err := migrationreview.SourceAuthorityBindingForArtifact(content, sourceSet.InventorySHA256,
+		sourceSet.ProjectSourceFingerprint, sourceSet.ProjectSnapshotSHA256, len(sourceSet.Components))
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKey := fixtureSourceAuthorityPrivateKey()
+	attestation, err := migrationreview.SignSourceAuthority(binding, "fixture-source-authority", privateKey, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(attestation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "mancode-source-authority-" + binding.InventorySHA256 + ".json"
+	if err := os.WriteFile(filepath.Join(root, name), encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(encoded)
+	return Evidence{Path: name, SHA256: hex.EncodeToString(digest[:])}
+}
+
+func fixtureMigrationAuthorityTrustStore() migrationreview.TrustStore {
+	privateKey := fixtureSourceAuthorityPrivateKey()
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	return migrationreview.TrustStore{SchemaVersion: migrationreview.TrustStoreSchemaVersion, Keys: []migrationreview.ReviewerKey{{
+		KeyID: migrationreview.KeyID(publicKey), PublicKey: base64.StdEncoding.EncodeToString(publicKey),
+		Reviewer: "fixture-source-authority", Products: []string{"mancode"}, Purposes: []string{migrationreview.PurposeSourceAuthority},
+		NotBefore: "2000-01-01T00:00:00Z", NotAfter: "9999-01-01T00:00:00Z",
+	}}}
+}
+
+func fixtureSourceAuthorityPrivateKey() ed25519.PrivateKey {
+	seed := sha256.Sum256([]byte("Threadforge Mancode source-authority test signing key"))
+	return ed25519.NewKeyFromSeed(seed[:])
 }
 
 func writeMancodeSourceSetReportFixture(t *testing.T, root, path string, report migrationsources.MancodeReport) Evidence {
@@ -1129,6 +1249,7 @@ func refreshMancodeProjectSourceSetCounts(t *testing.T, root string, migration *
 		component.CredentialExclusions = coverage.CredentialExcludedRecords
 		component.RejectedRecords = coverage.RejectedRecords
 		migration.MancodeSourceSet = writeMancodeSourceSetReportFixture(t, root, "mancode-source-set-updated.json", sourceSet)
+		migration.MancodeSourceAuthority = writeMancodeSourceAuthorityFixture(t, root, *migration)
 		return
 	}
 	t.Fatal("source-set project component was missing")

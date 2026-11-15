@@ -586,6 +586,83 @@ def _make_csv(index: dict[str, Any]) -> bytes:
     return buffer.getvalue().encode("utf-8")
 
 
+def _make_python_gap_queue_csv(index: dict[str, Any]) -> bytes:
+    """Build a grouped convenience view of missing or malformed evidence fields."""
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    gap_fields = (
+        ("license_expression_missing", lambda item: item["license_expression"] is None),
+        ("license_files_missing", lambda item: not item["license_files"]),
+        ("license_metadata_malformed", lambda item: item["license_metadata_malformed"]),
+        (
+            "license_classifier_metadata_malformed",
+            lambda item: item["license_classifier_metadata_malformed"],
+        ),
+    )
+    for item in index["python_observations"]:
+        gaps = [name for name, predicate in gap_fields if predicate(item)]
+        if not gaps:
+            continue
+        key = (item["normalized_name"], item["version"])
+        entry = grouped.setdefault(
+            key,
+            {
+                "package_names": set(),
+                "profiles": set(),
+                "gaps": defaultdict(set),
+                "archives": {},
+            },
+        )
+        entry["package_names"].add(item["name"])
+        entry["profiles"].add(item["profile"])
+        entry["archives"][item["profile"]] = {
+            "profile": item["profile"],
+            "archive": item["archive"],
+            "archive_sha256": item["archive_sha256"],
+        }
+        for gap in gaps:
+            entry["gaps"][gap].add(item["profile"])
+
+    buffer = io.StringIO(newline="")
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(
+        [
+            "package_names_json",
+            "normalized_name",
+            "version",
+            "profiles_with_evidence_gaps_json",
+            "license_expression_missing_profiles_json",
+            "license_files_missing_profiles_json",
+            "license_metadata_malformed_profiles_json",
+            "license_classifier_metadata_malformed_profiles_json",
+            "evidence_archives_json",
+            "meaning",
+        ]
+    )
+    for (normalized_name, version), entry in sorted(grouped.items()):
+        writer.writerow(
+            [
+                _csv_value(sorted(entry["package_names"])),
+                _csv_value(normalized_name),
+                _csv_value(version),
+                _csv_value(sorted(entry["profiles"])),
+                _csv_value(sorted(entry["gaps"]["license_expression_missing"])),
+                _csv_value(sorted(entry["gaps"]["license_files_missing"])),
+                _csv_value(sorted(entry["gaps"]["license_metadata_malformed"])),
+                _csv_value(
+                    sorted(entry["gaps"]["license_classifier_metadata_malformed"])
+                ),
+                _csv_value(
+                    [
+                        entry["archives"][profile]
+                        for profile in sorted(entry["archives"])
+                    ]
+                ),
+                "Missing or malformed collected evidence only; not a license conclusion.",
+            ]
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
 def build_license_review_index(
     *,
     bundle_dir: Path,
@@ -699,9 +776,11 @@ def build_license_review_index(
         "utf-8"
     )
     csv_bytes = _make_csv(index)
+    gap_queue_bytes = _make_python_gap_queue_csv(index)
     files: dict[str, bytes] = {
         "license-review-index.json": json_bytes,
         "license-review-observations.csv": csv_bytes,
+        "license-review-evidence-gaps.csv": gap_queue_bytes,
         "evidence/checksums.txt": checksum_bytes,
     }
     for profile in python_profiles + go_profiles:
@@ -767,6 +846,14 @@ def main(argv: list[str] | None = None) -> int:
                 "version": index["candidate"]["version"],
                 "python_observations": index["summary"]["python_observation_count"],
                 "go_observations": index["summary"]["go_observation_count"],
+                "python_observations_with_evidence_gaps": sum(
+                    1
+                    for item in index["python_observations"]
+                    if item["license_expression"] is None
+                    or not item["license_files"]
+                    or item["license_metadata_malformed"]
+                    or item["license_classifier_metadata_malformed"]
+                ),
                 "review_status": index["review_status"],
                 "release_clearance": index["release_clearance"],
             },

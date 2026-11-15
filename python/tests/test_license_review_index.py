@@ -37,10 +37,15 @@ def _tar_bytes(entries):
     return output.getvalue()
 
 
-def _python_archive(os_name, python_version, expression, *, unsafe=False):
+def _python_archive(
+    os_name, python_version, expression, *, unsafe=False, evidence_gaps=()
+):
     target = {"os": os_name, "python_version": python_version}
     license_text = b"Example license notice\n"
     license_path = "licenses/example-package/1.0.0/LICENSE"
+    evidence_gaps = set(evidence_gaps)
+    if "missing_expression" in evidence_gaps:
+        expression = None
     distribution = {
         "name": "example-package",
         "normalized_name": "example-package",
@@ -48,14 +53,21 @@ def _python_archive(os_name, python_version, expression, *, unsafe=False):
         "locked": True,
         "metadata_file_sha256": "b" * 64,
         "license_expression": expression,
-        "license_expression_status": "captured_unreviewed",
-        "license_expression_sha256": hashlib.sha256(expression.encode()).hexdigest(),
+        "license_expression_status": "missing"
+        if expression is None
+        else "captured_unreviewed",
+        "license_expression_sha256": hashlib.sha256(expression.encode()).hexdigest()
+        if expression is not None
+        else None,
         "license_classifiers": ["License :: OSI Approved :: MIT License"],
-        "license_classifier_metadata_malformed": False,
-        "license_metadata_malformed": False,
+        "license_classifier_metadata_malformed": "malformed_classifiers"
+        in evidence_gaps,
+        "license_metadata_malformed": "malformed_license_metadata" in evidence_gaps,
         "legacy_license_field_byte_count": 0,
         "legacy_license_field_sha256": None,
-        "license_files": [
+        "license_files": []
+        if "missing_license_files" in evidence_gaps
+        else [
             {
                 "path": "example_package-1.0.0.dist-info/licenses/LICENSE",
                 "archive_path": license_path,
@@ -77,9 +89,12 @@ def _python_archive(os_name, python_version, expression, *, unsafe=False):
     entries = {
         "python-license-evidence/README.md": b"unreviewed\n",
         "python-license-evidence/evidence.json": json.dumps(evidence).encode(),
-        "python-license-evidence/report.csv": b"name,version,expression\nexample-package,1.0.0,MIT\n",
-        f"python-license-evidence/{license_path}": license_text,
+        "python-license-evidence/report.csv": (
+            f"name,version,expression\nexample-package,1.0.0,{expression or ''}\n"
+        ).encode(),
     }
+    if "missing_license_files" not in evidence_gaps:
+        entries[f"python-license-evidence/{license_path}"] = license_text
     if unsafe:
         entries["../outside.txt"] = b"unsafe member"
         del entries[f"python-license-evidence/{license_path}"]
@@ -115,7 +130,9 @@ def _go_archive(target):
     )
 
 
-def _make_candidate(root, *, variance=False, unsafe_python_profile=None):
+def _make_candidate(
+    root, *, variance=False, unsafe_python_profile=None, python_evidence_gaps=None
+):
     root.mkdir()
     payloads = INDEX_BUILDER.VERIFIER.expected_payload_names(VERSION)
     for name in payloads:
@@ -130,6 +147,7 @@ def _make_candidate(root, *, variance=False, unsafe_python_profile=None):
                 python_version,
                 expression,
                 unsafe=profile == unsafe_python_profile,
+                evidence_gaps=(python_evidence_gaps or {}).get(profile, ()),
             )
         )
     for target in INDEX_BUILDER.VERIFIER.GO_TARGETS:
@@ -200,11 +218,76 @@ def test_builds_target_preserving_review_index_and_never_grants_clearance(tmp_pa
         rows = list(csv.DictReader(source))
     assert len(rows) == 16
     assert all(len(row) == 19 for row in rows)
+    with (output / "license-review-evidence-gaps.csv").open(
+        encoding="utf-8", newline=""
+    ) as source:
+        assert list(csv.DictReader(source)) == []
     sums = (output / "SHA256SUMS.txt").read_text(encoding="ascii").splitlines()
-    assert len(sums) == 19
+    assert len(sums) == 20
     for row in sums:
         digest, relative = row.split("  ", 1)
         assert hashlib.sha256((output / relative).read_bytes()).hexdigest() == digest
+
+
+def test_grouped_evidence_gap_queue_preserves_affected_profiles_and_archive_bindings(
+    tmp_path,
+):
+    candidate = tmp_path / "candidate"
+    verification = _make_candidate(
+        candidate,
+        python_evidence_gaps={
+            "linux/3.11": {
+                "missing_expression",
+                "missing_license_files",
+                "malformed_license_metadata",
+            },
+            "windows/3.11": {"missing_license_files", "malformed_classifiers"},
+        },
+    )
+    output = tmp_path / "review"
+
+    index = _build(candidate, output, verification)
+
+    with (output / "license-review-evidence-gaps.csv").open(
+        encoding="utf-8", newline=""
+    ) as source:
+        rows = list(csv.DictReader(source))
+    assert len(rows) == 1
+    row = rows[0]
+    assert json.loads(row["package_names_json"]) == ["example-package"]
+    assert row["normalized_name"] == "example-package"
+    assert row["version"] == "1.0.0"
+    assert json.loads(row["profiles_with_evidence_gaps_json"]) == [
+        "python/linux/3.11",
+        "python/windows/3.11",
+    ]
+    assert json.loads(row["license_expression_missing_profiles_json"]) == [
+        "python/linux/3.11"
+    ]
+    assert json.loads(row["license_files_missing_profiles_json"]) == [
+        "python/linux/3.11",
+        "python/windows/3.11",
+    ]
+    assert json.loads(row["license_metadata_malformed_profiles_json"]) == [
+        "python/linux/3.11"
+    ]
+    assert json.loads(row["license_classifier_metadata_malformed_profiles_json"]) == [
+        "python/windows/3.11"
+    ]
+    archives = json.loads(row["evidence_archives_json"])
+    assert [archive["profile"] for archive in archives] == [
+        "python/linux/3.11",
+        "python/windows/3.11",
+    ]
+    for archive in archives:
+        observation = next(
+            item
+            for item in index["python_observations"]
+            if item["profile"] == archive["profile"]
+        )
+        assert archive["archive_sha256"] == observation["archive_sha256"]
+    sums = (output / "SHA256SUMS.txt").read_text(encoding="ascii")
+    assert "license-review-evidence-gaps.csv" in sums
 
 
 def test_rejects_changed_candidate_payload(tmp_path):

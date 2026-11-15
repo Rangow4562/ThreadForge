@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/cutover-approval-attestation-result-v1.schema.json",
+  "title": "Threadforge cutover approval attestation result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "role", "reviewer_id", "approved", "key_id", "attestation", "report_sha256",
+    "trusted_signature_verified", "approval_assertion_signed", "execution_authorized", "cutover_ready", "human_review_required"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.cutover-approval-attestation-result.v1" },
+    "role": { "enum": ["release-manager", "security-reviewer", "license-reviewer"] },
+    "reviewer_id": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._@/-]{0,127}$" },
+    "key_id": { "$ref": "cutover-approval-attestation-v1.schema.json#/$defs/sha256" },
+    "approved": { "type": "boolean" },
+    "attestation": { "$ref": "cutover-evidence-v2.schema.json#/$defs/evidence" },
+    "report_sha256": { "$ref": "cutover-approval-attestation-v1.schema.json#/$defs/sha256" },
+    "trusted_signature_verified": { "const": true },
+    "approval_assertion_signed": { "const": true },
+    "human_review_required": { "const": true },
+    "execution_authorized": { "const": false },
+    "cutover_ready": { "const": false }
+  }
+}

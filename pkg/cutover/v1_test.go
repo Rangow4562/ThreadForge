@@ -24,7 +24,7 @@ import (
 func TestAssessRequiresAllParityMigrationAdaptersAndEvaluations(t *testing.T) {
 	root := t.TempDir()
 	report, evidence, trust := completeFixture(t, root)
-	assessment, err := AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
+	assessment, err := AssessWithTrustAndMigrationReviewersAndApprovers(report, root, trust, fixtureMigrationAuthorityTrustStore(), fixtureApprovalTrustStore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,8 @@ func TestAssessBlocksIncompleteMancodePrivacyBindingCoverage(t *testing.T) {
 		mancodeMigration.FormatCoverage.SHA256 = hex.EncodeToString(digest[:])
 	}
 	writeCoverage()
-	assessment, err := AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
+	sealFixtureApprovals(t, root, &report)
+	assessment, err := AssessWithTrustAndMigrationReviewersAndApprovers(report, root, trust, fixtureMigrationAuthorityTrustStore(), fixtureApprovalTrustStore())
 	if err != nil || !assessment.Ready {
 		t.Fatalf("verified Mancode privacy binding blocked a complete report: %#v, %v", assessment, err)
 	}
@@ -454,7 +455,8 @@ func TestAssessBlocksMancodeLegacyPlanWithoutSourceVersionBinding(t *testing.T) 
 	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "no separately trusted reviewer policy") {
 		t.Fatalf("signed plan review bypassed the separate reviewer trust root: %#v, %v", assessment, err)
 	}
-	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, trust, reviewers)
+	sealFixtureApprovals(t, root, &report)
+	assessment, err = AssessWithTrustAndMigrationReviewersAndApprovers(report, root, trust, reviewers, fixtureApprovalTrustStore())
 	if err != nil || !assessment.Ready || assessment.TrustedMigrationReviewersSHA256 == "" {
 		t.Fatalf("valid signed supplementary review did not satisfy only the missing source-contract evidence: %#v, %v", assessment, err)
 	}
@@ -663,12 +665,12 @@ func TestAssessDerivesMetricsFromTrialsAndNormalizesOverheadPerRun(t *testing.T)
 	if evaluation.BaselineRuns != 8 || evaluation.CandidateRuns != 4 || evaluation.CandidateCostUSD >= evaluation.BaselineCostUSD || evaluation.CandidateTokens >= evaluation.BaselineTokens {
 		t.Fatalf("fixture must have fewer candidate total cost/tokens because it has fewer runs: %#v", evaluation)
 	}
-	assessment, err := AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
+	assessment, err := AssessWithTrustAndMigrationReviewersAndApprovers(report, root, trust, fixtureMigrationAuthorityTrustStore(), fixtureApprovalTrustStore())
 	if err != nil || !assessment.Ready {
 		t.Fatalf("run-normalized fixture should pass: %#v, %v", assessment, err)
 	}
 	evaluation.CandidateTokens++
-	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
+	assessment, err = AssessWithTrustAndMigrationReviewersAndApprovers(report, root, trust, fixtureMigrationAuthorityTrustStore(), fixtureApprovalTrustStore())
 	if err != nil || assessment.Ready || !hasBlocker(assessment.Blockers, "declared metrics do not match") {
 		t.Fatalf("caller-edited metrics should be rejected: %#v, %v", assessment, err)
 	}
@@ -751,7 +753,7 @@ func TestAssessmentRequiresExternalTrustedEvaluatorAndValidSignature(t *testing.
 		t.Fatalf("expired evaluator key was accepted: %#v", assessment)
 	}
 
-	assessment, err = AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
+	assessment, err = AssessWithTrustAndMigrationReviewersAndApprovers(report, root, trust, fixtureMigrationAuthorityTrustStore(), fixtureApprovalTrustStore())
 	if err != nil || !assessment.Ready {
 		t.Fatalf("correctly scoped signature was rejected: %#v, %v", assessment, err)
 	}
@@ -986,7 +988,8 @@ func TestAssessReconcilesEveryMancodeSourceSetComponent(t *testing.T) {
 	migration.MancodeSourceSet = writeMancodeSourceSetReportFixture(t, root, "mancode-source-set-complete.json", sourceSet)
 	migration.MancodeSourceAuthority = writeMancodeSourceAuthorityFixture(t, root, *migration)
 
-	assessment, err := AssessWithTrustAndMigrationReviewers(report, root, trust, fixtureMigrationAuthorityTrustStore())
+	sealFixtureApprovals(t, root, &report)
+	assessment, err := AssessWithTrustAndMigrationReviewersAndApprovers(report, root, trust, fixtureMigrationAuthorityTrustStore(), fixtureApprovalTrustStore())
 	if err != nil || !assessment.Ready {
 		t.Fatalf("fully reconciled multi-root Mancode evidence was rejected: %#v, %v", assessment, err)
 	}
@@ -1042,7 +1045,7 @@ func TestAssessRequiresTrustedMancodeSourceAuthorityBoundToExactInventory(t *tes
 	root := t.TempDir()
 	report, _, evaluatorTrust := completeFixture(t, root)
 	authorityTrust := fixtureMigrationAuthorityTrustStore()
-	assessment, err := AssessWithTrustAndMigrationReviewers(report, root, evaluatorTrust, authorityTrust)
+	assessment, err := AssessWithTrustAndMigrationReviewersAndApprovers(report, root, evaluatorTrust, authorityTrust, fixtureApprovalTrustStore())
 	if err != nil || !assessment.Ready {
 		t.Fatalf("fixture source-authority attestation should verify: %#v, %v", assessment, err)
 	}
@@ -1145,7 +1148,56 @@ func completeFixture(t *testing.T, root string) (Report, Evidence, EvaluatorTrus
 		report.Evaluations[i].Attestation = Evidence{Path: fmt.Sprintf("attestation-%s.json", report.Evaluations[i].Domain)}
 		refreshEvaluation(t, root, &report.Evaluations[i], trials)
 	}
+	sealFixtureApprovals(t, root, &report)
 	return report, evidence, trust
+}
+
+func sealFixtureApprovals(t *testing.T, root string, report *Report) {
+	t.Helper()
+	for index := range report.Approvals {
+		approval := &report.Approvals[index]
+		approval.Reviewer = "fixture-" + approval.Role
+		approval.Approved = true
+		approval.Reason = "acceptance evidence reviewed"
+		approval.ApprovedAt = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
+		key := fixtureApprovalPrivateKey(approval.Role)
+		binding, err := ApprovalBindingForReport(*report, *approval)
+		if err != nil {
+			t.Fatal(err)
+		}
+		attestation, err := SignApproval(binding, key, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(attestation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := "cutover-approval-" + approval.Role + ".json"
+		if err := os.WriteFile(filepath.Join(root, path), encoded, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(encoded)
+		approval.Attestation = Evidence{Path: path, SHA256: hex.EncodeToString(digest[:])}
+	}
+}
+
+func fixtureApprovalPrivateKey(role string) ed25519.PrivateKey {
+	seed := sha256.Sum256([]byte("Threadforge cutover approver test key:" + role))
+	return ed25519.NewKeyFromSeed(seed[:])
+}
+
+func fixtureApprovalTrustStore() ApprovalTrustStore {
+	trust := ApprovalTrustStore{SchemaVersion: ApprovalTrustSchemaVersion}
+	for _, role := range RequiredApproverRoles {
+		publicKey := fixtureApprovalPrivateKey(role).Public().(ed25519.PublicKey)
+		trust.Keys = append(trust.Keys, TrustedApprovalKey{
+			KeyID: approvalKeyID(publicKey), PublicKey: base64.StdEncoding.EncodeToString(publicKey),
+			Reviewer: "fixture-" + role, Roles: []string{role},
+			NotBefore: "2000-01-01T00:00:00Z", NotAfter: "9999-01-01T00:00:00Z",
+		})
+	}
+	return trust
 }
 
 func writeMancodeSourceSetFixture(t *testing.T, root string, migration MigrationEvidence) Evidence {

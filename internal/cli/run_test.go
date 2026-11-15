@@ -28,6 +28,7 @@ import (
 	"github.com/threadforge-ai/threadforge/internal/sourcefingerprint"
 	"github.com/threadforge-ai/threadforge/internal/store"
 	"github.com/threadforge-ai/threadforge/pkg/continuity"
+	"github.com/threadforge-ai/threadforge/pkg/cutover"
 	"github.com/threadforge-ai/threadforge/pkg/decision"
 	"github.com/threadforge-ai/threadforge/pkg/memoryfeedback"
 	"github.com/threadforge-ai/threadforge/pkg/migrationbackup"
@@ -3962,7 +3963,7 @@ func TestCutoverAssessmentFailsClosedAndDoesNotMutateSources(t *testing.T) {
 	runGit("commit", "-m", "test candidate")
 	candidateCommit := runGit("rev-parse", "HEAD")
 	reportPath := filepath.Join(root, "cutover-report.json")
-	report := `{"schema_version":"threadforge.cutover-evidence.v4","candidate_commit":"` + candidateCommit + `","features":[],"adapters":[],"migrations":[],"cross_harness_tests":[],"evaluations":[],"approvals":[]}`
+	report := `{"schema_version":"threadforge.cutover-evidence.v8","candidate_commit":"` + candidateCommit + `","features":[],"adapters":[],"migrations":[],"cross_harness_tests":[],"evaluations":[],"approvals":[]}`
 	if err := os.WriteFile(reportPath, []byte(report), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -4000,6 +4001,37 @@ func TestCutoverAssessmentFailsClosedAndDoesNotMutateSources(t *testing.T) {
 		"--trusted-evaluators", trustedEvaluatorPath, "--repository-root", repositoryRoot}, &out, &stderr)
 	if code != 1 || !strings.Contains(stderr.String(), "outside the candidate repository and evidence root") {
 		t.Fatalf("in-bundle trust policy code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	out.Reset()
+	stderr.Reset()
+	code = Run([]string{"cutover", "assess", "--report", reportPath, "--evidence-root", evidenceRoot,
+		"--trusted-approvers", trustedEvaluatorPath, "--repository-root", repositoryRoot}, &out, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "trusted approver file must be outside the candidate repository and evidence root") {
+		t.Fatalf("in-bundle approver policy code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	approverIdentity, approverPublic, err := teamauth.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = approverIdentity
+	approverPolicy := cutover.ApprovalTrustStore{SchemaVersion: cutover.ApprovalTrustSchemaVersion, Keys: []cutover.TrustedApprovalKey{{
+		KeyID: approverPublic.KeyID, PublicKey: approverPublic.PublicKey, Reviewer: "external-reviewer",
+		Roles: []string{"release-manager"}, NotBefore: "2000-01-01T00:00:00Z", NotAfter: "9999-01-01T00:00:00Z",
+	}}}
+	approverPolicyBytes, err := json.Marshal(approverPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approverPolicyPath := filepath.Join(root, "trusted-approvers.json")
+	if err := os.WriteFile(approverPolicyPath, approverPolicyBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	stderr.Reset()
+	code = Run([]string{"cutover", "assess", "--report", reportPath, "--evidence-root", evidenceRoot,
+		"--trusted-approvers", approverPolicyPath, "--repository-root", repositoryRoot}, &out, &stderr)
+	if code != 1 || !strings.Contains(out.String(), `"trusted_approvers_sha256":`) || !strings.Contains(out.String(), `"ready": false`) {
+		t.Fatalf("external approver policy was not surfaced in blocked assessment code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
 	}
 	if err := os.Remove(trustedEvaluatorPath); err != nil {
 		t.Fatal(err)

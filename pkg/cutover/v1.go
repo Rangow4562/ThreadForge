@@ -21,7 +21,7 @@ import (
 	"github.com/threadforge-ai/threadforge/pkg/privacy"
 )
 
-const SchemaVersion = "threadforge.cutover-evidence.v7"
+const SchemaVersion = "threadforge.cutover-evidence.v8"
 
 const (
 	maxArtifactBytes = 128 << 20
@@ -127,12 +127,13 @@ type Evaluation struct {
 }
 
 type Approval struct {
-	Role       string     `json:"role"`
-	Reviewer   string     `json:"reviewer"`
-	Approved   bool       `json:"approved"`
-	Reason     string     `json:"reason"`
-	ApprovedAt string     `json:"approved_at"`
-	Evidence   []Evidence `json:"evidence"`
+	Role        string     `json:"role"`
+	Reviewer    string     `json:"reviewer"`
+	Approved    bool       `json:"approved"`
+	Reason      string     `json:"reason"`
+	ApprovedAt  string     `json:"approved_at"`
+	Evidence    []Evidence `json:"evidence"`
+	Attestation Evidence   `json:"attestation"`
 }
 
 type Assessment struct {
@@ -140,6 +141,7 @@ type Assessment struct {
 	Ready                           bool     `json:"ready"`
 	TrustedEvaluatorsSHA256         string   `json:"trusted_evaluators_sha256,omitempty"`
 	TrustedMigrationReviewersSHA256 string   `json:"trusted_migration_reviewers_sha256,omitempty"`
+	TrustedApproversSHA256          string   `json:"trusted_approvers_sha256,omitempty"`
 	Blockers                        []string `json:"blockers"`
 }
 
@@ -159,7 +161,12 @@ func AssessWithTrust(report Report, evidenceRoot string, trustedEvaluators Evalu
 }
 
 func AssessWithTrustAndMigrationReviewers(report Report, evidenceRoot string, trustedEvaluators EvaluatorTrustStore, trustedMigrationReviewers migrationreview.TrustStore) (Assessment, error) {
-	assessment := Assessment{SchemaVersion: "threadforge.cutover-assessment.v3", Blockers: []string{}}
+	return AssessWithTrustAndMigrationReviewersAndApprovers(report, evidenceRoot, trustedEvaluators, trustedMigrationReviewers, ApprovalTrustStore{})
+}
+
+func AssessWithTrustAndMigrationReviewersAndApprovers(report Report, evidenceRoot string, trustedEvaluators EvaluatorTrustStore,
+	trustedMigrationReviewers migrationreview.TrustStore, trustedApprovers ApprovalTrustStore) (Assessment, error) {
+	assessment := Assessment{SchemaVersion: "threadforge.cutover-assessment.v4", Blockers: []string{}}
 	if report.SchemaVersion != SchemaVersion {
 		assessment.Blockers = append(assessment.Blockers, "unsupported cutover evidence schema")
 	}
@@ -182,6 +189,14 @@ func AssessWithTrustAndMigrationReviewers(report Report, evidenceRoot string, tr
 			assessment.Blockers = append(assessment.Blockers, "trusted migration reviewer policy: "+reviewerErr.Error())
 		} else {
 			assessment.TrustedMigrationReviewersSHA256 = reviewerDigest
+		}
+	}
+	if len(trustedApprovers.Keys) > 0 {
+		approverDigest, approverErr := ApprovalTrustStoreSHA256(trustedApprovers)
+		if approverErr != nil {
+			assessment.Blockers = append(assessment.Blockers, "trusted approver policy: "+approverErr.Error())
+		} else {
+			assessment.TrustedApproversSHA256 = approverDigest
 		}
 	}
 	verifier := &artifactVerifier{root: root, verified: make(map[string]string)}
@@ -366,12 +381,18 @@ func AssessWithTrustAndMigrationReviewers(report Report, evidenceRoot string, tr
 	}
 
 	approvalByRole := make(map[string]Approval, len(report.Approvals))
+	approvalReviewerRoles := make(map[string]string, len(report.Approvals))
 	for _, approval := range report.Approvals {
 		if approval.Role == "" || approvalByRole[approval.Role].Role != "" {
 			assessment.Blockers = append(assessment.Blockers, fmt.Sprintf("duplicate or empty approval role %q", approval.Role))
 			continue
 		}
 		approvalByRole[approval.Role] = approval
+		if priorRole := approvalReviewerRoles[approval.Reviewer]; priorRole != "" && priorRole != approval.Role {
+			assessment.Blockers = append(assessment.Blockers, "cutover approval roles must be signed by distinct trusted reviewers")
+		} else if approval.Reviewer != "" {
+			approvalReviewerRoles[approval.Reviewer] = approval.Role
+		}
 	}
 	for _, role := range RequiredApproverRoles {
 		approval, ok := approvalByRole[role]
@@ -387,6 +408,33 @@ func AssessWithTrustAndMigrationReviewers(report Report, evidenceRoot string, tr
 			assessment.Blockers = append(assessment.Blockers, "approval "+role+" requires an RFC3339 timestamp")
 		}
 		verifyEvidence(&assessment, verifier, "approval "+role, approval.Evidence)
+		if approval.Attestation.Path == "" {
+			assessment.Blockers = append(assessment.Blockers, "approval "+role+" is missing a trusted signed attestation")
+			continue
+		}
+		verifyEvidence(&assessment, verifier, "approval "+role+" signed attestation", []Evidence{approval.Attestation})
+		attestationBytes, _, err := verifier.readEvidence(approval.Attestation)
+		if err != nil {
+			assessment.Blockers = append(assessment.Blockers, "approval "+role+" signed attestation: "+err.Error())
+			continue
+		}
+		var attestation ApprovalAttestation
+		if err := decodeUniqueJSON(attestationBytes, &attestation); err != nil {
+			assessment.Blockers = append(assessment.Blockers, "approval "+role+" signed attestation is invalid JSON")
+			continue
+		}
+		expected, err := ApprovalBindingForReport(report, approval)
+		if err != nil {
+			assessment.Blockers = append(assessment.Blockers, "approval "+role+" binding is invalid: "+err.Error())
+			continue
+		}
+		if len(trustedApprovers.Keys) == 0 {
+			assessment.Blockers = append(assessment.Blockers, "approval "+role+" has no separately trusted approver policy")
+			continue
+		}
+		if err := VerifyApprovalAttestation(attestation, trustedApprovers, expected); err != nil {
+			assessment.Blockers = append(assessment.Blockers, "approval "+role+" signed attestation is not trusted: "+err.Error())
+		}
 	}
 
 	sort.Strings(assessment.Blockers)

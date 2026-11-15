@@ -5058,3 +5058,72 @@ def test_mancode_source_set_and_cutover_v6_require_per_root_evidence():
     unsafe_result["cutover_ready"] = True
     with pytest.raises(ValidationError):
         validator_for(result_schema)(result_schema, registry=authority_registry).validate(unsafe_result)
+
+
+def test_cutover_v8_requires_role_scoped_signed_approvals():
+    v8_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v8.schema.json").read_text(encoding="utf-8"))
+    v3_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v3.schema.json").read_text(encoding="utf-8"))
+    v2_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v2.schema.json").read_text(encoding="utf-8"))
+    registry = Registry().with_resources([
+        (v8_schema["$id"], Resource.from_contents(v8_schema)),
+        (v3_schema["$id"], Resource.from_contents(v3_schema)),
+        (v2_schema["$id"], Resource.from_contents(v2_schema)),
+    ])
+    validator = validator_for(v8_schema)(v8_schema, registry=registry)
+    evidence = {"path": "review.json", "sha256": "a" * 64}
+    report = {
+        "schema_version": "threadforge.cutover-evidence.v8",
+        "candidate_commit": "1" * 40,
+        "features": [], "adapters": [], "migrations": [], "cross_harness_tests": [], "evaluations": [],
+        "approvals": [{
+            "role": "release-manager", "reviewer": "release-reviewer", "approved": True,
+            "reason": "Reviewed pinned acceptance evidence.", "approved_at": "2026-11-15T12:00:00Z",
+            "evidence": [evidence], "attestation": evidence,
+        }],
+    }
+    validator.validate(report)
+    unsigned = json.loads(json.dumps(report))
+    unsigned["approvals"][0].pop("attestation")
+    with pytest.raises(ValidationError):
+        validator.validate(unsigned)
+
+    trust_schema = json.loads((SCHEMA_DIRECTORY / "cutover-approval-trust-v1.schema.json").read_text(encoding="utf-8"))
+    trust = {
+        "schema_version": "threadforge.cutover-approval-trust.v1",
+        "keys": [{
+            "key_id": "b" * 64, "public_key": "A" * 44, "reviewer_id": "release-reviewer",
+            "roles": ["release-manager"], "not_before": "2026-01-01T00:00:00Z", "not_after": "2027-01-01T00:00:00Z",
+        }],
+    }
+    validator_for(trust_schema)(trust_schema).validate(trust)
+    trust["keys"][0]["roles"] = ["release-manager", "unscoped-role"]
+    with pytest.raises(ValidationError):
+        validator_for(trust_schema)(trust_schema).validate(trust)
+
+    attestation_schema = json.loads((SCHEMA_DIRECTORY / "cutover-approval-attestation-v1.schema.json").read_text(encoding="utf-8"))
+    attestation = {
+        "schema_version": "threadforge.cutover-approval-attestation.v1", "key_id": "b" * 64,
+        "role": "release-manager", "reviewer_id": "release-reviewer", "approved": True,
+        "reason_sha256": "c" * 64, "approved_at": "2026-11-15T12:00:00Z",
+        "candidate_commit": "1" * 40, "report_evidence_sha256": "d" * 64,
+        "supporting_evidence_sha256": "a" * 64, "issued_at": "2026-11-15T12:01:00Z", "signature": "A" * 88,
+    }
+    validator_for(attestation_schema)(attestation_schema).validate(attestation)
+
+    result_schema = json.loads((SCHEMA_DIRECTORY / "cutover-approval-attestation-result-v1.schema.json").read_text(encoding="utf-8"))
+    result_registry = Registry().with_resources([
+        (result_schema["$id"], Resource.from_contents(result_schema)),
+        (attestation_schema["$id"], Resource.from_contents(attestation_schema)),
+        (v2_schema["$id"], Resource.from_contents(v2_schema)),
+    ])
+    result = {
+        "schema_version": "threadforge.cutover-approval-attestation-result.v1", "role": "release-manager",
+        "reviewer_id": "release-reviewer", "approved": True, "key_id": "b" * 64,
+        "attestation": evidence, "report_sha256": "e" * 64, "trusted_signature_verified": True,
+        "approval_assertion_signed": True, "execution_authorized": False, "cutover_ready": False,
+        "human_review_required": True,
+    }
+    validator_for(result_schema)(result_schema, registry=result_registry).validate(result)
+    result["cutover_ready"] = True
+    with pytest.raises(ValidationError):
+        validator_for(result_schema)(result_schema, registry=result_registry).validate(result)

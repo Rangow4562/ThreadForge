@@ -349,11 +349,14 @@ func validSeverityName(value beacon.Severity) bool {
 }
 
 func runCutover(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "attest-approval" {
+		return runCutoverApproval(args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && args[0] == "attest-evaluation" {
 		return runCutoverAttestation(args[1:], stdout, stderr)
 	}
 	if len(args) == 0 || args[0] != "assess" {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover <assess|attest-evaluation> ...")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover <assess|attest-evaluation|attest-approval> ...")
 		return 2
 	}
 	fs := flag.NewFlagSet("cutover assess", flag.ContinueOnError)
@@ -362,12 +365,13 @@ func runCutover(args []string, stdout, stderr io.Writer) int {
 	evidenceRoot := fs.String("evidence-root", "", "directory containing report evidence artifacts")
 	trustedEvaluatorPath := fs.String("trusted-evaluators", "", "out-of-repository evaluator trust policy JSON")
 	trustedMigrationReviewerPath := fs.String("trusted-migration-reviewers", "", "out-of-repository trusted Mancode migration-review and source-authority policy JSON")
+	trustedApproverPath := fs.String("trusted-approvers", "", "out-of-repository trusted cutover approver policy JSON")
 	repositoryRoot := fs.String("repository-root", ".", "clean Threadforge git checkout under assessment")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
 	if *reportPath == "" || *evidenceRoot == "" || fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-and-source-authority-trust.json>] [--repository-root <clean-checkout>]")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-and-source-authority-trust.json>] [--trusted-approvers <external-approver-trust.json>] [--repository-root <clean-checkout>]")
 		return 2
 	}
 	reportContent, err := readBoundedJSONContent(*reportPath, 32<<20)
@@ -424,7 +428,27 @@ func runCutover(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
-	assessment, err := cutover.AssessWithTrustAndMigrationReviewers(report, *evidenceRoot, trustedEvaluators, trustedMigrationReviewers)
+	trustedApprovers := cutover.ApprovalTrustStore{}
+	trustedApproverDigest := ""
+	if *trustedApproverPath != "" {
+		trustPath, err := filepath.EvalSymlinks(*trustedApproverPath)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "resolve trusted approver file:", err)
+			return 1
+		}
+		repositoryPath, _ := filepath.EvalSymlinks(*repositoryRoot)
+		evidencePath, _ := filepath.EvalSymlinks(*evidenceRoot)
+		if pathIsWithin(repositoryPath, trustPath) || pathIsWithin(evidencePath, trustPath) {
+			_, _ = fmt.Fprintln(stderr, "trusted approver file must be outside the candidate repository and evidence root")
+			return 1
+		}
+		trustedApprovers, trustedApproverDigest, err = cutover.ReadApprovalTrustStore(*trustedApproverPath)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
+	assessment, err := cutover.AssessWithTrustAndMigrationReviewersAndApprovers(report, *evidenceRoot, trustedEvaluators, trustedMigrationReviewers, trustedApprovers)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
@@ -435,6 +459,10 @@ func runCutover(args []string, stdout, stderr io.Writer) int {
 	}
 	if trustedMigrationReviewerDigest != "" && assessment.TrustedMigrationReviewersSHA256 != trustedMigrationReviewerDigest {
 		_, _ = fmt.Fprintln(stderr, "trusted migration reviewer policy fingerprint changed during assessment")
+		return 1
+	}
+	if trustedApproverDigest != "" && assessment.TrustedApproversSHA256 != trustedApproverDigest {
+		_, _ = fmt.Fprintln(stderr, "trusted approver policy fingerprint changed during assessment")
 		return 1
 	}
 	if code := writeIndentedJSON(stdout, assessment, stderr); code != 0 {
@@ -4589,8 +4617,9 @@ Commands:
   session update --id <id> --expected-revision <n> [--close] [--summary <text>] [--next-action <text>] [--identity-key <private-key.json>]
   session history --id <id> [--db <path>]
   handoff list|export|resume ...
-  cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-and-source-authority-trust.json>] [--repository-root <clean-checkout>]
+  cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-and-source-authority-trust.json>] [--trusted-approvers <external-approver-trust.json>] [--repository-root <clean-checkout>]
   cutover attest-evaluation --report <report.json> --domain <domain> --evidence-root <artifacts-dir> --candidate-root <clean-checkout> --legacy-root <clean-checkout> --identity <private-identity.json> --trusted-evaluators <external-trust.json> --attestation-path <relative-new-path.json> --output-report <new-report.json> --confirm-evaluator-assertion
+  cutover attest-approval --report <report.json> --role <role> --decision <approve|reject> --reason <text> --approved-at <RFC3339> --evidence-root <artifacts-dir> --candidate-root <clean-checkout> --identity <reviewer-private-identity.json> --trusted-approvers <external-trust.json> --attestation-path <relative-new-path.json> --output-report <new-report.json> --confirm-approval
   evolution domain-verify --file <domain-verification-request.v1-or-v2.json> [--python python]
   security scan [--traces <events.jsonl>] [--rules-dir <path>] [--rules-store <path>] [--min-severity info] [--session <id-substring>] [--fail-on <severity>]
   security reviews list [--limit 50] [--offset 0] [--db <path>]

@@ -238,3 +238,70 @@ func appendHandoffFixture(t *testing.T, path string, events ...beacon.Event) {
 		t.Fatal(err)
 	}
 }
+
+func TestHandoffListReadsBeaconCompatibleRuntimeEventLog(t *testing.T) {
+	root := t.TempDir()
+	tracePath := filepath.Join(root, "beacon-runtime.jsonl")
+	appendHandoffFixture(t, tracePath,
+		handoffFixtureEvent("gemini-cli", "legacy-gemini-session-123", "prompt.submitted", "private prompt must not appear in list output"),
+		handoffFixtureEvent("gemini_cli", "legacy-gemini-session-123", "agent.message", "private answer must not appear in list output"),
+		handoffFixtureEvent("goose", "legacy-goose-session-456", "prompt.submitted", "another private prompt"),
+	)
+	file, err := os.OpenFile(tracePath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("not-json\n"); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"handoff", "list", "--source", "runtime-log", "--traces", tracePath, "--harness", "gemini", "--limit", "0", "--json"}, &stdout, &stderr)
+	var result handoffEventListResult
+	if code != 0 || json.Unmarshal(stdout.Bytes(), &result) != nil || result.SchemaVersion != handoffEventListSchema ||
+		result.Source != "event_log" || len(result.Sessions) != 1 || result.Scan.TraceMissing || result.Scan.Truncated ||
+		result.Scan.Malformed != 1 || result.Scan.Changed || stderr.Len() != 0 {
+		t.Fatalf("event-log list code=%d result=%#v stdout=%q stderr=%q", code, result, stdout.String(), stderr.String())
+	}
+	got := result.Sessions[0]
+	if got.ID != "legacy-gemini-session-123" || got.Harness != "gemini_cli" || got.EventCount != 2 || got.PromptCount != 1 {
+		t.Fatalf("normalized event-log session = %#v", got)
+	}
+	if strings.Contains(stdout.String(), "private prompt") || strings.Contains(stdout.String(), "private answer") || strings.Contains(stdout.String(), tracePath) {
+		t.Fatalf("event-log list leaked content or source path: %q", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"handoff", "list", "--source", "runtime-log", "--traces", tracePath, "--limit", "0"}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "legacy-goose-session-456") ||
+		!strings.Contains(stderr.String(), "1 malformed event-log row") || strings.Contains(stdout.String(), "another private prompt") {
+		t.Fatalf("human event-log list code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestHandoffListRuntimeLogReportsMissingSourceAndRejectsNativeOptions(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.jsonl")
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"handoff", "list", "--source", "runtime-log", "--traces", missing, "--json"}, &stdout, &stderr)
+	var result handoffEventListResult
+	if code != 0 || json.Unmarshal(stdout.Bytes(), &result) != nil || !result.Scan.TraceMissing || len(result.Sessions) != 0 {
+		t.Fatalf("missing event-log result code=%d result=%#v stdout=%q stderr=%q", code, result, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"handoff", "list", "--source", "runtime-log", "--subagents"}, &stdout, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "native-store options") || stdout.Len() != 0 {
+		t.Fatalf("mixed source options code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"handoff", "list", "--traces", missing}, &stdout, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "requires --source runtime-log") || stdout.Len() != 0 {
+		t.Fatalf("trace path without event-log source code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}

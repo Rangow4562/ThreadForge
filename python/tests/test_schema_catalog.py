@@ -12,6 +12,37 @@ SCHEMA_DIRECTORY = Path(__file__).resolve().parents[2] / "schema"
 SCHEMA_PATHS = sorted(SCHEMA_DIRECTORY.glob("*.json"))
 
 
+def test_handoff_event_list_schema_is_versioned_content_free_and_reports_scan_state():
+    schema = json.loads((SCHEMA_DIRECTORY / "handoff-event-list-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.handoff-event-list.v1",
+        "source": "event_log",
+        "sessions": [
+            {
+                "id": "legacy-gemini-session-123",
+                "harness": "gemini_cli",
+                "updated_at": "2026-11-15T10:00:00Z",
+                "event_count": 2,
+                "prompt_count": 1,
+                "command_count": 0,
+                "file_change_count": 0,
+                "tool_event_count": 0,
+            }
+        ],
+        "scan": {"older_events_omitted": False, "malformed_lines": 1},
+    }
+    validator.validate(result)
+    for invalid in (
+        {**result, "source": "remote"},
+        {**result, "private_path": "C:/Users/example/runtime.jsonl"},
+        {**result, "sessions": [{**result["sessions"][0], "prompt": "private prompt"}]},
+        {**result, "scan": {"older_events_omitted": False, "source_path": "runtime.jsonl"}},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_mcp_resource_document_schema_requires_explicit_advisory_only_boundary():
     schema = json.loads((SCHEMA_DIRECTORY / "mcp-resource-document-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

@@ -18,7 +18,17 @@ import (
 	handoffpkg "github.com/threadforge-ai/threadforge/internal/handoff"
 )
 
-const handoffExportSchemaVersion = "threadforge.handoff-export.v1"
+const (
+	handoffExportSchemaVersion = "threadforge.handoff-export.v1"
+	handoffEventListSchema     = "threadforge.handoff-event-list.v1"
+)
+
+type handoffEventListResult struct {
+	SchemaVersion string                `json:"schema_version"`
+	Source        string                `json:"source"`
+	Sessions      []handoffpkg.Session  `json:"sessions"`
+	Scan          handoffpkg.ScanStatus `json:"scan"`
+}
 
 type handoffExportResult struct {
 	SchemaVersion string `json:"schema_version"`
@@ -68,7 +78,9 @@ func (values *repeatedFlag) Set(value string) error {
 func runHandoffList(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("handoff list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	harness := fs.String("harness", "", "filter by native-session runtime")
+	source := fs.String("source", "native", "session source: native or runtime-log")
+	tracePath := fs.String("traces", "", "local canonical event-log JSONL override (Threadforge or Beacon)")
+	harness := fs.String("harness", "", "filter by runtime")
 	directory := fs.String("dir", "", "filter to this absolute workspace and descendants")
 	here := fs.Bool("here", false, "filter to the current workspace and descendants")
 	includeSubagents := fs.Bool("subagents", false, "include delegated child sessions")
@@ -83,6 +95,25 @@ func runHandoffList(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return 2
 	}
+	if *source != "native" && *source != "runtime-log" {
+		_, _ = fmt.Fprintln(stderr, "--source must be native or runtime-log")
+		return 2
+	}
+	if *source == "native" && *tracePath != "" {
+		_, _ = fmt.Fprintln(stderr, "--traces requires --source runtime-log")
+		return 2
+	}
+	if *source == "runtime-log" && (*includeSubagents || len(storeOverrides) > 0 ||
+		strings.TrimSpace(*claudeDir) != "" || strings.TrimSpace(*codexDir) != "" ||
+		strings.TrimSpace(*openCodeDir) != "" || strings.TrimSpace(*clineDir) != "") {
+		_, _ = fmt.Fprintln(stderr, "native-store options cannot be combined with --source runtime-log")
+		return 2
+	}
+	if *tracePath != "" && (!filepath.IsAbs(*tracePath) || len(*tracePath) > 4096 || strings.ContainsRune(*tracePath, '\x00') ||
+		(runtime.GOOS == "windows" && strings.HasPrefix(*tracePath, `\\`))) {
+		_, _ = fmt.Fprintln(stderr, "--traces must be a bounded absolute local file path")
+		return 2
+	}
 	if *here && *directory != "" {
 		_, _ = fmt.Fprintln(stderr, "--here and --dir cannot be combined")
 		return 2
@@ -93,11 +124,19 @@ func runHandoffList(args []string, stdout, stderr io.Writer) int {
 	}
 	canonicalHarness := ""
 	if *harness != "" {
-		var ok bool
-		canonicalHarness, ok = canonicalHandoffHarness(*harness)
-		if !ok {
-			_, _ = fmt.Fprintln(stderr, "unsupported native-session harness")
-			return 2
+		if *source == "native" {
+			var ok bool
+			canonicalHarness, ok = canonicalHandoffHarness(*harness)
+			if !ok {
+				_, _ = fmt.Fprintln(stderr, "unsupported native-session harness")
+				return 2
+			}
+		} else {
+			canonicalHarness = strings.TrimSpace(*harness)
+			if len(canonicalHarness) > 64 || strings.ContainsAny(canonicalHarness, "\x00\r\n\t") {
+				_, _ = fmt.Fprintln(stderr, "runtime filter must be a bounded name without control separators")
+				return 2
+			}
 		}
 	}
 	filterDir := strings.TrimSpace(*directory)
@@ -152,6 +191,62 @@ func runHandoffList(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		dirs[direct.harness] = abs
+	}
+	if *source == "runtime-log" {
+		paths, err := appdata.Resolve("", *tracePath)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "local event-log path could not be resolved")
+			return 1
+		}
+		listing, err := handoffpkg.List(paths.Traces, handoffpkg.Filter{
+			Harness: canonicalHarness, Directory: filterDir, Limit: *limit,
+		})
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "event-log session discovery failed; no session results were returned")
+			return 1
+		}
+		if listing.Scan.Changed {
+			_, _ = fmt.Fprintln(stderr, "local event log changed during discovery; no session results were returned")
+			return 1
+		}
+		if listing.Sessions == nil {
+			listing.Sessions = []handoffpkg.Session{}
+		}
+		if *jsonOutput {
+			result := handoffEventListResult{
+				SchemaVersion: handoffEventListSchema, Source: "event_log",
+				Sessions: listing.Sessions, Scan: listing.Scan,
+			}
+			if err := json.NewEncoder(stdout).Encode(result); err != nil {
+				_, _ = fmt.Fprintln(stderr, "event-log session results could not be written")
+				return 1
+			}
+		} else {
+			if _, err := fmt.Fprintln(stdout, "UPDATED\tHARNESS\tSESSION\tEVENTS\tDIRECTORY"); err != nil {
+				return 1
+			}
+			for _, session := range listing.Sessions {
+				updated := "unknown"
+				if !session.UpdatedAt.IsZero() {
+					updated = session.UpdatedAt.UTC().Format(time.RFC3339)
+				}
+				if _, err := fmt.Fprintf(stdout, "%s\t%s\t%s\t%d\t%s\n", updated,
+					safeHandoffCell(session.Harness, 64), safeHandoffCell(session.ID, 256),
+					session.EventCount, safeHandoffCell(session.Directory, 512)); err != nil {
+					return 1
+				}
+			}
+			if listing.Scan.TraceMissing {
+				_, _ = fmt.Fprintln(stderr, "warning: selected local event log is missing")
+			}
+			if listing.Scan.Truncated {
+				_, _ = fmt.Fprintln(stderr, "warning: older event-log rows were omitted by the local scan limit")
+			}
+			if listing.Scan.Malformed > 0 {
+				_, _ = fmt.Fprintf(stderr, "warning: %d malformed event-log rows were omitted\n", listing.Scan.Malformed)
+			}
+		}
+		return 0
 	}
 	response, err := handoffbridge.List(handoffbridge.Request{
 		SchemaVersion: handoffbridge.RequestSchemaVersion, Harness: canonicalHarness,

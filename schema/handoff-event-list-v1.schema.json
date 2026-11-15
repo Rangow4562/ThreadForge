@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/handoff-event-list-v1.schema.json",
+  "title": "Threadforge Local Event-Log Handoff Session List v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source", "sessions", "scan"],
+  "properties": {
+    "schema_version": { "const": "threadforge.handoff-event-list.v1" },
+    "source": { "const": "event_log" },
+    "sessions": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "harness", "updated_at", "event_count", "prompt_count",
+          "command_count", "file_change_count", "tool_event_count"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "harness": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "directory": { "type": "string", "maxLength": 1048576 },
+          "directory_conflict": { "type": "boolean" },
+          "branch": { "type": "string", "maxLength": 1048576 },
+          "branch_conflict": { "type": "boolean" },
+          "started_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "event_count": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+          "prompt_count": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+          "command_count": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+          "file_change_count": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+          "tool_event_count": { "type": "integer", "minimum": 0, "maximum": 67108864 }
+        }
+      }
+    },
+    "scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["older_events_omitted"],
+      "properties": {
+        "trace_missing": { "type": "boolean" },
+        "older_events_omitted": { "type": "boolean" },
+        "malformed_lines": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+        "source_changed_during_read": { "type": "boolean" }
+      }
+    }
+  }
+}

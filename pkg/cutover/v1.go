@@ -3,6 +3,7 @@ package cutover
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,7 +22,7 @@ import (
 	"github.com/threadforge-ai/threadforge/pkg/privacy"
 )
 
-const SchemaVersion = "threadforge.cutover-evidence.v8"
+const SchemaVersion = "threadforge.cutover-evidence.v9"
 
 const (
 	maxArtifactBytes = 128 << 20
@@ -34,6 +35,7 @@ var gitCommitRE = regexp.MustCompile(`^(?:[a-f0-9]{40}|[a-f0-9]{64})$`)
 
 type Report struct {
 	SchemaVersion string              `json:"schema_version"`
+	Repository    string              `json:"repository"`
 	Candidate     string              `json:"candidate_commit"`
 	Features      []FeatureEvidence   `json:"features"`
 	Adapters      []AdapterEvidence   `json:"adapters"`
@@ -172,6 +174,9 @@ func AssessWithTrustAndMigrationReviewersAndApprovers(report Report, evidenceRoo
 	}
 	if !gitCommitRE.MatchString(report.Candidate) {
 		assessment.Blockers = append(assessment.Blockers, "candidate_commit must be a pinned lowercase git commit")
+	}
+	if !GitHubRepositorySlugValid(report.Repository) {
+		assessment.Blockers = append(assessment.Blockers, "repository must be a GitHub owner/name slug")
 	}
 	root, err := checkedEvidenceRoot(evidenceRoot)
 	if err != nil {
@@ -436,10 +441,54 @@ func AssessWithTrustAndMigrationReviewersAndApprovers(report Report, evidenceRoo
 			assessment.Blockers = append(assessment.Blockers, "approval "+role+" signed attestation is not trusted: "+err.Error())
 		}
 	}
+	if securityApproval, ok := approvalByRole["security-reviewer"]; ok {
+		validateGitHubMainBranchGovernance(&assessment, verifier, securityApproval.Evidence, report.Repository)
+	} else {
+		assessment.Blockers = append(assessment.Blockers, "security-reviewer approval is missing effective GitHub main-branch governance evidence")
+	}
 
 	sort.Strings(assessment.Blockers)
 	assessment.Ready = len(assessment.Blockers) == 0
 	return assessment, nil
+}
+
+func validateGitHubMainBranchGovernance(assessment *Assessment, verifier *artifactVerifier, evidence []Evidence, expectedRepository string) {
+	var selected *GitHubMainBranchGovernance
+	for _, item := range evidence {
+		content, actual, err := verifier.readEvidence(item)
+		if err != nil || actual != item.SHA256 {
+			continue
+		}
+		var envelope map[string]json.RawMessage
+		if err := decodeUniqueJSON(content, &envelope); err != nil {
+			continue
+		}
+		var version string
+		if err := json.Unmarshal(envelope["schema_version"], &version); err != nil || version != GitHubMainBranchGovernanceSchemaVersion {
+			continue
+		}
+		if selected != nil {
+			assessment.Blockers = append(assessment.Blockers, "security-reviewer evidence contains multiple GitHub main-branch governance artifacts")
+			return
+		}
+		governance, err := DecodeGitHubMainBranchGovernance(content)
+		if err != nil {
+			assessment.Blockers = append(assessment.Blockers, "security-reviewer GitHub main-branch governance artifact is invalid")
+			return
+		}
+		selected = &governance
+	}
+	if selected == nil {
+		assessment.Blockers = append(assessment.Blockers, "security-reviewer approval must include one hash-bound GitHub main-branch governance artifact")
+		return
+	}
+	if !strings.EqualFold(selected.Repository, expectedRepository) {
+		assessment.Blockers = append(assessment.Blockers, "GitHub main-branch governance repository does not match the candidate repository")
+		return
+	}
+	if err := ValidateGitHubMainBranchGovernance(*selected, time.Now()); err != nil {
+		assessment.Blockers = append(assessment.Blockers, "GitHub main-branch governance is not cutover-ready: "+err.Error())
+	}
 }
 
 func validateMigrationSourceBackup(assessment *Assessment, verifier *artifactVerifier, migration MigrationEvidence) {

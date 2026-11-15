@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/github-main-branch-governance-v1.schema.json",
+  "title": "Threadforge GitHub main-branch governance snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repository", "branch", "api_endpoint", "observed_at", "rules"],
+  "properties": {
+    "schema_version": { "const": "threadforge.github-main-branch-governance.v1" },
+    "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$" },
+    "branch": { "const": "main" },
+    "api_endpoint": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "rules": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": { "type": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "additionalProperties": true
+      }
+    }
+  }
+}

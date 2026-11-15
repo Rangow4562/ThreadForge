@@ -176,6 +176,7 @@ func newCutoverApprovalFixture(t *testing.T, confirm bool) cutoverApprovalFixtur
 		}
 	}
 	candidateCommit := makeCutoverAttestationGitRepo(t, candidateRoot, "candidate")
+	setGitHubOriginForTest(t, candidateRoot, "threadforge-fixture/Threadforge")
 	evidenceBytes := []byte("independently reviewed release evidence\n")
 	if err := os.WriteFile(filepath.Join(evidenceRoot, "review.txt"), evidenceBytes, 0o600); err != nil {
 		t.Fatal(err)
@@ -204,6 +205,7 @@ func newCutoverApprovalFixture(t *testing.T, confirm bool) cutoverApprovalFixtur
 	reportPath := filepath.Join(root, "cutover-report.json")
 	report := cutover.Report{
 		SchemaVersion: cutover.SchemaVersion,
+		Repository:    "threadforge-fixture/Threadforge",
 		Candidate:     candidateCommit,
 		Approvals: []cutover.Approval{{
 			Role: "release-manager", Reviewer: "fixture-release-manager", Evidence: []cutover.Evidence{{

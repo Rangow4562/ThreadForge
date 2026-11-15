@@ -178,6 +178,7 @@ func newCutoverAttestationFixture(t *testing.T) cutoverAttestationFixture {
 		}
 	}
 	candidateCommit := makeCutoverAttestationGitRepo(t, candidateRoot, "candidate")
+	setGitHubOriginForTest(t, candidateRoot, "threadforge-fixture/Threadforge")
 	legacyCommit := makeCutoverAttestationGitRepo(t, legacyRoot, "legacy")
 
 	trials := cutover.EvaluationTrials{
@@ -263,7 +264,7 @@ func newCutoverAttestationFixture(t *testing.T) cutoverAttestationFixture {
 	}
 
 	reportPath := filepath.Join(root, "cutover-report.json")
-	report := cutover.Report{SchemaVersion: cutover.SchemaVersion, Candidate: candidateCommit, Evaluations: []cutover.Evaluation{evaluation}}
+	report := cutover.Report{SchemaVersion: cutover.SchemaVersion, Repository: "threadforge-fixture/Threadforge", Candidate: candidateCommit, Evaluations: []cutover.Evaluation{evaluation}}
 	reportBytes, err := json.Marshal(report)
 	if err != nil {
 		t.Fatal(err)

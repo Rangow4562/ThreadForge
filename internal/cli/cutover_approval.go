@@ -84,7 +84,7 @@ func runCutoverApproval(args []string, stdout, stderr io.Writer) int {
 	if report.SchemaVersion != cutover.SchemaVersion {
 		return attestationError(stderr, fmt.Errorf("cutover report must use schema %s", cutover.SchemaVersion))
 	}
-	if err := verifyPinnedCleanCheckout(candidate, report.Candidate, "candidate"); err != nil {
+	if err := verifyCandidateCheckout(candidate, report.Candidate, report.Repository); err != nil {
 		return attestationError(stderr, err)
 	}
 	if strings.TrimSpace(*reason) != *reason || len(*reason) > 2000 || !utf8Valid(*reason) || containsCredentialText(*reason) {
@@ -216,7 +216,7 @@ func runCutoverApproval(args []string, stdout, stderr io.Writer) int {
 	if reportErr != nil || sha256.Sum256(latestReport) != originalReportHash {
 		return attestationError(stderr, errors.New("source cutover report changed while preparing attestation"))
 	}
-	if err := verifyPinnedCleanCheckout(candidate, report.Candidate, "candidate"); err != nil {
+	if err := verifyCandidateCheckout(candidate, report.Candidate, report.Repository); err != nil {
 		return attestationError(stderr, err)
 	}
 	if err := writeExclusiveEvidence(evidence, attestationRelative, attestationBytes); err != nil {
@@ -226,7 +226,7 @@ func runCutoverApproval(args []string, stdout, stderr io.Writer) int {
 		removeCreatedFileIfDigest(attestationAbsolute, attestationHash[:])
 		return attestationError(stderr, fmt.Errorf("write updated report: %w", err))
 	}
-	if err := verifyPinnedCleanCheckout(candidate, report.Candidate, "candidate"); err != nil {
+	if err := verifyCandidateCheckout(candidate, report.Candidate, report.Repository); err != nil {
 		removeCreatedFileIfDigest(attestationAbsolute, attestationHash[:])
 		removeCreatedFileIfDigest(reportOutput, reportHash[:])
 		return attestationError(stderr, err)

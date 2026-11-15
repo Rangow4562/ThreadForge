@@ -17,7 +17,7 @@ func TestCutoverApprovalAttestationBindsRoleReviewerAndEvidence(t *testing.T) {
 		NotBefore: "2026-01-01T00:00:00Z", NotAfter: "2027-01-01T00:00:00Z",
 	}}}
 	report := Report{
-		SchemaVersion: SchemaVersion, Candidate: "0123456789abcdef0123456789abcdef01234567",
+		SchemaVersion: SchemaVersion, Repository: "threadforge-fixture/Threadforge", Candidate: "0123456789abcdef0123456789abcdef01234567",
 		Features: []FeatureEvidence{{ID: "capture", Status: "complete", Evidence: []Evidence{{Path: "capture.json", SHA256: testDigest("capture")}}}},
 	}
 	approval := Approval{
@@ -79,7 +79,7 @@ func TestCutoverApprovalAttestationBindsRoleReviewerAndEvidence(t *testing.T) {
 
 func TestApprovalEvidenceFingerprintExcludesOnlyApprovalRows(t *testing.T) {
 	report := Report{
-		SchemaVersion: SchemaVersion, Candidate: "0123456789abcdef0123456789abcdef01234567",
+		SchemaVersion: SchemaVersion, Repository: "threadforge-fixture/Threadforge", Candidate: "0123456789abcdef0123456789abcdef01234567",
 		Approvals: []Approval{{Role: "release-manager", Reviewer: "reviewer", Reason: "first"}},
 	}
 	first, err := ApprovalEvidenceFingerprint(report)

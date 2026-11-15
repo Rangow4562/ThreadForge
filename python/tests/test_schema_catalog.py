@@ -5127,3 +5127,38 @@ def test_cutover_v8_requires_role_scoped_signed_approvals():
     result["cutover_ready"] = True
     with pytest.raises(ValidationError):
         validator_for(result_schema)(result_schema, registry=result_registry).validate(result)
+
+
+def test_cutover_v9_binds_repository_and_governance_artifact():
+    v9_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v9.schema.json").read_text(encoding="utf-8"))
+    v3_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v3.schema.json").read_text(encoding="utf-8"))
+    v2_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v2.schema.json").read_text(encoding="utf-8"))
+    registry = Registry().with_resources([
+        (v9_schema["$id"], Resource.from_contents(v9_schema)),
+        (v3_schema["$id"], Resource.from_contents(v3_schema)),
+        (v2_schema["$id"], Resource.from_contents(v2_schema)),
+    ])
+    validator = validator_for(v9_schema)(v9_schema, registry=registry)
+    report = {
+        "schema_version": "threadforge.cutover-evidence.v9",
+        "repository": "Rangow4562/ThreadForge",
+        "candidate_commit": "1" * 40,
+        "features": [], "adapters": [], "migrations": [], "cross_harness_tests": [], "evaluations": [], "approvals": [],
+    }
+    validator.validate(report)
+    without_repository = json.loads(json.dumps(report))
+    without_repository.pop("repository")
+    with pytest.raises(ValidationError):
+        validator.validate(without_repository)
+
+    governance_schema = json.loads((SCHEMA_DIRECTORY / "github-main-branch-governance-v1.schema.json").read_text(encoding="utf-8"))
+    governance = {
+        "schema_version": "threadforge.github-main-branch-governance.v1",
+        "repository": "Rangow4562/ThreadForge", "branch": "main",
+        "api_endpoint": "/repos/Rangow4562/ThreadForge/rules/branches/main",
+        "observed_at": "2026-11-15T12:00:00Z", "rules": [{"type": "deletion"}],
+    }
+    validator_for(governance_schema)(governance_schema).validate(governance)
+    governance["branch"] = "develop"
+    with pytest.raises(ValidationError):
+        validator_for(governance_schema)(governance_schema).validate(governance)

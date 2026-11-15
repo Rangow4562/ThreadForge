@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -349,6 +350,9 @@ func validSeverityName(value beacon.Severity) bool {
 }
 
 func runCutover(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "capture-main-branch-governance" {
+		return runCutoverCaptureGitHubGovernance(args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && args[0] == "attest-approval" {
 		return runCutoverApproval(args[1:], stdout, stderr)
 	}
@@ -356,7 +360,7 @@ func runCutover(args []string, stdout, stderr io.Writer) int {
 		return runCutoverAttestation(args[1:], stdout, stderr)
 	}
 	if len(args) == 0 || args[0] != "assess" {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover <assess|attest-evaluation|attest-approval> ...")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge cutover <assess|capture-main-branch-governance|attest-evaluation|attest-approval> ...")
 		return 2
 	}
 	fs := flag.NewFlagSet("cutover assess", flag.ContinueOnError)
@@ -384,7 +388,7 @@ func runCutover(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "decode cutover report:", err)
 		return 1
 	}
-	if err := verifyCandidateCheckout(*repositoryRoot, report.Candidate); err != nil {
+	if err := verifyCandidateCheckout(*repositoryRoot, report.Candidate, report.Repository); err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -501,8 +505,52 @@ func readBoundedJSONContent(name string, maxBytes int64) ([]byte, error) {
 	return content, nil
 }
 
-func verifyCandidateCheckout(root, expectedCommit string) error {
-	return verifyPinnedCleanCheckout(root, expectedCommit, "candidate")
+func verifyCandidateCheckout(root, expectedCommit, expectedRepository string) error {
+	if err := verifyPinnedCleanCheckout(root, expectedCommit, "candidate"); err != nil {
+		return err
+	}
+	output, err := exec.Command("git", "-C", root, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return errors.New("candidate checkout must have a GitHub origin matching report.repository")
+	}
+	actualRepository, err := gitHubRepositoryFromRemote(strings.TrimSpace(string(output)))
+	if err != nil || !strings.EqualFold(actualRepository, expectedRepository) {
+		return errors.New("cutover evidence repository does not match candidate origin")
+	}
+	return nil
+}
+
+func gitHubRepositoryFromRemote(remote string) (string, error) {
+	remote = strings.TrimSpace(remote)
+	var repositoryPath string
+	if strings.HasPrefix(remote, "git@github.com:") {
+		repositoryPath = strings.TrimPrefix(remote, "git@github.com:")
+	} else {
+		parsed, err := url.Parse(remote)
+		if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "ssh") || !strings.EqualFold(parsed.Hostname(), "github.com") ||
+			parsed.Port() != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.ForceQuery {
+			return "", errors.New("candidate origin is not a supported GitHub repository URL")
+		}
+		if parsed.Scheme == "https" && parsed.User != nil {
+			return "", errors.New("candidate HTTPS origin must not embed credentials")
+		}
+		if parsed.Scheme == "ssh" && (parsed.User == nil || parsed.User.Username() != "git") {
+			return "", errors.New("candidate SSH origin must use the git user")
+		}
+		repositoryPath = strings.TrimPrefix(parsed.Path, "/")
+	}
+	if strings.HasSuffix(repositoryPath, ".git") {
+		repositoryPath = strings.TrimSuffix(repositoryPath, ".git")
+	}
+	parts := strings.Split(repositoryPath, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || parts[0] == "." || parts[0] == ".." || parts[1] == "." || parts[1] == ".." {
+		return "", errors.New("candidate origin is not a GitHub owner/name repository")
+	}
+	repository := parts[0] + "/" + parts[1]
+	if !cutover.GitHubRepositorySlugValid(repository) {
+		return "", errors.New("candidate origin is not a valid GitHub owner/name repository")
+	}
+	return repository, nil
 }
 
 func verifyPinnedCleanCheckout(root, expectedCommit, label string) error {
@@ -4618,6 +4666,7 @@ Commands:
   session history --id <id> [--db <path>]
   handoff list|export|resume ...
   cutover assess --report <evidence.json> --evidence-root <artifacts-dir> [--trusted-evaluators <external-trust.json>] [--trusted-migration-reviewers <reviewer-and-source-authority-trust.json>] [--trusted-approvers <external-approver-trust.json>] [--repository-root <clean-checkout>]
+  cutover capture-main-branch-governance --repository <owner/name> --output <new-evidence.json>
   cutover attest-evaluation --report <report.json> --domain <domain> --evidence-root <artifacts-dir> --candidate-root <clean-checkout> --legacy-root <clean-checkout> --identity <private-identity.json> --trusted-evaluators <external-trust.json> --attestation-path <relative-new-path.json> --output-report <new-report.json> --confirm-evaluator-assertion
   cutover attest-approval --report <report.json> --role <role> --decision <approve|reject> --reason <text> --approved-at <RFC3339> --evidence-root <artifacts-dir> --candidate-root <clean-checkout> --identity <reviewer-private-identity.json> --trusted-approvers <external-trust.json> --attestation-path <relative-new-path.json> --output-report <new-report.json> --confirm-approval
   evolution domain-verify --file <domain-verification-request.v1-or-v2.json> [--python python]

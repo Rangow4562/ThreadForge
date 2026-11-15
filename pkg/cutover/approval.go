@@ -160,7 +160,8 @@ func ApprovalEvidenceFingerprint(report Report) (string, error) {
 func ApprovalBindingForReport(report Report, approval Approval) (ApprovalBinding, error) {
 	if !containsString(RequiredApproverRoles, approval.Role) || !approvalReviewerRE.MatchString(approval.Reviewer) ||
 		privacy.ContainsCredentialText(approval.Reviewer) || strings.TrimSpace(approval.Reason) == "" || len(approval.Reason) > 2000 ||
-		privacy.ContainsCredentialText(approval.Reason) || !gitCommitRE.MatchString(report.Candidate) {
+		privacy.ContainsCredentialText(approval.Reason) || !gitCommitRE.MatchString(report.Candidate) ||
+		!GitHubRepositorySlugValid(report.Repository) {
 		return ApprovalBinding{}, errors.New("cutover approval binding is incomplete or invalid")
 	}
 	if _, err := time.Parse(time.RFC3339Nano, approval.ApprovedAt); err != nil {

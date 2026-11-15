@@ -3956,6 +3956,7 @@ func TestCutoverAssessmentFailsClosedAndDoesNotMutateSources(t *testing.T) {
 	runGit("init")
 	runGit("config", "user.name", "Threadforge Test")
 	runGit("config", "user.email", "threadforge-test@example.invalid")
+	runGit("remote", "add", "origin", "https://github.com/threadforge-fixture/Threadforge.git")
 	if err := os.WriteFile(filepath.Join(repositoryRoot, "README.md"), []byte("fixture\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -3963,7 +3964,7 @@ func TestCutoverAssessmentFailsClosedAndDoesNotMutateSources(t *testing.T) {
 	runGit("commit", "-m", "test candidate")
 	candidateCommit := runGit("rev-parse", "HEAD")
 	reportPath := filepath.Join(root, "cutover-report.json")
-	report := `{"schema_version":"threadforge.cutover-evidence.v8","candidate_commit":"` + candidateCommit + `","features":[],"adapters":[],"migrations":[],"cross_harness_tests":[],"evaluations":[],"approvals":[]}`
+	report := `{"schema_version":"threadforge.cutover-evidence.v9","repository":"threadforge-fixture/Threadforge","candidate_commit":"` + candidateCommit + `","features":[],"adapters":[],"migrations":[],"cross_harness_tests":[],"evaluations":[],"approvals":[]}`
 	if err := os.WriteFile(reportPath, []byte(report), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -3987,6 +3988,21 @@ func TestCutoverAssessmentFailsClosedAndDoesNotMutateSources(t *testing.T) {
 	code = Run([]string{"cutover", "assess", "--report", reportPath, "--evidence-root", evidenceRoot, "--repository-root", repositoryRoot}, &out, &stderr)
 	if code != 1 || !strings.Contains(out.String(), `"ready": false`) || !strings.Contains(out.String(), "beacon.capture") {
 		t.Fatalf("incomplete cutover code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	originalReport := report
+	wrongRepositoryReport := strings.Replace(report, `"repository":"threadforge-fixture/Threadforge"`, `"repository":"other-org/other-repo"`, 1)
+	if err := os.WriteFile(reportPath, []byte(wrongRepositoryReport), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	stderr.Reset()
+	code = Run([]string{"cutover", "assess", "--report", reportPath, "--evidence-root", evidenceRoot, "--repository-root", repositoryRoot}, &out, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "does not match candidate origin") || out.Len() != 0 {
+		t.Fatalf("mismatched repository identity code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	report = originalReport
+	if err := os.WriteFile(reportPath, []byte(report), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	if strings.Contains(stderr.String(), "retir") {
 		t.Fatalf("assessment unexpectedly attempted a cutover action: %s", stderr.String())

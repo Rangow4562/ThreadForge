@@ -1140,6 +1140,7 @@ func completeFixture(t *testing.T, root string) (Report, Evidence, EvaluatorTrus
 			report.Migrations[i].MancodeSourceAuthority = writeMancodeSourceAuthorityFixture(t, root, report.Migrations[i])
 		}
 	}
+	writeMainBranchGovernanceFixture(t, root, &report)
 	trust := fixtureTrustStore()
 	for i := range report.Evaluations {
 		trials := fixtureTrials(t, report.Evaluations[i].Domain)
@@ -1375,7 +1376,7 @@ func writeMigrationCoverageFixtureNamed(t *testing.T, root string, migration Mig
 }
 
 func completeReportWithoutWriting(evidence Evidence) Report {
-	report := Report{SchemaVersion: SchemaVersion, Candidate: strings.Repeat("b", 40)}
+	report := Report{SchemaVersion: SchemaVersion, Repository: "threadforge-fixture/Threadforge", Candidate: strings.Repeat("b", 40)}
 	for _, id := range RequiredFeatures {
 		report.Features = append(report.Features, FeatureEvidence{ID: id, Status: "complete", Evidence: []Evidence{evidence}})
 	}

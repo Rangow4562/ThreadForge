@@ -88,7 +88,7 @@ func runCutoverAttestation(args []string, stdout, stderr io.Writer) int {
 	if report.SchemaVersion != cutover.SchemaVersion {
 		return attestationError(stderr, fmt.Errorf("cutover report must use schema %s", cutover.SchemaVersion))
 	}
-	if err := verifyPinnedCleanCheckout(candidate, report.Candidate, "candidate"); err != nil {
+	if err := verifyCandidateCheckout(candidate, report.Candidate, report.Repository); err != nil {
 		return attestationError(stderr, err)
 	}
 	var selectedIndex = -1
@@ -198,7 +198,7 @@ func runCutoverAttestation(args []string, stdout, stderr io.Writer) int {
 	if freshIdentity, identityErr := teamauth.LoadIdentity(identityFile); identityErr != nil || freshIdentity.KeyID != identity.KeyID || !freshIdentity.PrivateKey.Equal(identity.PrivateKey) {
 		return attestationError(stderr, errors.New("evaluator identity changed while preparing attestation"))
 	}
-	if err := verifyPinnedCleanCheckout(candidate, report.Candidate, "candidate"); err != nil {
+	if err := verifyCandidateCheckout(candidate, report.Candidate, report.Repository); err != nil {
 		return attestationError(stderr, err)
 	}
 	if err := verifyPinnedCleanCheckout(legacy, evaluation.LegacyCommit, "legacy"); err != nil {
@@ -212,7 +212,7 @@ func runCutoverAttestation(args []string, stdout, stderr io.Writer) int {
 		removeCreatedFileIfDigest(attestationAbsolute, attestationDigest[:])
 		return attestationError(stderr, fmt.Errorf("write updated report: %w", err))
 	}
-	if err := verifyPinnedCleanCheckout(candidate, report.Candidate, "candidate"); err != nil {
+	if err := verifyCandidateCheckout(candidate, report.Candidate, report.Repository); err != nil {
 		removeCreatedFileIfDigest(attestationAbsolute, attestationDigest[:])
 		removeCreatedFileIfDigest(reportOutput, reportDigest[:])
 		return attestationError(stderr, err)

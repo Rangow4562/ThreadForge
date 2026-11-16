@@ -28,6 +28,12 @@ try {
 assert.ok(Array.isArray(packed) && packed.length === 1, 'expected one adapter package dry-run result');
 
 const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
+const lock = JSON.parse(readFileSync(path.join(packageRoot, 'package-lock.json'), 'utf8'));
+assert.equal(lock.name, manifest.name, 'adapter package lock name is stale');
+assert.equal(lock.version, manifest.version, 'adapter package lock version is stale');
+assert.equal(lock.packages?.['']?.name, manifest.name, 'adapter package lock root name is stale');
+assert.equal(lock.packages?.['']?.version, manifest.version, 'adapter package lock root version is stale');
+assert.equal(lock.packages?.['']?.license, manifest.license, 'adapter package lock license is stale');
 const files = packed[0].files;
 assert.ok(Array.isArray(files), 'npm did not return package file inventory');
 const paths = new Set(files.map((file) => file.path));

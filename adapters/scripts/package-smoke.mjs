@@ -31,6 +31,20 @@ const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'),
 const files = packed[0].files;
 assert.ok(Array.isArray(files), 'npm did not return package file inventory');
 const paths = new Set(files.map((file) => file.path));
+const repositoryRoot = path.resolve(packageRoot, '..');
+const legalNoticeFiles = ['LICENSE', 'NOTICE', 'THIRD_PARTY.md'];
+function normalizedText(filePath) {
+  return readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n').replace(/\n+$/, '') + '\n';
+}
+assert.equal(manifest.license, 'Apache-2.0', 'adapter package license metadata must match the project license');
+for (const filePath of legalNoticeFiles) {
+  assert.ok(paths.has(filePath), `project license/notice file is missing from the adapter package: ${filePath}`);
+  assert.equal(
+    normalizedText(path.join(packageRoot, filePath)),
+    normalizedText(path.join(repositoryRoot, filePath)),
+    `adapter package legal notice drifted from the repository root: ${filePath}`,
+  );
+}
 for (const modFile of [
   'command-code-mod/package.json',
   'command-code-mod/index.ts',
@@ -97,6 +111,14 @@ try {
   const installedRoot = path.join(installRoot, 'node_modules', '@threadforge', 'adapter-contracts');
   const installedManifest = JSON.parse(readFileSync(path.join(installedRoot, 'package.json'), 'utf8'));
   assert.deepEqual(installedManifest.bin, manifest.bin, 'installed package lost its command mapping');
+  assert.equal(installedManifest.license, 'Apache-2.0', 'installed adapter lost its Apache-2.0 license metadata');
+  for (const filePath of legalNoticeFiles) {
+    assert.equal(
+      normalizedText(path.join(installedRoot, filePath)),
+      normalizedText(path.join(repositoryRoot, filePath)),
+      `installed adapter package lost or changed its legal notice: ${filePath}`,
+    );
+  }
   for (const modFile of [
     'command-code-mod/package.json',
     'command-code-mod/index.ts',

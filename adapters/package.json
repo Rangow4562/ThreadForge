@@ -1,12 +1,16 @@
 {
   "name": "@threadforge/adapter-contracts",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "files": [
     "dist/**",
     "command-code-mod/**",
-    "openclaw-plugin/**"
+    "openclaw-plugin/**",
+    "LICENSE",
+    "NOTICE",
+    "THIRD_PARTY.md"
   ],
   "bin": {
     "threadforge-adapter": "./dist/bin.js"

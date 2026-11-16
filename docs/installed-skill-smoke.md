@@ -1,5 +1,9 @@
 # Installed skill, Qoder command, Command Code, and MCP dispatch smoke
 
+## Installed-host refresh — November 16, 2026 (smoke v48)
+
+`npm.cmd run test:installed-skills` completed successfully on the Windows development host. The `threadforge.installed-skill-smoke.v48` report recorded `real_model_invocations=0`; the isolated-home smoke completed its digest-checked procedure/memory-skill installations and discovery checks. Versions observed in this run were OpenCode `1.18.31`, Claude Code `2.1.325`, Gemini CLI `0.42.0`, Codex CLI `0.169.0`, and Antigravity CLI `1.5.9`. OpenCode, Gemini, and Codex skill discovery passed. The selected Antigravity write-denial probe produced no write effect; Copilot plan-gate coverage remains `partial`, and Command Code agent execution remains gated on isolated login. This validates only selected-version fixture transport and local configuration behavior, not real-model adherence, efficacy, a security boundary, or full host parity.
+
 ## Command Code follow-up — November 15, 2026 (CLI 1.89.1; smoke v48)
 
 The isolated Windows rerun verified that Command Code `1.89.1` lists the project Threadforge MCP server and discovers both the approved procedure and memory-continuity skills. The agent probe was explicitly `skipped` with `isolated_command_code_cli_requires_login_for_agent_run`; the fixture received zero provider requests and made zero real-model invocations. With an isolated home and provider credentials removed, `cmdc mcp --help` exposed management commands only, not a standalone tool-call operation. This remains discovery/configuration evidence; host-mediated retrieval is unverified.

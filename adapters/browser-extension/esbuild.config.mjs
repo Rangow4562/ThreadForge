@@ -56,13 +56,15 @@ async function copyStatic() {
   }
   // icons/ is optional; copy if present.
   await cp(path.join(src, 'icons'), path.join(dist, 'icons'), { recursive: true }).catch(() => {});
-  // Every distributable target carries the upstream MIT license and the
-  // repository-level Apache license/notice for Threadforge modifications.
+  // Every distributable target carries upstream and Threadforge license files,
+  // the project attribution ledger, and this extension's source history.
   const repositoryRoot = path.resolve(__dirname, '..', '..');
   await Promise.all([
     cp(path.join(__dirname, 'LICENSE.agent-beacon'), path.join(dist, 'LICENSE.agent-beacon')),
     cp(path.join(repositoryRoot, 'LICENSE'), path.join(dist, 'LICENSE.threadforge-apache')),
     cp(path.join(repositoryRoot, 'NOTICE'), path.join(dist, 'NOTICE.threadforge')),
+    cp(path.join(repositoryRoot, 'THIRD_PARTY.md'), path.join(dist, 'THIRD_PARTY.md')),
+    cp(path.join(__dirname, 'UPSTREAM_MODIFICATIONS.md'), path.join(dist, 'UPSTREAM_MODIFICATIONS.md')),
   ]);
 }
 

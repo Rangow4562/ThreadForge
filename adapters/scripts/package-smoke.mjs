@@ -39,6 +39,10 @@ assert.ok(Array.isArray(files), 'npm did not return package file inventory');
 const paths = new Set(files.map((file) => file.path));
 const repositoryRoot = path.resolve(packageRoot, '..');
 const legalNoticeFiles = ['LICENSE', 'NOTICE', 'THIRD_PARTY.md'];
+const nestedPackages = [
+  { directory: 'openclaw-plugin', name: '@threadforge/openclaw-observer' },
+  { directory: 'command-code-mod', name: 'threadforge-command-code-telemetry' },
+];
 function normalizedText(filePath) {
   return readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n').replace(/\n+$/, '') + '\n';
 }
@@ -50,6 +54,21 @@ for (const filePath of legalNoticeFiles) {
     normalizedText(path.join(repositoryRoot, filePath)),
     `adapter package legal notice drifted from the repository root: ${filePath}`,
   );
+}
+for (const nested of nestedPackages) {
+  const nestedManifest = JSON.parse(readFileSync(path.join(packageRoot, nested.directory, 'package.json'), 'utf8'));
+  assert.equal(nestedManifest.name, nested.name, `nested package identity changed: ${nested.directory}`);
+  assert.equal(nestedManifest.version, manifest.version, `nested package version drifted: ${nested.directory}`);
+  assert.equal(nestedManifest.license, 'Apache-2.0', `nested package license is missing: ${nested.directory}`);
+  for (const filePath of legalNoticeFiles) {
+    const packagePath = `${nested.directory}/${filePath}`;
+    assert.ok(paths.has(packagePath), `nested package legal file is missing: ${packagePath}`);
+    assert.equal(
+      normalizedText(path.join(packageRoot, nested.directory, filePath)),
+      normalizedText(path.join(repositoryRoot, filePath)),
+      `nested package legal file drifted: ${packagePath}`,
+    );
+  }
 }
 for (const modFile of [
   'command-code-mod/package.json',
@@ -124,6 +143,19 @@ try {
       normalizedText(path.join(repositoryRoot, filePath)),
       `installed adapter package lost or changed its legal notice: ${filePath}`,
     );
+  }
+  for (const nested of nestedPackages) {
+    const installedNested = path.join(installedRoot, nested.directory);
+    const nestedManifest = JSON.parse(readFileSync(path.join(installedNested, 'package.json'), 'utf8'));
+    assert.equal(nestedManifest.version, manifest.version, `installed nested package version drifted: ${nested.directory}`);
+    assert.equal(nestedManifest.license, 'Apache-2.0', `installed nested package license is missing: ${nested.directory}`);
+    for (const filePath of legalNoticeFiles) {
+      assert.equal(
+        normalizedText(path.join(installedNested, filePath)),
+        normalizedText(path.join(repositoryRoot, filePath)),
+        `installed nested package legal file drifted: ${nested.directory}/${filePath}`,
+      );
+    }
   }
   for (const modFile of [
     'command-code-mod/package.json',

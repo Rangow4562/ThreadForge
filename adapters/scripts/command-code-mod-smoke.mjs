@@ -7,6 +7,16 @@ import { fileURLToPath } from 'node:url';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const modRoot = path.join(packageRoot, 'command-code-mod');
+const repositoryRoot = path.resolve(packageRoot, '..');
+const packageManifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
+const modManifest = JSON.parse(readFileSync(path.join(modRoot, 'package.json'), 'utf8'));
+assert.equal(modManifest.license, 'Apache-2.0', 'Command Code mod must declare the project license');
+assert.equal(modManifest.version, packageManifest.version, 'Command Code mod version must match the adapter package');
+for (const filePath of ['LICENSE', 'NOTICE', 'THIRD_PARTY.md']) {
+  const modText = readFileSync(path.join(modRoot, filePath), 'utf8').replace(/\r\n/g, '\n').replace(/\n+$/, '');
+  const rootText = readFileSync(path.join(repositoryRoot, filePath), 'utf8').replace(/\r\n/g, '\n').replace(/\n+$/, '');
+  assert.equal(modText, rootText, `Command Code mod must retain synchronized legal file ${filePath}`);
+}
 const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'threadforge-command-code-mod-smoke-'));
 const projectRoot = path.join(tempRoot, 'project');
 const homeRoot = path.join(tempRoot, 'home');

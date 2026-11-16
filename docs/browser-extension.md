@@ -20,6 +20,8 @@ The repository-wide `test.ps1` gate now includes this subproject's type check, u
 
 Create unsigned review archives with `npm run package:chromium` or `npm run package:firefox`. They are written to `artifacts/chromium/threadforge-browser-chromium.zip` and `artifacts/firefox/threadforge-browser-firefox.zip`. Both rebuild from their respective target first and include the Agent Beacon MIT license, Threadforge's Apache license and NOTICE, the project `THIRD_PARTY.md` ledger, and this extension's `UPSTREAM_MODIFICATIONS.md` record. Unit tests inspect both generated ZIPs for those files. These archives are not signed and do not establish store approval or installed-browser compatibility.
 
+The candidate workflow retains source-bound, checksummed Chromium and Firefox review archives plus SPDX inventories as a separate 14-day Actions artifact; see [browser extension release candidate](browser-extension-release.md). It does not publish to browser stores or change the extension's independent manifest version.
+
 ## Privacy and controls
 
 - A fresh install has global capture disabled, Claude.ai and ChatGPT site toggles disabled, and `metadata` retention selected.

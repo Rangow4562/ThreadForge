@@ -24,6 +24,12 @@ func TestManagedRuleLifecycleInstallsListsReplacesAndRemoves(t *testing.T) {
 	if err != nil || len(rules) != 1 || rules[0].ID != ids[0] || rules[0].Source != rulestore.SourceStore {
 		t.Fatalf("installed rules=%#v error=%v", rules, err)
 	}
+	dashboardRules, err := ListDashboardRules(storeDir)
+	if err != nil || len(dashboardRules) != 1 || dashboardRules[0].ID != ids[0] ||
+		dashboardRules[0].Source != rulestore.SourceStore || dashboardRules[0].Kind != "match" ||
+		dashboardRules[0].Status == "" || dashboardRules[0].TestCount == 0 {
+		t.Fatalf("dashboard rule summaries=%#v error=%v", dashboardRules, err)
+	}
 	if _, err := InstallManagedRules(storeDir, source, false); err == nil {
 		t.Fatal("duplicate rule install without force was accepted")
 	}

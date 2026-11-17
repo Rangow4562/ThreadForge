@@ -2131,6 +2131,29 @@ def test_security_review_contracts_are_versioned_bounded_and_metadata_only():
         "offset": 0,
         "reviews": [review],
     })
+    security_rule = {
+        "rule_id": "suspicious-shell-pipe",
+        "title": "Suspicious shell pipeline",
+        "description": "Detects a risky command sequence.",
+        "severity": "high",
+        "status": "stable",
+        "posture": "detect",
+        "kind": "match",
+        "reason": "A shell pipeline matched the local rule.",
+        "source": "baseline",
+        "test_count": 2,
+    }
+    validate("security-rules-v1.schema.json", {
+        "schema_version": "threadforge.security-rules.v1",
+        "count": 1,
+        "rules": [security_rule],
+    })
+    with pytest.raises(ValidationError):
+        validate("security-rules-v1.schema.json", {
+            "schema_version": "threadforge.security-rules.v1",
+            "count": 1,
+            "rules": [{**security_rule, "match": "raw evaluator expression"}],
+        })
     validate("security-finding-review-history-v1.schema.json", {
         "schema_version": "threadforge.security-finding-review-history.v1",
         "events": [

@@ -56,6 +56,58 @@ func localRequest(method, target string, body io.Reader) *http.Request {
 	return request
 }
 
+func TestSecurityRulesEndpointReturnsBoundedPathFreeMetadata(t *testing.T) {
+	handler, _, _ := testHandler(t)
+	crossOrigin := localRequest(http.MethodGet, "/v1/security/rules", nil)
+	crossOrigin.Header.Set("Origin", "http://untrusted.example")
+	rejected := httptest.NewRecorder()
+	handler.ServeHTTP(rejected, crossOrigin)
+	if rejected.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin rule request returned %d: %s", rejected.Code, rejected.Body.String())
+	}
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, localRequest(http.MethodGet, "/v1/security/rules", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("security rules returned %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response securityRulesResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.SchemaVersion != "threadforge.security-rules.v1" || response.Count == 0 ||
+		response.Count != len(response.Rules) || response.Count > securityscan.MaxRules {
+		t.Fatalf("unexpected security rules response: %#v", response)
+	}
+	for _, rule := range response.Rules {
+		if rule.ID == "" || rule.Title == "" || rule.Kind == "" || rule.Status == "" || rule.Source == "" || rule.TestCount < 0 {
+			t.Fatalf("incomplete rule summary: %#v", rule)
+		}
+	}
+	body := recorder.Body.String()
+	for _, forbidden := range []string{`"match":`, `"correlation":`, `"tests":`, `"path":`} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("security rules exposed execution or path data (%s): %s", forbidden, body)
+		}
+	}
+}
+
+func TestDashboardExposesOnDemandSecurityRuleBrowser(t *testing.T) {
+	handler, _, _ := testHandler(t)
+	page := httptest.NewRecorder()
+	handler.ServeHTTP(page, localRequest(http.MethodGet, "/dashboard/", nil))
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `id="load-security-rules"`) ||
+		!strings.Contains(page.Body.String(), `id="security-rules-list"`) {
+		t.Fatalf("security rules UI is missing: status=%d body=%q", page.Code, page.Body.String())
+	}
+	script := httptest.NewRecorder()
+	handler.ServeHTTP(script, localRequest(http.MethodGet, "/dashboard/app.js", nil))
+	if script.Code != http.StatusOK || !strings.Contains(script.Body.String(), "fetch('/v1/security/rules'") ||
+		!strings.Contains(script.Body.String(), "threadforge.security-rules.v1") {
+		t.Fatalf("security rules UI client is missing: status=%d", script.Code)
+	}
+}
+
 func TestLocalServiceExposesScopedTaskAndSessionReads(t *testing.T) {
 	handler, database, _ := testHandler(t)
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)

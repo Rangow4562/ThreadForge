@@ -47,6 +47,12 @@ type securityScanResponse struct {
 	Findings               *[]securityFindingDetail `json:"findings,omitempty"`
 }
 
+type securityRulesResponse struct {
+	SchemaVersion string                              `json:"schema_version"`
+	Count         int                                 `json:"count"`
+	Rules         []securityscan.DashboardRuleSummary `json:"rules"`
+}
+
 type securityFindingDetail struct {
 	Fingerprint      string                 `json:"fingerprint"`
 	RuleID           string                 `json:"rule_id"`
@@ -120,6 +126,7 @@ func NewHandlerWithProjectStoresRulesAndInventoryRoots(procedures *store.Store, 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", h.health)
 	mux.HandleFunc("GET /v1/dashboard", h.dashboard)
+	mux.HandleFunc("GET /v1/security/rules", h.listSecurityRules)
 	mux.HandleFunc("GET /v1/security/scan", h.securityScan)
 	mux.HandleFunc("POST /v1/security/scan", h.persistSecurityScan)
 	mux.HandleFunc("GET /v1/security/finding-reviews", h.listSecurityFindingReviews)
@@ -155,6 +162,21 @@ func NewHandlerWithProjectStoresRulesAndInventoryRoots(procedures *store.Store, 
 
 func (h *Handler) securityScan(w http.ResponseWriter, r *http.Request) {
 	h.runSecurityScan(w, r, false)
+}
+
+func (h *Handler) listSecurityRules(w http.ResponseWriter, r *http.Request) {
+	if !sameLocalOrigin(r) {
+		writeError(w, http.StatusForbidden, errors.New("security rule reads are restricted to same-origin requests"))
+		return
+	}
+	rules, err := securityscan.ListDashboardRules(h.ruleStoreDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("local security rules are unavailable"))
+		return
+	}
+	writeJSON(w, http.StatusOK, securityRulesResponse{
+		SchemaVersion: "threadforge.security-rules.v1", Count: len(rules), Rules: rules,
+	})
 }
 
 func (h *Handler) persistSecurityScan(w http.ResponseWriter, r *http.Request) {

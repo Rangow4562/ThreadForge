@@ -115,6 +115,7 @@ export async function installCursorProjectPlanGateHook(projectRoot: string, comm
     next.preToolUse = [
       ...readHookRefs(next, 'preToolUse'),
       { command, matcher: 'Write', timeout: 10, failClosed: true },
+      { command, matcher: 'Shell|MCP:.*', timeout: 10, failClosed: true },
     ];
     settings.version = 1;
     settings.hooks = next;

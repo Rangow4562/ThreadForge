@@ -1334,13 +1334,17 @@ test('adapter CLI installs and removes Cursor plan gate without replacing user h
     let result = await invoke(['cursor', 'plan-gate', 'install', '--project-root', root, '--command', command]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'installed');
-    assert.match(JSON.parse(result.stdout).warning, /direct Write tools only/);
+    assert.match(JSON.parse(result.stdout).warning, /direct Write, Shell, and MCP/);
+    assert.match(JSON.parse(result.stdout).warning, /no effect\/path-scope proof/);
     let config = JSON.parse(await readFile(hooksPath, 'utf8'));
     assert.deepEqual(config.userOption, original.userOption);
     assert.deepEqual(config.hooks.preToolUse[0], original.hooks.preToolUse[0]);
     assert.deepEqual(config.hooks.sessionStart, original.hooks.sessionStart);
     assert.deepEqual(config.hooks.preToolUse[1], {
       command, matcher: 'Write', timeout: 10, failClosed: true,
+    });
+    assert.deepEqual(config.hooks.preToolUse[2], {
+      command, matcher: 'Shell|MCP:.*', timeout: 10, failClosed: true,
     });
 
     result = await invoke(['cursor', 'plan-gate', 'update', '--project-root', root, '--command', command]);

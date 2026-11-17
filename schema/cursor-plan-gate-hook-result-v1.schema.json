@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/cursor-plan-gate-hook-result-v1.schema.json",
+  "title": "Threadforge Cursor deny-only task-plan hook result v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "maxProperties": 0,
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["permission", "user_message", "agent_message"],
+      "properties": {
+        "permission": { "const": "deny" },
+        "user_message": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "agent_message": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    }
+  ]
+}

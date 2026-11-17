@@ -12,6 +12,25 @@ SCHEMA_DIRECTORY = Path(__file__).resolve().parents[2] / "schema"
 SCHEMA_PATHS = sorted(SCHEMA_DIRECTORY.glob("*.json"))
 
 
+def test_cursor_plan_gate_result_is_no_opinion_or_deny_only():
+    schema = json.loads((SCHEMA_DIRECTORY / "cursor-plan-gate-hook-result-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    validator.validate({})
+    validator.validate({
+        "permission": "deny",
+        "user_message": "Threadforge withheld this Cursor tool call.",
+        "agent_message": "Review finalized requirements and the plan decision.",
+    })
+    for invalid in (
+        {"permission": "allow"},
+        {"permission": "ask"},
+        {"permission": "deny", "user_message": "denied", "agent_message": "denied", "path": "private.txt"},
+        {"permission": "deny", "user_message": "denied"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_handoff_event_list_schema_is_versioned_content_free_and_reports_scan_state():
     schema = json.loads((SCHEMA_DIRECTORY / "handoff-event-list-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

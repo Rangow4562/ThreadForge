@@ -622,6 +622,38 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 		t.Fatalf("read-only Copilot MCP retrieval should remain available during planning: code=%d stdout=%s stderr=%s",
 			code, copilotReadOnlyMCPOutput, copilotReadOnlyMCPError)
 	}
+	cursorShellInput := map[string]any{
+		"hook_event_name": "preToolUse", "tool_name": "Shell", "cwd": projectRoot,
+		"tool_input": map[string]any{"command": "node -e write-private-sentinel"},
+	}
+	code, cursorBeforePlanShellOutput, cursorBeforePlanShellError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorShellInput)
+	if code != 0 || cursorBeforePlanShellError != "" || !strings.Contains(cursorBeforePlanShellOutput, `"permission": "deny"`) ||
+		strings.Contains(cursorBeforePlanShellOutput, "write-private-sentinel") {
+		t.Fatalf("unconfirmed Cursor shell call was not privately denied: code=%d stdout=%s stderr=%s",
+			code, cursorBeforePlanShellOutput, cursorBeforePlanShellError)
+	}
+	cursorMCPMutationInput := map[string]any{
+		"hook_event_name": "preToolUse", "tool_name": "MCP:fixture_write_record", "cwd": projectRoot,
+		"tool_input": map[string]any{"record": "private-value"},
+	}
+	code, cursorBeforePlanMCPOutput, cursorBeforePlanMCPError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorMCPMutationInput)
+	if code != 0 || cursorBeforePlanMCPError != "" || !strings.Contains(cursorBeforePlanMCPOutput, `"permission": "deny"`) ||
+		strings.Contains(cursorBeforePlanMCPOutput, "private-value") {
+		t.Fatalf("unconfirmed Cursor MCP call was not privately denied: code=%d stdout=%s stderr=%s",
+			code, cursorBeforePlanMCPOutput, cursorBeforePlanMCPError)
+	}
+	cursorReadOnlyMCPInput := map[string]any{
+		"hook_event_name": "preToolUse", "tool_name": "MCP:threadforge_procedure_get", "cwd": projectRoot,
+		"tool_input": map[string]any{"procedure_id": "approved-procedure"},
+	}
+	code, cursorReadOnlyMCPOutput, cursorReadOnlyMCPError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorReadOnlyMCPInput)
+	if code != 0 || cursorReadOnlyMCPError != "" || strings.Contains(cursorReadOnlyMCPOutput, "permission") {
+		t.Fatalf("allowlisted read-only Cursor MCP retrieval should remain available during planning: code=%d stdout=%s stderr=%s",
+			code, cursorReadOnlyMCPOutput, cursorReadOnlyMCPError)
+	}
 	if code := Run([]string{"task", "plan", "confirm", "--id", "plan-gate-task", "--expected-revision", "3",
 		"--decision", "plan_only", "--actor", "owner", "--reason", "plan only; do not edit"}, &out, &stderr); code != 0 {
 		t.Fatalf("plan-only confirmation code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
@@ -653,6 +685,18 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 		!strings.Contains(copilotPlanOnlyMCPOutput, `"permissionDecision": "deny"`) {
 		t.Fatalf("plan-only Copilot MCP mutation was not denied: code=%d stdout=%s stderr=%s",
 			code, copilotPlanOnlyMCPOutput, copilotPlanOnlyMCPError)
+	}
+	code, cursorPlanOnlyShellOutput, cursorPlanOnlyShellError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorShellInput)
+	if code != 0 || cursorPlanOnlyShellError != "" || !strings.Contains(cursorPlanOnlyShellOutput, `"permission": "deny"`) {
+		t.Fatalf("plan-only Cursor shell call was not denied: code=%d stdout=%s stderr=%s",
+			code, cursorPlanOnlyShellOutput, cursorPlanOnlyShellError)
+	}
+	code, cursorPlanOnlyMCPOutput, cursorPlanOnlyMCPError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorMCPMutationInput)
+	if code != 0 || cursorPlanOnlyMCPError != "" || !strings.Contains(cursorPlanOnlyMCPOutput, `"permission": "deny"`) {
+		t.Fatalf("plan-only Cursor MCP call was not denied: code=%d stdout=%s stderr=%s",
+			code, cursorPlanOnlyMCPOutput, cursorPlanOnlyMCPError)
 	}
 	codexPlanOnlyInput := map[string]any{
 		"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": projectRoot,
@@ -694,6 +738,32 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 	if code := Run([]string{"task", "plan", "confirm", "--id", "plan-gate-task", "--expected-revision", "5",
 		"--decision", "governed_execution", "--actor", "owner", "--reason", "continue within the declared scope"}, &out, &stderr); code != 0 {
 		t.Fatalf("scoped plan confirmation code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	code, cursorGovernedShellOutput, cursorGovernedShellError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorShellInput)
+	var cursorGovernedShell map[string]any
+	if code != 0 || cursorGovernedShellError != "" || json.Unmarshal([]byte(cursorGovernedShellOutput), &cursorGovernedShell) != nil ||
+		len(cursorGovernedShell) != 0 {
+		t.Fatalf("governed Cursor shell call must return no opinion, not allow: code=%d stdout=%s stderr=%s",
+			code, cursorGovernedShellOutput, cursorGovernedShellError)
+	}
+	cursorShellOutsideCWDInput := map[string]any{
+		"hook_event_name": "preToolUse", "tool_name": "Shell", "cwd": t.TempDir(),
+		"tool_input": map[string]any{"command": "go test ./..."},
+	}
+	code, cursorShellOutsideCWDOutput, cursorShellOutsideCWDError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorShellOutsideCWDInput)
+	if code != 0 || cursorShellOutsideCWDError != "" || !strings.Contains(cursorShellOutsideCWDOutput, `"permission": "deny"`) {
+		t.Fatalf("Cursor shell call outside the selected project was not denied: code=%d stdout=%s stderr=%s",
+			code, cursorShellOutsideCWDOutput, cursorShellOutsideCWDError)
+	}
+	code, cursorGovernedMCPOutput, cursorGovernedMCPError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorMCPMutationInput)
+	var cursorGovernedMCP map[string]any
+	if code != 0 || cursorGovernedMCPError != "" || json.Unmarshal([]byte(cursorGovernedMCPOutput), &cursorGovernedMCP) != nil ||
+		len(cursorGovernedMCP) != 0 {
+		t.Fatalf("governed Cursor MCP call must return no opinion, not allow: code=%d stdout=%s stderr=%s",
+			code, cursorGovernedMCPOutput, cursorGovernedMCPError)
 	}
 
 	code, inScopeOutput, inScopeError := runClaudeTaskPlanGuardTestHook(t, projectRoot, "plan-gate-task", "plan-gate-project", hookInput)
@@ -821,8 +891,8 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 			code, cursorOutsideOutput, cursorOutsideError)
 	}
 	cursorUnsupportedInput := map[string]any{
-		"tool_name": "Shell", "cwd": projectRoot,
-		"tool_input": map[string]any{"command": "echo do-not-run"},
+		"tool_name": "UnknownTool", "cwd": projectRoot,
+		"tool_input": map[string]any{"value": "do-not-run"},
 	}
 	code, cursorUnsupportedOutput, cursorUnsupportedError := runTaskPlanGuardTestHook(t, projectRoot,
 		"plan-gate-task", "plan-gate-project", "cursor", cursorUnsupportedInput)

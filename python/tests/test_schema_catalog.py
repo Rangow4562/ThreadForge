@@ -1807,6 +1807,56 @@ def test_rrsi_trajectory_summary_schema_is_bounded_and_content_free():
         })
 
 
+def test_rrsi_declared_heldout_evaluation_schema_never_claims_authority():
+    documents = {
+        path.name: json.loads(path.read_text(encoding="utf-8"))
+        for path in SCHEMA_PATHS
+    }
+    resources = []
+    for path, document in documents.items():
+        resource_id = document.get("$id", (SCHEMA_DIRECTORY / path).as_uri())
+        resources.append((resource_id, Resource.from_contents(document)))
+    registry = Registry().with_resources(resources)
+    schema = documents["rrsi-heldout-evaluation-v1.schema.json"]
+    validator = validator_for(schema)(schema, registry=registry)
+    evaluation = {
+        "schema_version": "threadforge.rrsi-evaluation.v1",
+        "domain": "workspace",
+        "job": "heldout_champ",
+        "trials_per_task": 1,
+        "score": 1.0,
+        "mean_tokens": 100,
+        "expected_trials": 1,
+        "missing_trials": 0,
+        "metrics": {"criteria_passed": 1, "criteria_total": 1, "criterion_rate": 1.0},
+        "per_task": {
+            "law/task-1": {
+                "rewards": [1.0],
+                "weights": [1.0],
+                "tokens": [100],
+                "missing": 0,
+                "metrics": {},
+            }
+        },
+    }
+    heldout = {
+        "schema_version": "threadforge.rrsi-heldout-evaluation.v1",
+        "evaluation_scope": "declared_heldout_job_label",
+        "human_review_required": True,
+        "independent_holdout_verified": False,
+        "execution_verified": False,
+        "cutover_evidence_eligible": False,
+        "evaluation": evaluation,
+    }
+    validator.validate(heldout)
+
+    for field in ("independent_holdout_verified", "execution_verified", "cutover_evidence_eligible"):
+        with pytest.raises(ValidationError):
+            validator.validate({**heldout, field: True})
+    with pytest.raises(ValidationError):
+        validator.validate({**heldout, "source_path": "private/runs/workspace/eval.json"})
+
+
 def test_git_ref_team_sync_schemas_are_project_scoped_and_path_free():
     manifest_schema = json.loads((SCHEMA_DIRECTORY / "team-procedure-manifest-v1.schema.json").read_text(encoding="utf-8"))
     manifest_validator = validator_for(manifest_schema)(manifest_schema)

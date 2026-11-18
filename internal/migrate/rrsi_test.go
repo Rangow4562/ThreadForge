@@ -44,7 +44,9 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 		},
 	}
 	for domain, result := range taskResults {
-		writeMancodeJSONFixture(t, root, filepath.ToSlash(filepath.Join("runs", domain, "jobs", "base", "eval.json")), result)
+		job := result.(map[string]any)["job"].(string)
+		relative := filepath.ToSlash(filepath.Join("runs", domain, "jobs", job, "eval.json"))
+		writeMancodeJSONFixture(t, root, relative, result)
 	}
 	writeMancodeJSONFixture(t, root, "runs/coding/calibration.json", map[string]any{
 		"delta": 0.02, "z": 2.0, "sd_null": 0.01, "sd_null_bootstrap": 0.012, "se_bootstrap": 0.008,
@@ -99,7 +101,28 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 		if record.Scope != "local_pending_review" {
 			t.Fatalf("RRSI result became active evidence: %#v", record)
 		}
-		if record.Type == "rrsi_evaluation_result" {
+		if record.Type == "rrsi_evaluation_result" || record.Type == "rrsi_heldout_evaluation_result" {
+			evaluationPayload := record.Payload
+			if record.Type == "rrsi_heldout_evaluation_result" {
+				var heldout struct {
+					SchemaVersion              string          `json:"schema_version"`
+					EvaluationScope            string          `json:"evaluation_scope"`
+					HumanReviewRequired        bool            `json:"human_review_required"`
+					IndependentHoldoutVerified bool            `json:"independent_holdout_verified"`
+					ExecutionVerified          bool            `json:"execution_verified"`
+					CutoverEvidenceEligible    bool            `json:"cutover_evidence_eligible"`
+					Evaluation                 json.RawMessage `json:"evaluation"`
+				}
+				if err := json.Unmarshal(record.Payload, &heldout); err != nil {
+					t.Fatal(err)
+				}
+				if heldout.SchemaVersion != rrsiHeldoutEvaluationSchema || heldout.EvaluationScope != "declared_heldout_job_label" ||
+					!heldout.HumanReviewRequired || heldout.IndependentHoldoutVerified || heldout.ExecutionVerified ||
+					heldout.CutoverEvidenceEligible || len(heldout.Evaluation) == 0 {
+					t.Fatalf("RRSI held-out label became verified or cutover-eligible evidence: %#v", heldout)
+				}
+				evaluationPayload = heldout.Evaluation
+			}
 			var payload struct {
 				SchemaVersion string             `json:"schema_version"`
 				Domain        string             `json:"domain"`
@@ -119,7 +142,7 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 					} `json:"metrics"`
 				} `json:"per_task"`
 			}
-			if err := json.Unmarshal(record.Payload, &payload); err != nil {
+			if err := json.Unmarshal(evaluationPayload, &payload); err != nil {
 				t.Fatal(err)
 			}
 			if payload.SchemaVersion != rrsiEvaluationImportSchema {
@@ -182,6 +205,26 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 	for _, kind := range []string{"noise_calibration", "evolution_frontier", "rrsi_edit_history", "rrsi_attribution", "rrsi_selection_decision"} {
 		if !gotTypes[kind] {
 			t.Errorf("RRSI snapshot is missing typed record %q", kind)
+		}
+	}
+	if !gotTypes["rrsi_heldout_evaluation_result"] {
+		t.Error("RRSI held-out-labelled run did not get its non-authorizing record type")
+	}
+}
+
+func TestRRSIEvaluationJobMustMatchSourcePath(t *testing.T) {
+	for _, test := range []struct {
+		path string
+		job  string
+	}{
+		{path: "runs/workspace/jobs/base/eval.json", job: "heldout_champ"},
+		{path: "runs/workspace/jobs/heldout_champ/eval.json", job: "heldout_other"},
+		{path: "runs/coding/r0/A/eval.json", job: "r0B"},
+	} {
+		_, recognized, err := normalizeRRSIItems(test.path, map[string]any{"job": test.job})
+		if !recognized || err == nil {
+			t.Errorf("RRSI evaluation path/job mismatch was accepted: path=%q job=%q recognized=%t err=%v",
+				test.path, test.job, recognized, err)
 		}
 	}
 }

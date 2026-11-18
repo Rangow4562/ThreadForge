@@ -11,6 +11,8 @@ import (
 
 const (
 	rrsiEvaluationImportSchema  = "threadforge.rrsi-evaluation.v1"
+	rrsiHeldoutEvaluationSchema = "threadforge.rrsi-heldout-evaluation.v1"
+	rrsiHeldoutEvaluationType   = "rrsi_heldout_evaluation_result"
 	rrsiFrontierImportSchema    = "threadforge.rrsi-frontier.v1"
 	rrsiCalibrationImportSchema = "threadforge.rrsi-noise-calibration.v1"
 	rrsiHistoryImportSchema     = "threadforge.rrsi-edit-history.v1"
@@ -31,8 +33,33 @@ func normalizeRRSIItems(relative string, value any) ([]normalizedItem, bool, err
 		if !supportedDomain {
 			return nil, true, errors.New("RRSI evaluation is outside a supported domain directory")
 		}
+		pathJob, jobScoped, err := rrsiEvaluationJobForPath(relative)
+		if err != nil {
+			return nil, true, err
+		}
+		if jobScoped {
+			source, ok := rrsiObject(value)
+			job, jobOK := source["job"].(string)
+			if !ok || !jobOK || job != pathJob {
+				return nil, true, errors.New("RRSI evaluation job does not match its source path")
+			}
+		}
 		payload, err := normalizeRRSIEvaluation(domain, value)
-		return []normalizedItem{{Type: "rrsi_evaluation_result", Payload: payload}}, true, err
+		if err != nil {
+			return nil, true, err
+		}
+		recordType := "rrsi_evaluation_result"
+		if jobScoped && strings.HasPrefix(strings.ToLower(pathJob), "heldout_") {
+			if strings.TrimSpace(pathJob[len("heldout_"):]) == "" {
+				return nil, true, errors.New("RRSI held-out evaluation label is empty")
+			}
+			payload, err = normalizeRRSIHeldoutEvaluation(payload)
+			if err != nil {
+				return nil, true, err
+			}
+			recordType = rrsiHeldoutEvaluationType
+		}
+		return []normalizedItem{{Type: recordType, Payload: payload}}, true, nil
 	case "calibration.json":
 		if !supportedDomain {
 			return nil, true, errors.New("RRSI calibration is outside a supported domain directory")
@@ -66,6 +93,54 @@ func normalizeRRSIItems(relative string, value any) ([]normalizedItem, bool, err
 	default:
 		return nil, false, nil
 	}
+}
+
+func rrsiEvaluationRecordTypeForPath(relative string) string {
+	job, scoped, err := rrsiEvaluationJobForPath(relative)
+	if err == nil && scoped && len(job) > len("heldout_") &&
+		strings.HasPrefix(strings.ToLower(job), "heldout_") {
+		return rrsiHeldoutEvaluationType
+	}
+	return "rrsi_evaluation_result"
+}
+
+func rrsiEvaluationJobForPath(relative string) (string, bool, error) {
+	tail, ok := rrsiRunTailOriginal(relative)
+	if !ok || len(tail) != 3 || !strings.EqualFold(tail[2], "eval.json") {
+		return "", false, nil
+	}
+	if strings.EqualFold(tail[0], "jobs") {
+		if strings.TrimSpace(tail[1]) == "" {
+			return "", true, errors.New("RRSI evaluation job path is empty")
+		}
+		return tail[1], true, nil
+	}
+	if isRRSIRoundName(tail[0]) {
+		if len(tail[1]) != 1 || !isRRSIEvaluationVariant(tail[1][0]) {
+			return "", true, errors.New("RRSI round evaluation variant path is invalid")
+		}
+		return tail[0] + tail[1], true, nil
+	}
+	return "", false, nil
+}
+
+func isRRSIEvaluationVariant(value byte) bool {
+	if value >= 'a' && value <= 'h' {
+		value -= 'a' - 'A'
+	}
+	return value >= 'A' && value <= 'H'
+}
+
+func normalizeRRSIHeldoutEvaluation(evaluation json.RawMessage) (json.RawMessage, error) {
+	return rrsiMarshal(map[string]any{
+		"schema_version":               rrsiHeldoutEvaluationSchema,
+		"evaluation_scope":             "declared_heldout_job_label",
+		"human_review_required":        true,
+		"independent_holdout_verified": false,
+		"execution_verified":           false,
+		"cutover_evidence_eligible":    false,
+		"evaluation":                   evaluation,
+	})
 }
 
 func rrsiDomain(relative string) (string, bool) {

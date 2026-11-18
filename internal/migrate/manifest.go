@@ -885,7 +885,7 @@ func knownRecordType(value string) bool {
 		"workflow_verification", "workflow_plan", "workflow_checkpoint",
 		"mancode_workflow_aggregate", "mancode_legacy_workflow_summary", "mancode_legacy_requirements", "mancode_legacy_review_summary", "mancode_legacy_verification_summary", "mancode_legacy_workflow_plan",
 		"rrsi_evaluation_result", "rrsi_edit_history", "rrsi_attribution", "rrsi_selection_decision", "rrsi_trial_artifact",
-		"rrsi_trajectory_summary", rrsiDeliverableRecordType, rrsiCriticRecordType, rrsiSmokeRecordType,
+		"rrsi_trajectory_summary", rrsiHeldoutEvaluationType, rrsiDeliverableRecordType, rrsiCriticRecordType, rrsiSmokeRecordType,
 		rrsiPrepRecordType, rrsiDirectivesRecordType, rrsiAnalysisRecordType:
 		return true
 	default:
@@ -1722,7 +1722,7 @@ func classifyRecord(product Product, relative string) string {
 		case "frontier.json":
 			return "evolution_frontier"
 		case "eval.json":
-			return "rrsi_evaluation_result"
+			return rrsiEvaluationRecordTypeForPath(relative)
 		case "decisions.json":
 			return "rrsi_selection_decision"
 		default:

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from './test-api.js';
 import { resolveBrowserTarget } from '../../e2e/browser-target.js';
 
 describe('resolveBrowserTarget (e2e browser selection)', () => {

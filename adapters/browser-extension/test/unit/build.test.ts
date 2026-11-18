@@ -1,6 +1,6 @@
 // Runs the real build (esbuild.config.mjs) for each target into a temp dir.
 // Runtime bundles stay complete and every target carries all applicable notices.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, setTestTimeout } from './test-api.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -56,6 +56,7 @@ function archiveEntries(filename: string): string[] {
 }
 
 beforeAll(() => {
+  setTestTimeout(60_000);
   work = mkdtempSync(path.join(tmpdir(), 'beacon-ext-build-'));
   for (const t of ['chrome', 'firefox', 'safari']) {
     execFileSync(process.execPath, ['esbuild.config.mjs', '--target', t, '--outdir', out(t)], {
@@ -63,19 +64,23 @@ beforeAll(() => {
       stdio: 'pipe',
     });
   }
-}, 60_000);
+});
 
 afterAll(() => {
   rmSync(work, { recursive: true, force: true });
 });
 
-describe.each(['chrome', 'firefox', 'safari'])('%s build', (t) => {
-  it.each([...FILES, ...LEGAL_FILES])('emits a non-empty %s', (f) => {
-    const p = path.join(out(t), f);
-    expect(existsSync(p)).toBe(true);
-    expect(statSync(p).size).toBeGreaterThan(0);
+for (const target of ['chrome', 'firefox', 'safari']) {
+  describe(`${target} build`, () => {
+    for (const file of [...FILES, ...LEGAL_FILES]) {
+      it(`emits a non-empty ${file}`, () => {
+        const p = path.join(out(target), file);
+        expect(existsSync(p)).toBe(true);
+        expect(statSync(p).size).toBeGreaterThan(0);
+      });
+    }
   });
-});
+}
 
 describe('chrome build', () => {
   it('ships src/manifest.json byte for byte', () => {
@@ -118,36 +123,39 @@ describe('safari build', () => {
   });
 });
 
-describe.each([
+for (const { target, filename } of [
   { target: 'chrome', filename: 'threadforge-browser-chromium.zip' },
   { target: 'firefox', filename: 'threadforge-browser-firefox.zip' },
-])('$target unsigned package', ({ target, filename }) => {
-  it('retains the license, notice, attribution ledger, and source record in the ZIP', () => {
-    const artifacts = path.join(work, 'artifacts', target);
-    mkdirSync(artifacts, { recursive: true });
-    const webExt = path.join(root, 'node_modules', 'web-ext', 'bin', 'web-ext.js');
-    execFileSync(
-      process.execPath,
-      [
-        webExt,
-        'build',
-        '--source-dir',
-        out(target),
-        '--artifacts-dir',
-        artifacts,
-        '--filename',
-        filename,
-        '--no-input',
-        '--no-config-discovery',
-        '--overwrite-dest',
-      ],
-      { cwd: root, stdio: 'pipe' },
-    );
+]) {
+  describe(`${target} unsigned package`, () => {
+    it('retains the license, notice, attribution ledger, and source record in the ZIP', () => {
+      setTestTimeout(60_000);
+      const artifacts = path.join(work, 'artifacts', target);
+      mkdirSync(artifacts, { recursive: true });
+      const webExt = path.join(root, 'node_modules', 'web-ext', 'bin', 'web-ext.js');
+      execFileSync(
+        process.execPath,
+        [
+          webExt,
+          'build',
+          '--source-dir',
+          out(target),
+          '--artifacts-dir',
+          artifacts,
+          '--filename',
+          filename,
+          '--no-input',
+          '--no-config-discovery',
+          '--overwrite-dest',
+        ],
+        { cwd: root, stdio: 'pipe' },
+      );
 
-    const entries = archiveEntries(path.join(artifacts, filename));
-    expect(entries).toEqual(expect.arrayContaining(LEGAL_FILES));
-  }, 60_000);
-});
+      const entries = archiveEntries(path.join(artifacts, filename));
+      expect(entries).toEqual(expect.arrayContaining(LEGAL_FILES));
+    });
+  });
+}
 
 describe('firefox build', () => {
   it('writes the derived Gecko manifest', () => {

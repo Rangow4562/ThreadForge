@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from './test-api.js';
 import { mergeSettings, normalizeSettings } from '../../src/shared/settings-schema.js';
 import { DEFAULT_SETTINGS } from '../../src/shared/types.js';
 

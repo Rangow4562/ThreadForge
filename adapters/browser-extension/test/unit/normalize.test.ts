@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from './test-api.js';
 import { normalizeTurn, turnToEnvelope } from '../../src/shared/normalize.js';
 import {
   attrValue,

@@ -1,7 +1,7 @@
 // Per-target manifest generation (tools/targets.mjs). Chrome must stay exactly
 // what it was; Firefox must get the keys Gecko requires and keep everything the
 // capture path depends on.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from './test-api.js';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -137,20 +137,21 @@ describe('assertSafeOutdir', () => {
   const project = '/repo/browser-extension';
   const src = '/repo/browser-extension/src';
 
-  it.each(['/repo/browser-extension/dist', '/repo/browser-extension/dist-firefox', '/tmp/beacon-build'])(
-    'allows %s',
-    (out) => {
+  for (const out of ['/repo/browser-extension/dist', '/repo/browser-extension/dist-firefox', '/tmp/beacon-build']) {
+    it(`allows ${out}`, () => {
       expect(() => assertSafeOutdir(project, src, out)).not.toThrow();
-    },
-  );
+    });
+  }
 
-  it.each([
+  for (const out of [
     '/repo/browser-extension', // --outdir .
     '/repo', // --outdir ..
     '/', // an ancestor
     '/repo/browser-extension/src', // --outdir src
     '/repo/browser-extension/src/popup', // inside src
-  ])('refuses %s, which the build would delete along with sources', (out) => {
-    expect(() => assertSafeOutdir(project, src, out)).toThrow(/refusing to build into/);
-  });
+  ]) {
+    it(`refuses ${out}, which the build would delete along with sources`, () => {
+      expect(() => assertSafeOutdir(project, src, out)).toThrow(/refusing to build into/);
+    });
+  }
 });

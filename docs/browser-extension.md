@@ -18,6 +18,8 @@ npm test
 
 The repository-wide `test.ps1` gate now includes this subproject's type check, unit tests, Chromium build and replay tests, Firefox build/lint, and unsigned Chromium/Firefox package smoke checks. Replay results and package archives are written under a unique temporary directory, not into the source tree's `test-results/` or `artifacts/` folders.
 
+The browser-free unit tests use the already-installed `@playwright/test` Node runner via `playwright.unit.config.ts`; the separate `playwright.config.ts` still selects only the Chromium replay tests. The unit runner covers `test/unit/**/*.test.ts` without opening a browser. Using one existing runner avoids a second Vite/Vitest development toolchain in the browser-extension lockfile.
+
 Create unsigned review archives with `npm run package:chromium` or `npm run package:firefox`. They are written to `artifacts/chromium/threadforge-browser-chromium.zip` and `artifacts/firefox/threadforge-browser-firefox.zip`. Both rebuild from their respective target first and include the Agent Beacon MIT license, Threadforge's Apache license and NOTICE, the project `THIRD_PARTY.md` ledger, and this extension's `UPSTREAM_MODIFICATIONS.md` record. Unit tests inspect both generated ZIPs for those files. These archives are not signed and do not establish store approval or installed-browser compatibility.
 
 The candidate workflow retains source-bound, checksummed Chromium and Firefox review archives plus SPDX inventories as a separate 14-day Actions artifact; see [browser extension release candidate](browser-extension-release.md). It does not publish to browser stores or change the extension's independent manifest version.

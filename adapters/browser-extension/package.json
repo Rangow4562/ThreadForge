@@ -13,8 +13,8 @@
     "package:firefox": "npm run build:firefox && web-ext build --source-dir dist-firefox --artifacts-dir artifacts/firefox --filename threadforge-browser-firefox.zip --no-input --no-config-discovery --overwrite-dest",
     "lint:firefox": "npm run build:firefox && web-ext lint --source-dir dist-firefox --warnings-as-errors",
     "check": "tsc --noEmit",
-    "test:unit": "vitest run",
-    "test:unit:watch": "vitest",
+    "test:unit": "playwright test --config=playwright.unit.config.ts",
+    "test:unit:watch": "playwright test --config=playwright.unit.config.ts --ui",
     "pretest": "npm run build",
     "test": "playwright test",
     "test:headed": "HEADED=1 playwright test --headed",
@@ -31,7 +31,6 @@
     "@types/node": "^22.0.0",
     "esbuild": "^0.28.1",
     "typescript": "^5.6.0",
-    "vitest": "^4.1.0",
     "web-ext": "^10.7.0"
   },
   "overrides": {

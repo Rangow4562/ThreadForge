@@ -189,6 +189,25 @@ def test_candidate_provenance_failure_stops_before_public_release_queries(tmp_pa
     assert len(fake.commands) == 1
 
 
+def test_candidate_provenance_failure_reports_safe_asset_filename(tmp_path):
+    bundle = tmp_path / "candidate"
+    files = candidate_bundle(bundle)
+    fake = FakeGitHub(bundle, files)
+    fake.candidate_succeeds = False
+    fake.candidate_stderr = (
+        "release-candidate verification failed: GitHub attestation verification failed for "
+        "threadforge_0.5.0_linux_amd64.tar.gz"
+    )
+
+    with pytest.raises(VERIFIER.PublishedReleaseVerificationError) as error:
+        verify(bundle, fake)
+
+    assert str(error.value) == (
+        "release-candidate provenance verification failed: GitHub attestation verification failed for "
+        "threadforge_0.5.0_linux_amd64.tar.gz"
+    )
+
+
 def test_candidate_provenance_failure_does_not_echo_unsafe_subprocess_output(tmp_path):
     bundle = tmp_path / "candidate"
     files = candidate_bundle(bundle)

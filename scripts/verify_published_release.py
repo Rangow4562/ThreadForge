@@ -28,7 +28,7 @@ MAX_TOTAL_BYTES = 10 * 1024 * 1024 * 1024
 COMMAND_TIMEOUT_SECONDS = 3600
 CHUNK_SIZE = 1024 * 1024
 CANDIDATE_FAILURE_PREFIX = "release-candidate verification failed: "
-SAFE_CANDIDATE_DIAGNOSTIC_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,:()'-]{0,239}$")
+SAFE_CANDIDATE_DIAGNOSTIC_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._,:()' -]{0,239}$")
 
 
 class PublishedReleaseVerificationError(ValueError):

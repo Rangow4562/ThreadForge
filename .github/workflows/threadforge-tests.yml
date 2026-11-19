@@ -281,10 +281,10 @@ jobs:
         working-directory: adapters
         run: npm ci
 
-      - name: Audit TypeScript adapter dependencies
+      - name: Audit TypeScript adapter dependencies (low and above)
         shell: bash
         working-directory: adapters
-        run: npm audit --audit-level=moderate
+        run: npm audit --audit-level=low
 
       - name: Run TypeScript adapter typecheck and tests
         shell: bash
@@ -303,10 +303,10 @@ jobs:
         working-directory: adapters/browser-extension
         run: npm ci
 
-      - name: Audit browser extension dependencies
+      - name: Audit browser extension dependencies (low and above)
         shell: bash
         working-directory: adapters/browser-extension
-        run: npm audit --audit-level=moderate
+        run: npm audit --audit-level=low
 
       - name: Install Playwright Chromium and Linux dependencies
         if: runner.os == 'Linux'

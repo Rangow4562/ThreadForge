@@ -207,6 +207,34 @@ def test_aider_auto_read_result_is_project_scoped_guidance_and_never_authorizes_
             validator.validate(invalid)
 
 
+def test_aider_live_handoff_smoke_receipt_is_loopback_only_and_path_free():
+    schema = json.loads((SCHEMA_DIRECTORY / "aider-handoff-live-smoke-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.aider-handoff-live-smoke.v1",
+        "status": "passed",
+        "aider_version": "aider 0.86.2",
+        "threadforge_exit_code": 0,
+        "read_only_load_confirmed": True,
+        "synthetic_brief_created": True,
+        "source_trace_unchanged": True,
+        "fixture_marker_echoed": False,
+        "api_base_scope": "loopback_fixture_only",
+        "model_prompt_submitted": False,
+        "user_configuration_isolated": True,
+    }
+    validator.validate(result)
+    for invalid in (
+        {**result, "brief_path": "C:/Users/private/handoff.md"},
+        {**result, "fixture_marker_echoed": True},
+        {**result, "api_base_scope": "https://provider.example"},
+        {**result, "model_prompt_submitted": True},
+        {**result, "status": "passed", "source_trace_unchanged": False},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_qoder_project_command_result_schema_is_bounded_and_content_free():
     schema = json.loads((SCHEMA_DIRECTORY / "qoder-project-command-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

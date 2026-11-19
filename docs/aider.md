@@ -48,4 +48,4 @@ Remove the staged copy with the same export and digest:
 npm.cmd --prefix adapters run adapter -- aider skills uninstall --project-root <absolute-project-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>
 ```
 
-Local CLI tests cover the explicit install/uninstall path and the opt-in project-config lifecycle, including idempotence, user-owned entries, YAML preservation, edited paths, and authority boundaries. This is fixture-level transport/configuration evidence only. Aider version discovery, live loading, model use, task outcome, and cross-harness retrieval remain unverified.
+Local CLI tests cover the explicit install/uninstall path and the opt-in project-config lifecycle, including idempotence, user-owned entries, YAML preservation, edited paths, and authority boundaries. On November 19, 2026, an isolated Aider `0.86.2` CLI smoke verified that `--read <file>` starts and reports the file as read-only context; it did not exercise a Threadforge-exported procedure or managed `.aider.conf.yml`. Model use, task outcome, and cross-harness retrieval remain unverified.

@@ -41,6 +41,20 @@ python scripts/verify_release_candidate.py \
 
 For a `workflow_dispatch` rehearsal from the `main` branch, pass `--source-ref refs/heads/main`; for a tag-triggered candidate, pass its exact `refs/tags/vVERSION` ref. The verifier performs GitHub API lookups for each attestation and may take several minutes. Each `gh attestation verify` subprocess has a 120-second timeout; timeouts and explicitly transient rate-limit, server, or transport errors receive at most two retries after 1- and 2-second delays. Other verification failures stop immediately. Its success output proves bundle integrity and the specified provenance bindings only: it always reports `license_review_required=true`, `release_clearance=false`, and `release_authorized=false`. It does not satisfy the cutover assessor, approve license/privacy/security/name review, or authorize publication. Publish the exact verified candidate files; do not rebuild or recompress them, because any byte change invalidates the source-bound attestations. Release creation and asset attachment remain a separate human-approved operation after every documented parity and cutover gate passes. Existing public-release assets that predate this workflow are not retroactively attested.
 
+Before publishing, create a draft release and attach the exact files from the already-verified tag candidate bundle. Then run a read-only prepublication check using a GitHub CLI identity with push access, because GitHub limits draft-release listings to users with push access. Do not grant the read-only verification workflow release-write permission just to inspect a draft.
+
+```bash
+python scripts/verify_published_release.py \
+  --require-draft \
+  --bundle-dir ./threadforge-candidate \
+  --version VERSION \
+  --source-commit FULL_SOURCE_COMMIT_SHA
+```
+
+The verifier requires the GitHub release to remain a draft, rechecks candidate attestations and the tag commit, and compares the complete uploaded draft asset inventory and bytes. A successful report uses `threadforge.draft-release-verification.v1` and explicitly sets `publish_authorized=false` and `release_authorized=false`; it is an integrity preflight, not permission to publish. Do not edit, replace, or re-upload draft assets after the check—if anything changes, run the check again. This local human-run preflight does not elevate the read-only GitHub Actions verifier token or change a release.
+
+The preflight receipt is defined by [the draft-release verification schema](../schema/draft-release-verification-v1.schema.json), which rejects any report that grants publication or release authorization.
+
 After an authorized tag-based publication, run the read-only post-publication audit against the same downloaded candidate bundle:
 
 ```bash

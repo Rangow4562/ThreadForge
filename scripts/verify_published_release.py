@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Verify a published GitHub release is byte-identical to a verified candidate.
+"""Verify uploaded GitHub release assets against a verified candidate.
 
-This is a read-only post-publication audit. It does not create, edit, or delete a
-release, and a successful result is not legal clearance or release authorization.
+The default mode performs a read-only post-publication audit. ``--require-draft``
+checks uploaded assets before publication. Neither mode creates, edits, publishes,
+or deletes a release, and neither result grants legal clearance or authorization.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ SAFE_CANDIDATE_DIAGNOSTIC_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._,:()' -]{0,2
 
 
 class PublishedReleaseVerificationError(ValueError):
-    """The published release does not match a verified candidate."""
+    """A release draft or published release does not match a verified candidate."""
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -138,11 +139,12 @@ def _candidate_verification_detail(stderr: Any) -> str | None:
     return None
 
 
-def verify_published_release(
+def _verify_release_assets(
     *,
     bundle_dir: Path,
     version: str,
     source_commit: str,
+    require_draft: bool,
     repository: str = REPOSITORY,
     gh: str = "gh",
     run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
@@ -185,15 +187,14 @@ def verify_published_release(
     view = _run_checked(
         [gh, "release", "view", tag, "--repo", repository, "--json", "assets,isDraft,isPrerelease,tagName"],
         run=run,
-        stage="published release metadata lookup",
+        stage="release metadata lookup",
     )
-    release = _decode_json(view.stdout, "published release metadata")
-    if (
-        not isinstance(release, dict)
-        or release.get("tagName") != tag
-        or release.get("isDraft") is not False
-        or release.get("isPrerelease") is not False
-    ):
+    release = _decode_json(view.stdout, "release metadata")
+    if not isinstance(release, dict) or release.get("tagName") != tag:
+        raise PublishedReleaseVerificationError("GitHub release is missing or bound to another tag")
+    if release.get("isDraft") is not require_draft or release.get("isPrerelease") is not False:
+        if require_draft:
+            raise PublishedReleaseVerificationError("GitHub release is missing, not a draft, prerelease, or bound to another tag")
         raise PublishedReleaseVerificationError("GitHub release is missing, draft, prerelease, or bound to another tag")
 
     assets = release.get("assets")
@@ -205,17 +206,17 @@ def verify_published_release(
             raise PublishedReleaseVerificationError("GitHub release asset inventory is malformed")
         asset_names.append(asset["name"])
     if len(asset_names) != len(set(asset_names)):
-        raise PublishedReleaseVerificationError("published release metadata contains duplicate asset names")
+        raise PublishedReleaseVerificationError("release metadata contains duplicate asset names")
     metadata_asset_names = set(asset_names)
 
     commit_result = _run_checked(
         [gh, "api", f"repos/{repository}/commits/{tag}"],
         run=run,
-        stage="published tag commit lookup",
+        stage="release tag commit lookup",
     )
-    commit_document = _decode_json(commit_result.stdout, "published tag commit")
+    commit_document = _decode_json(commit_result.stdout, "release tag commit")
     if not isinstance(commit_document, dict) or commit_document.get("sha") != source_commit:
-        raise PublishedReleaseVerificationError("published tag does not resolve to the candidate source commit")
+        raise PublishedReleaseVerificationError("release tag does not resolve to the candidate source commit")
 
     with tempfile.TemporaryDirectory(prefix="threadforge-published-release-") as temporary:
         download_dir = Path(temporary) / "assets"
@@ -223,7 +224,7 @@ def verify_published_release(
         _run_checked(
             [gh, "release", "download", tag, "--repo", repository, "--dir", str(download_dir)],
             run=run,
-            stage="published release asset download",
+            stage="release asset download",
         )
         published_files = _regular_files(download_dir)
         candidate_names = set(candidate_files)
@@ -239,12 +240,31 @@ def verify_published_release(
         )
         if metadata_missing or metadata_extra or downloaded_missing or downloaded_extra or byte_differences:
             raise PublishedReleaseVerificationError(
-                "published asset mismatch: "
+                "release asset mismatch: "
                 f"metadata missing={metadata_missing}, metadata extra={metadata_extra}, "
                 f"download missing={downloaded_missing}, download extra={downloaded_extra}, "
                 f"byte differences={byte_differences}"
             )
         checked_assets = len(candidate_files)
+
+    if require_draft:
+        return {
+            "schema": "threadforge.draft-release-verification.v1",
+            "repository": repository,
+            "tag": tag,
+            "source_commit": source_commit,
+            "candidate_provenance_verified": True,
+            "tag_commit_matches_candidate": True,
+            "draft_release": True,
+            "draft_assets_match_candidate": True,
+            "prepublication_check_only": True,
+            "asset_count": checked_assets,
+            "payload_count": checked_assets - 1,
+            "license_review_required": True,
+            "release_clearance": False,
+            "release_authorized": False,
+            "publish_authorized": False,
+        }
 
     return {
         "schema": "threadforge.published-release-verification.v1",
@@ -262,6 +282,47 @@ def verify_published_release(
     }
 
 
+def verify_published_release(
+    *,
+    bundle_dir: Path,
+    version: str,
+    source_commit: str,
+    repository: str = REPOSITORY,
+    gh: str = "gh",
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> dict[str, Any]:
+    return _verify_release_assets(
+        bundle_dir=bundle_dir,
+        version=version,
+        source_commit=source_commit,
+        require_draft=False,
+        repository=repository,
+        gh=gh,
+        run=run,
+    )
+
+
+def verify_draft_release(
+    *,
+    bundle_dir: Path,
+    version: str,
+    source_commit: str,
+    repository: str = REPOSITORY,
+    gh: str = "gh",
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> dict[str, Any]:
+    """Verify uploaded draft assets without granting authority to publish them."""
+    return _verify_release_assets(
+        bundle_dir=bundle_dir,
+        version=version,
+        source_commit=source_commit,
+        require_draft=True,
+        repository=repository,
+        gh=gh,
+        run=run,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle-dir", type=Path, required=True, help="downloaded and locally verified candidate bundle")
@@ -269,9 +330,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-commit", required=True, help="full candidate source commit SHA-1")
     parser.add_argument("--repo", default=REPOSITORY, help="GitHub repository owner/name")
     parser.add_argument("--gh", default="gh", help="GitHub CLI executable")
+    parser.add_argument(
+        "--require-draft",
+        action="store_true",
+        help="verify an uploaded draft release before publication; success never authorizes publication",
+    )
     arguments = parser.parse_args(argv)
+    verify = verify_draft_release if arguments.require_draft else verify_published_release
     try:
-        result = verify_published_release(
+        result = verify(
             bundle_dir=arguments.bundle_dir,
             version=arguments.version,
             source_commit=arguments.source_commit,
@@ -279,7 +346,8 @@ def main(argv: list[str] | None = None) -> int:
             gh=arguments.gh,
         )
     except PublishedReleaseVerificationError as error:
-        print(f"published-release verification failed: {error}", file=sys.stderr)
+        stage = "draft-release" if arguments.require_draft else "published-release"
+        print(f"{stage} verification failed: {error}", file=sys.stderr)
         return 1
     print(json.dumps(result, sort_keys=True, indent=2))
     return 0

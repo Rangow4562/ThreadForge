@@ -4,6 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import jsonschema
 import pytest
 
 
@@ -77,8 +78,9 @@ class FakeGitHub:
         raise AssertionError(f"unexpected command: {command}")
 
 
-def verify(bundle: Path, fake: FakeGitHub):
-    return VERIFIER.verify_published_release(
+def verify(bundle: Path, fake: FakeGitHub, *, require_draft: bool = False):
+    verifier = VERIFIER.verify_draft_release if require_draft else VERIFIER.verify_published_release
+    return verifier(
         bundle_dir=bundle,
         version=VERSION,
         source_commit=SOURCE_COMMIT,
@@ -112,6 +114,46 @@ def test_published_release_requires_provenance_tag_binding_and_exact_asset_bytes
     candidate_command = fake.commands[0]
     assert candidate_command[candidate_command.index("--source-ref") + 1] == f"refs/tags/{TAG}"
     assert all("shell" not in str(command).lower() for command in fake.commands)
+
+
+def test_draft_preflight_requires_candidate_provenance_and_exact_uploaded_assets(tmp_path):
+    bundle = tmp_path / "candidate"
+    files = candidate_bundle(bundle)
+    fake = FakeGitHub(bundle, files)
+    fake.is_draft = True
+
+    result = verify(bundle, fake, require_draft=True)
+
+    assert result == {
+        "schema": "threadforge.draft-release-verification.v1",
+        "repository": "example/threadforge",
+        "tag": TAG,
+        "source_commit": SOURCE_COMMIT,
+        "candidate_provenance_verified": True,
+        "tag_commit_matches_candidate": True,
+        "draft_release": True,
+        "draft_assets_match_candidate": True,
+        "prepublication_check_only": True,
+        "asset_count": 28,
+        "payload_count": 27,
+        "license_review_required": True,
+        "release_clearance": False,
+        "release_authorized": False,
+        "publish_authorized": False,
+    }
+    schema_path = SCRIPT_PATH.parents[1] / "schema" / "draft-release-verification-v1.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    validator = jsonschema.validators.validator_for(schema)(schema)
+    validator.validate(result)
+    for unsafe in (
+        {**result, "publish_authorized": True},
+        {**result, "release_authorized": True},
+        {**result, "unexpected": "private-field"},
+    ):
+        with pytest.raises(jsonschema.ValidationError):
+            validator.validate(unsafe)
+    assert any(command[1:3] == ["release", "download"] for command in fake.commands)
+    assert not any(command[1:3] in (["release", "edit"], ["release", "upload"]) for command in fake.commands)
 
 
 def test_rejects_public_asset_with_different_bytes(tmp_path):
@@ -173,6 +215,56 @@ def test_rejects_unpublished_or_prerelease_release(tmp_path, state):
 
     with pytest.raises(VERIFIER.PublishedReleaseVerificationError, match="draft, prerelease"):
         verify(bundle, fake)
+
+
+@pytest.mark.parametrize("state", ["published", "prerelease"])
+def test_draft_preflight_rejects_non_draft_or_prerelease_release(tmp_path, state):
+    bundle = tmp_path / state
+    files = candidate_bundle(bundle)
+    fake = FakeGitHub(bundle, files)
+    if state == "prerelease":
+        fake.is_draft = True
+        fake.is_prerelease = True
+
+    with pytest.raises(VERIFIER.PublishedReleaseVerificationError, match="not a draft, prerelease"):
+        verify(bundle, fake, require_draft=True)
+
+
+def test_draft_preflight_rejects_asset_mutation(tmp_path):
+    bundle = tmp_path / "candidate"
+    files = candidate_bundle(bundle)
+    fake = FakeGitHub(bundle, files)
+    fake.is_draft = True
+    fake.download_overrides["candidate-payload-03.bin"] = b"changed-after-upload\n"
+
+    with pytest.raises(VERIFIER.PublishedReleaseVerificationError, match="byte differences=1"):
+        verify(bundle, fake, require_draft=True)
+
+
+def test_cli_draft_flag_selects_non_authorizing_preflight(tmp_path, monkeypatch, capsys):
+    calls = {}
+
+    def verify_draft(**kwargs):
+        calls.update(kwargs)
+        return {
+            "schema": "threadforge.draft-release-verification.v1",
+            "publish_authorized": False,
+        }
+
+    monkeypatch.setattr(VERIFIER, "verify_draft_release", verify_draft)
+    code = VERIFIER.main(
+        [
+            "--bundle-dir", str(tmp_path / "candidate"),
+            "--version", VERSION,
+            "--source-commit", SOURCE_COMMIT,
+            "--require-draft",
+        ]
+    )
+
+    assert code == 0
+    assert calls["version"] == VERSION
+    assert calls["source_commit"] == SOURCE_COMMIT
+    assert json.loads(capsys.readouterr().out)["publish_authorized"] is False
 
 
 def test_candidate_provenance_failure_stops_before_public_release_queries(tmp_path):

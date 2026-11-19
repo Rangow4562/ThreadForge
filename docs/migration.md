@@ -4,6 +4,8 @@ Migration is deliberately a review workflow, not an automatic cutover. It never 
 
 ## Command sequence
 
+When RRSI was run with a custom `rrsi.py --runs <directory>`, pass that exact directory as `--root` to `migrate inspect` and `migrate snapshot --product rrsi`. The importer recognizes `coding/`, `workspace/`, and `eng/` only as top-level children of this explicitly supplied root, then applies the same path-bound converters, privacy checks, backup verification, and review-only scope as repository-relative `runs/<domain>/` inputs. It does not search for or guess custom run directories.
+
 ```powershell
 threadforge migrate inspect --product <beacon|mancode|anyjev|rrsi> --root <legacy-data-root>
 threadforge migrate snapshot --product <product> --root <legacy-data-root>

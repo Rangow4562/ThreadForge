@@ -144,50 +144,62 @@ func normalizeRRSIHeldoutEvaluation(evaluation json.RawMessage) (json.RawMessage
 }
 
 func rrsiDomain(relative string) (string, bool) {
-	parts := strings.Split(strings.ToLower(filepath.ToSlash(relative)), "/")
+	parts, domainIndex, ok := rrsiDomainPathParts(relative)
+	if !ok {
+		return "", false
+	}
+	return strings.ToLower(parts[domainIndex]), true
+}
+
+// rrsiDomainPathParts accepts both repository-relative runs/<domain>/... paths
+// and paths relative to an explicitly supplied RRSI --runs directory, where
+// <domain>/... is the first component. The direct form is deliberately limited
+// to the root component so unrelated nested directories are not classified as
+// RRSI run artifacts.
+func rrsiDomainPathParts(relative string) ([]string, int, bool) {
+	parts := strings.Split(filepath.ToSlash(relative), "/")
 	for i, part := range parts {
-		if part != "runs" || i+1 >= len(parts) {
+		if !strings.EqualFold(part, "runs") {
 			continue
 		}
-		domain := parts[i+1]
-		switch domain {
-		case "coding", "workspace", "eng":
-			return domain, true
-		default:
-			return "", false
+		if i+1 < len(parts) && isRRSIDomainName(parts[i+1]) {
+			return parts, i + 1, true
 		}
+		return nil, 0, false
 	}
-	return "", false
+	if len(parts) > 1 && isRRSIDomainName(parts[0]) {
+		return parts, 0, true
+	}
+	return nil, 0, false
+}
+
+func isRRSIDomainName(value string) bool {
+	switch strings.ToLower(value) {
+	case "coding", "workspace", "eng":
+		return true
+	default:
+		return false
+	}
 }
 
 func rrsiRunTail(relative string) ([]string, bool) {
-	parts := strings.Split(strings.ToLower(filepath.ToSlash(relative)), "/")
-	for i, part := range parts {
-		if part != "runs" || i+2 > len(parts) {
-			continue
-		}
-		domain := parts[i+1]
-		if domain != "coding" && domain != "workspace" && domain != "eng" {
-			return nil, false
-		}
-		return parts[i+2:], true
+	parts, domainIndex, ok := rrsiDomainPathParts(relative)
+	if !ok {
+		return nil, false
 	}
-	return nil, false
+	lowerParts := make([]string, len(parts))
+	for i, part := range parts {
+		lowerParts[i] = strings.ToLower(part)
+	}
+	return lowerParts[domainIndex+1:], true
 }
 
 func rrsiRunTailOriginal(relative string) ([]string, bool) {
-	parts := strings.Split(filepath.ToSlash(relative), "/")
-	for i, part := range parts {
-		if !strings.EqualFold(part, "runs") || i+2 > len(parts) {
-			continue
-		}
-		domain := strings.ToLower(parts[i+1])
-		if domain != "coding" && domain != "workspace" && domain != "eng" {
-			return nil, false
-		}
-		return parts[i+2:], true
+	parts, domainIndex, ok := rrsiDomainPathParts(relative)
+	if !ok {
+		return nil, false
 	}
-	return nil, false
+	return parts[domainIndex+1:], true
 }
 
 func isRRSIRawTrialArtifactPath(relative string) bool {

@@ -229,6 +229,63 @@ func TestRRSIEvaluationJobMustMatchSourcePath(t *testing.T) {
 	}
 }
 
+func TestRRSICustomRunsRootImportReadback(t *testing.T) {
+	root := t.TempDir()
+	writeMancodeJSONFixture(t, root, "coding/jobs/base/eval.json", map[string]any{
+		"job": "base", "k": 1, "S": 1.0, "C": nil, "n_expected": 1, "missing": 0,
+		"extra": map[string]any{"total_passes": 1, "n_trials": 1, "pass_rate": 1.0},
+		"per_task": map[string]any{"task-1": map[string]any{
+			"rewards": []any{1.0}, "weights": []any{1.0}, "tokens": []any{nil}, "missing": 0,
+		}},
+	})
+
+	inspected, err := Inspect(RRSI, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspected.Summary.FilesScanned != 1 || inspected.Summary.RecordsImported != 1 || inspected.Summary.RecordsRejected != 0 {
+		t.Fatalf("explicit RRSI --runs root did not reconcile: %#v", inspected.Summary)
+	}
+
+	dataRoot := t.TempDir()
+	snapshot, err := CreateSnapshot(RRSI, root, dataRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dataRoot, "migrations", "snapshots", string(RRSI), snapshot.SourceFingerprint, "manifest.json")
+	records, err := ReadSnapshotRecords(manifestPath, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Type != "rrsi_evaluation_result" || records[0].Scope != "local_pending_review" {
+		t.Fatalf("custom --runs root changed RRSI projection or review scope: %#v", records)
+	}
+}
+
+func TestRRSICustomRunsRootRecognitionIsTopLevelOnly(t *testing.T) {
+	for _, test := range []struct {
+		path   string
+		domain string
+		valid  bool
+	}{
+		{path: "coding/jobs/base/eval.json", domain: "coding", valid: true},
+		{path: "Workspace/r0/A/eval.json", domain: "workspace", valid: true},
+		{path: "eng/global_analysis.json", domain: "eng", valid: true},
+		{path: "nested/coding/jobs/base/eval.json", valid: false},
+		{path: "codingish/jobs/base/eval.json", valid: false},
+		{path: "nested/runs/coding/jobs/base/eval.json", domain: "coding", valid: true},
+	} {
+		domain, ok := rrsiDomain(test.path)
+		if ok != test.valid || (ok && domain != test.domain) {
+			t.Errorf("rrsiDomain(%q) = (%q, %t), expected (%q, %t)", test.path, domain, ok, test.domain, test.valid)
+		}
+		_, tailOK := rrsiRunTailOriginal(test.path)
+		if tailOK != test.valid {
+			t.Errorf("rrsiRunTailOriginal(%q) recognized=%t, expected %t", test.path, tailOK, test.valid)
+		}
+	}
+}
+
 func TestRRSIHistoricalTextCredentialMatchesAreExcludedBeforeSnapshot(t *testing.T) {
 	root := t.TempDir()
 	writeMancodeFixture(t, root, "runs/coding/history.jsonl", []byte(

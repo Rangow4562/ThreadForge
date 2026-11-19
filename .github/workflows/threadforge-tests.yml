@@ -246,6 +246,11 @@ jobs:
           uv run --project python --locked --extra test --extra decisions --extra workspace go vet ./...
           go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
+      - name: Run module-wide Go race tests
+        if: runner.os == 'Linux' && matrix.python == '3.11'
+        shell: bash
+        run: uv run --project python --locked --extra test --extra decisions --extra workspace go test -race ./...
+
       - name: Run vendored Beacon contract tests
         shell: bash
         working-directory: third_party/agent-beacon/pkg/asymptoteobserve

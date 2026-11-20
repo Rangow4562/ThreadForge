@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/cutover-approval-attestation-v2.schema.json",
+  "title": "Threadforge signed cutover approval v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "key_id", "role", "reviewer_id", "approved", "reason_sha256", "approved_at",
+    "candidate_commit", "report_evidence_sha256", "supporting_evidence_sha256", "issued_at", "signature"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.cutover-approval-attestation.v2" },
+    "key_id": { "$ref": "#/$defs/sha256" },
+    "role": { "enum": ["release-manager", "security-reviewer", "license-reviewer", "product-name-reviewer"] },
+    "reviewer_id": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._@/-]{0,127}$" },
+    "approved": { "type": "boolean" },
+    "reason_sha256": { "$ref": "#/$defs/sha256" },
+    "approved_at": { "type": "string", "format": "date-time" },
+    "candidate_commit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+    "report_evidence_sha256": { "$ref": "#/$defs/sha256" },
+    "supporting_evidence_sha256": { "$ref": "#/$defs/sha256" },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "contentEncoding": "base64", "minLength": 88, "maxLength": 88 }
+  },
+  "$defs": { "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+}

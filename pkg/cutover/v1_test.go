@@ -902,6 +902,40 @@ func TestAssessFailsClosedForUnsafeEvidenceAndUnresolvedMigration(t *testing.T) 
 	}
 }
 
+func TestProductNameReviewerMustAttestToClearanceEvidence(t *testing.T) {
+	root := t.TempDir()
+	report, _, trust := completeFixture(t, root)
+	nameReviewerIndex := -1
+	for index := range report.Approvals {
+		if report.Approvals[index].Role == "product-name-reviewer" {
+			nameReviewerIndex = index
+			break
+		}
+	}
+	if nameReviewerIndex < 0 {
+		t.Fatal("complete report fixture is missing the product-name reviewer")
+	}
+
+	otherEvidence := []byte("independent artifact not listed under name clearance\n")
+	if err := os.WriteFile(filepath.Join(root, "unrelated-review.json"), otherEvidence, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(otherEvidence)
+	report.Approvals[nameReviewerIndex].Evidence = []Evidence{{
+		Path: "unrelated-review.json", SHA256: hex.EncodeToString(digest[:]),
+	}}
+	sealFixtureApprovals(t, root, &report)
+
+	assessment, err := AssessWithTrustAndMigrationReviewersAndApprovers(
+		report, root, trust, fixtureMigrationAuthorityTrustStore(), fixtureApprovalTrustStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Ready || !hasBlocker(assessment.Blockers, "product-name-reviewer approval must attest to all release.product-name-clearance evidence") {
+		t.Fatalf("product-name approval that omits clearance evidence was accepted: %#v", assessment)
+	}
+}
+
 func TestRequiredSourceInventoryMatchesDocumentedMatrix(t *testing.T) {
 	matrix, err := os.ReadFile(filepath.Join("..", "..", "docs", "source-matrix.md"))
 	if err != nil {

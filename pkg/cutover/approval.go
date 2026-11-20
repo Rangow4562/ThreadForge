@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	ApprovalTrustSchemaVersion       = "threadforge.cutover-approval-trust.v1"
-	ApprovalAttestationSchemaVersion = "threadforge.cutover-approval-attestation.v1"
+	ApprovalTrustSchemaVersion       = "threadforge.cutover-approval-trust.v2"
+	ApprovalAttestationSchemaVersion = "threadforge.cutover-approval-attestation.v2"
 	maxApprovalTrustBytes            = 1 << 20
 )
 

@@ -105,7 +105,7 @@ func TestFeatureParityRowsMapToCutoverRequirements(t *testing.T) {
 		}
 	}
 	for _, id := range RequiredFeatures {
-		if id == "release.license-review" { // tracked by docs/license-audit.md and THIRD_PARTY.md, outside the product-area table
+		if id == "release.license-review" || id == "release.product-name-clearance" { // external legal evidence is tracked by docs/license-audit.md and docs/cutover.md
 			continue
 		}
 		if _, ok := covered[id]; !ok {
@@ -131,7 +131,7 @@ func TestUnifiedAcceptanceDocumentsCurrentEvidenceSchema(t *testing.T) {
 func TestCutoverApprovalDocumentationUsesCurrentEvidenceSchema(t *testing.T) {
 	data := readRepositoryDocument(t, filepath.Join("..", "..", "docs", "cutover.md"))
 	version := strings.TrimPrefix(SchemaVersion, "threadforge.cutover-evidence.")
-	marker := "Evidence " + version + " accepts release-manager, security-reviewer, and license-reviewer approvals"
+	marker := "Evidence " + version + " accepts release-manager, security-reviewer, license-reviewer, and product-name-reviewer approvals"
 	if !strings.Contains(string(data), marker) {
 		t.Fatalf("cutover approval documentation must describe current evidence schema %q", SchemaVersion)
 	}

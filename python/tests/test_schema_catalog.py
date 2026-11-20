@@ -5313,3 +5313,66 @@ def test_cutover_v9_binds_repository_and_governance_artifact():
     governance["branch"] = "develop"
     with pytest.raises(ValidationError):
         validator_for(governance_schema)(governance_schema).validate(governance)
+
+
+def test_cutover_v10_requires_product_name_reviewer_contracts():
+    v10_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v10.schema.json").read_text(encoding="utf-8"))
+    v3_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v3.schema.json").read_text(encoding="utf-8"))
+    v2_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v2.schema.json").read_text(encoding="utf-8"))
+    registry = Registry().with_resources([
+        (v10_schema["$id"], Resource.from_contents(v10_schema)),
+        (v3_schema["$id"], Resource.from_contents(v3_schema)),
+        (v2_schema["$id"], Resource.from_contents(v2_schema)),
+    ])
+    evidence = {"path": "legal/name-clearance-summary.json", "sha256": "a" * 64}
+    report = {
+        "schema_version": "threadforge.cutover-evidence.v10",
+        "repository": "Rangow4562/ThreadForge", "candidate_commit": "1" * 40,
+        "features": [{"id": "release.product-name-clearance", "status": "complete", "evidence": [evidence]}],
+        "adapters": [], "migrations": [], "cross_harness_tests": [], "evaluations": [],
+        "approvals": [{
+            "role": "product-name-reviewer", "reviewer": "independent-name-reviewer", "approved": True,
+            "reason": "Reviewed the exact public name and intended-market clearance artifact.",
+            "approved_at": "2026-11-20T12:00:00Z", "evidence": [evidence], "attestation": evidence,
+        }],
+    }
+    validator_for(v10_schema)(v10_schema, registry=registry).validate(report)
+    invalid_report = json.loads(json.dumps(report))
+    invalid_report["approvals"][0]["role"] = "unscoped-reviewer"
+    with pytest.raises(ValidationError):
+        validator_for(v10_schema)(v10_schema, registry=registry).validate(invalid_report)
+
+    trust_schema = json.loads((SCHEMA_DIRECTORY / "cutover-approval-trust-v2.schema.json").read_text(encoding="utf-8"))
+    trust = {
+        "schema_version": "threadforge.cutover-approval-trust.v2",
+        "keys": [{
+            "key_id": "b" * 64, "public_key": "A" * 44, "reviewer_id": "independent-name-reviewer",
+            "roles": ["product-name-reviewer"], "not_before": "2026-01-01T00:00:00Z", "not_after": "2027-01-01T00:00:00Z",
+        }],
+    }
+    validator_for(trust_schema)(trust_schema).validate(trust)
+
+    attestation_schema = json.loads((SCHEMA_DIRECTORY / "cutover-approval-attestation-v2.schema.json").read_text(encoding="utf-8"))
+    attestation = {
+        "schema_version": "threadforge.cutover-approval-attestation.v2", "key_id": "b" * 64,
+        "role": "product-name-reviewer", "reviewer_id": "independent-name-reviewer", "approved": True,
+        "reason_sha256": "c" * 64, "approved_at": "2026-11-20T12:00:00Z", "candidate_commit": "1" * 40,
+        "report_evidence_sha256": "d" * 64, "supporting_evidence_sha256": "a" * 64,
+        "issued_at": "2026-11-20T12:01:00Z", "signature": "A" * 88,
+    }
+    validator_for(attestation_schema)(attestation_schema).validate(attestation)
+
+    result_schema = json.loads((SCHEMA_DIRECTORY / "cutover-approval-attestation-result-v2.schema.json").read_text(encoding="utf-8"))
+    result_registry = Registry().with_resources([
+        (result_schema["$id"], Resource.from_contents(result_schema)),
+        (attestation_schema["$id"], Resource.from_contents(attestation_schema)),
+        (v2_schema["$id"], Resource.from_contents(v2_schema)),
+    ])
+    result = {
+        "schema_version": "threadforge.cutover-approval-attestation-result.v2",
+        "role": "product-name-reviewer", "reviewer_id": "independent-name-reviewer", "approved": True,
+        "key_id": "b" * 64, "attestation": evidence, "report_sha256": "e" * 64,
+        "trusted_signature_verified": True, "approval_assertion_signed": True,
+        "execution_authorized": False, "cutover_ready": False, "human_review_required": True,
+    }
+    validator_for(result_schema)(result_schema, registry=result_registry).validate(result)

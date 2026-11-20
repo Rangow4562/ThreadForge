@@ -128,6 +128,15 @@ func TestUnifiedAcceptanceDocumentsCurrentEvidenceSchema(t *testing.T) {
 	t.Fatal("Unified acceptance row was not found in docs/feature-parity.md")
 }
 
+func TestCutoverApprovalDocumentationUsesCurrentEvidenceSchema(t *testing.T) {
+	data := readRepositoryDocument(t, filepath.Join("..", "..", "docs", "cutover.md"))
+	version := strings.TrimPrefix(SchemaVersion, "threadforge.cutover-evidence.")
+	marker := "Evidence " + version + " accepts release-manager, security-reviewer, and license-reviewer approvals"
+	if !strings.Contains(string(data), marker) {
+		t.Fatalf("cutover approval documentation must describe current evidence schema %q", SchemaVersion)
+	}
+}
+
 func TestReleaseCandidateWorkflowCannotPublishPublicReleases(t *testing.T) {
 	data := readRepositoryDocument(t, filepath.Join("..", "..", ".github", "workflows", "threadforge-tests.yml"))
 	var document yaml.Node

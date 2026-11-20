@@ -65,8 +65,8 @@ function Invoke-PythonCheck {
 Invoke-Check -Label 'Go module integrity' -Executable 'go' -Arguments @('mod', 'verify') -WorkingDirectory $RepositoryRoot
 Invoke-Check -Label 'Go tests' -Executable 'go' -Arguments @('test', './...') -WorkingDirectory $RepositoryRoot
 Invoke-Check -Label 'Go vet' -Executable 'go' -Arguments @('vet', './...') -WorkingDirectory $RepositoryRoot
-Invoke-Check -Label 'Go vulnerability scan (govulncheck v1.9.0)' -Executable 'go' `
-    -Arguments @('run', 'golang.org/x/vuln/cmd/govulncheck@v1.9.0', './...') -WorkingDirectory $RepositoryRoot
+Invoke-Check -Label 'Go vulnerability scan (govulncheck v1.9.0)' -Executable 'python' `
+    -Arguments @('scripts/run_govulncheck.py') -WorkingDirectory $RepositoryRoot
 if (Get-Command 'uv' -ErrorAction SilentlyContinue) {
     Invoke-Check -Label 'Python dependency lock freshness' -Executable 'uv' -Arguments @('lock', '--check') -WorkingDirectory (Join-Path $RepositoryRoot 'python')
     Invoke-Check -Label 'Python dependency vulnerability audit (uv 0.11.7)' -Executable 'uv' `

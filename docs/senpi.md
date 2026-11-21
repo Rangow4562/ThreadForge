@@ -18,4 +18,6 @@ The extension observes `session_start`, `session_shutdown`, `input`, `tool_call`
 
 Install, update, status, and removal operate on a dedicated `threadforge.ts` file with a SHA-256 ownership header, bounded reads, symlink checks, locking, snapshot validation, and atomic replacement. An unrelated extension or a locally edited managed extension is left untouched and causes a refusal.
 
-This is partial support: the current extension-loader/API and event-version compatibility, release packaging, Senpi executable discovery, and cross-harness acceptance have not been verified against an installed Senpi release. The CLI and inventory verify the extension file's ownership state, not whether Senpi is installed or running.
+The private adapter-package smoke packs and offline-installs the adapter, then exercises the exported Senpi installer from that installed package against a disposable project. It verifies the embedded extension template is present and matches maintained source after line-ending normalization, checks the ownership digest, and exercises idempotent install and removal. This covers package delivery, not Senpi's live extension-loader/API or event-version compatibility.
+
+This remains partial support: Senpi executable discovery and cross-harness acceptance have not been verified against an installed Senpi release. The CLI and inventory verify the extension file's ownership state, not whether Senpi is installed or running.

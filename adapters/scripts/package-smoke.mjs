@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const npmCli = process.env.npm_execpath;
@@ -101,8 +101,15 @@ assert.ok(files.length <= 600, `adapter package unexpectedly contains ${files.le
 assert.deepEqual(manifest.bin, { 'threadforge-adapter': './dist/bin.js' },
   'the portable adapter command must have one explicit package entry point');
 assert.ok(paths.has('dist/bin.js'), 'compiled bin entry point is missing from the package');
+assert.ok(paths.has('dist/senpi-extension.ts'), 'Senpi extension template is missing from the package');
+assert.equal(
+  normalizedText(path.join(packageRoot, 'dist', 'senpi-extension.ts')),
+  normalizedText(path.join(packageRoot, 'src', 'senpi-extension.ts')),
+  'packaged Senpi extension template differs from its maintained source',
+);
 const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'threadforge-adapter-package-smoke-'));
 let launcherVerified = false;
+let senpiInstalledTemplateVerified = false;
 try {
   const archive = spawnSync(process.execPath, [npmCli, 'pack', '--json', '--pack-destination', tempRoot], {
     cwd: packageRoot,
@@ -177,6 +184,25 @@ try {
   });
   assert.equal(importAllExports.status, 0,
     `installed package exports failed to import: ${(importAllExports.stderr || importAllExports.stdout).trim().slice(0, 2000)}`);
+
+  const senpiConfig = await import(pathToFileURL(path.join(installedRoot, 'dist', 'senpi-extension-config.js')).href);
+  const senpiProject = path.join(tempRoot, 'senpi-project');
+  mkdirSync(senpiProject);
+  const senpiOptions = { scope: 'project', projectRoot: senpiProject };
+  assert.equal(await senpiConfig.installSenpiExtension(senpiOptions), 'installed',
+    'installed adapter package could not install the Senpi extension template');
+  const senpiExtensionPath = path.join(senpiProject, '.senpi', 'extensions', 'threadforge.ts');
+  const senpiExtension = readFileSync(senpiExtensionPath, 'utf8');
+  assert.match(senpiExtension, /^\/\/ threadforge-managed-senpi-extension:v1 sha256=[a-f0-9]{64}\n/,
+    'installed Senpi extension omitted its ownership digest');
+  assert.equal(await senpiConfig.installSenpiExtension(senpiOptions), 'unchanged',
+    'installed Senpi extension install was not idempotent');
+  assert.equal(await senpiConfig.removeSenpiExtension(senpiOptions), 'removed',
+    'installed Senpi extension could not be removed from the disposable project');
+  assert.equal(await senpiConfig.getSenpiExtensionState(senpiOptions), 'missing',
+    'Senpi extension remained after removal from the disposable project');
+  senpiInstalledTemplateVerified = true;
+
   const launch = spawnSync(process.execPath, [npmCli, 'exec', '--offline', '--prefix', installRoot, '--', 'threadforge-adapter'], {
     cwd: tempRoot,
     encoding: 'utf8',
@@ -200,5 +226,6 @@ console.log(JSON.stringify({
   unpacked_bytes: packed[0].unpackedSize,
   private: manifest.private === true,
   portable_bin_verified: launcherVerified,
+  senpi_installed_template_verified: senpiInstalledTemplateVerified,
   importable_exports_verified: Object.keys(manifest.exports).length,
 }));

@@ -114,7 +114,7 @@
   },
   "scripts": {
     "adapter": "node --experimental-strip-types src/cli.ts",
-    "build:package": "tsc -p tsconfig.package.json",
+    "build:package": "node scripts/build-package.mjs",
     "prepack": "npm run build:package",
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "node --experimental-strip-types --test test/*.test.ts test/*.test.mjs",

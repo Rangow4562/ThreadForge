@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { resolveAdapterSiblingModule } from './adapter-cli-entry.ts';
 
 export type ClinePluginScope = 'user' | 'project';
 export type ClinePluginChange = 'installed' | 'updated' | 'unchanged' | 'removed' | 'absent';
@@ -103,7 +104,7 @@ export function clinePluginPath(scope: ClinePluginScope, root: string): string {
 }
 
 async function renderManagedContent(): Promise<ManagedContent> {
-  const sourcePath = fileURLToPath(new URL('./cline-plugin.ts', import.meta.url));
+  const sourcePath = resolveAdapterSiblingModule(import.meta.url, 'cline-plugin');
   const sourceReal = await realpath(sourcePath).catch(() => '');
   if (!sourceReal) throw new Error('Threadforge Cline adapter module is unavailable');
   const sourceBytes = await readRequiredModule(sourceReal);

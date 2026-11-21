@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/rrsi-heldout-evaluation-v1.schema.json",
+  "title": "Threadforge RRSI declared-held-out evaluation summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "threadforge.rrsi-heldout-evaluation.v1" },
+    "evaluation_scope": { "const": "declared_heldout_job_label" },
+    "human_review_required": { "const": true },
+    "independent_holdout_verified": { "const": false },
+    "execution_verified": { "const": false },
+    "cutover_evidence_eligible": { "const": false },
+    "evaluation": { "$ref": "rrsi-evaluation-summary-v1.schema.json" }
+  },
+  "required": [
+    "schema_version",
+    "evaluation_scope",
+    "human_review_required",
+    "independent_holdout_verified",
+    "execution_verified",
+    "cutover_evidence_eligible",
+    "evaluation"
+  ]
+}

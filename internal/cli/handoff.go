@@ -305,6 +305,16 @@ func canonicalHandoffHarness(value string) (string, bool) {
 	return canonical, ok
 }
 
+func canonicalHandoffTarget(value string) (string, bool) {
+	if canonical, ok := canonicalHandoffHarness(value); ok {
+		return canonical, true
+	}
+	if strings.EqualFold(strings.TrimSpace(value), "aider") {
+		return "aider", true
+	}
+	return "", false
+}
+
 func absoluteHandoffPath(path string) (string, error) {
 	if !filepath.IsAbs(path) || len(path) > 4096 || strings.ContainsRune(path, '\x00') ||
 		(runtime.GOOS == "windows" && strings.HasPrefix(path, `\\`)) {

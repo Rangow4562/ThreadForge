@@ -16,6 +16,7 @@ const securitySessionFilter = document.querySelector('#security-session-filter')
 const securityReviewButton = document.querySelector('#show-security-reviews');
 const securityReviewPrevious = document.querySelector('#security-reviews-previous');
 const securityReviewNext = document.querySelector('#security-reviews-next');
+const securityRulesButton = document.querySelector('#load-security-rules');
 const securityReviewPageSize = 100;
 let securityReviewOffset = 0;
 let securityReviewHasNextPage = false;
@@ -343,6 +344,64 @@ async function runSecurityScan() {
   }
 }
 
+function renderSecurityRules(data) {
+  const target = document.querySelector('#security-rules-list');
+  target.replaceChildren();
+  if (!Array.isArray(data.rules) || data.rules.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.textContent = 'No active security rules are available.';
+    target.append(empty);
+    return;
+  }
+  for (const rule of data.rules) {
+    const card = document.createElement('article');
+    card.className = 'security-finding';
+    const heading = document.createElement('h3');
+    heading.textContent = `[${rule.severity}] ${rule.title} (${rule.rule_id})`;
+    card.append(heading);
+    const metadata = document.createElement('p');
+    metadata.className = 'muted';
+    metadata.textContent = `${rule.status} · ${rule.posture} · ${rule.kind} · ${rule.source} · ${rule.test_count} conformance case(s)`;
+    card.append(metadata);
+    if (rule.description) {
+      const description = document.createElement('p');
+      description.textContent = rule.description;
+      card.append(description);
+    }
+    if (rule.reason) {
+      const reason = document.createElement('p');
+      reason.className = 'muted';
+      reason.textContent = `Finding reason: ${rule.reason}`;
+      card.append(reason);
+    }
+    target.append(card);
+  }
+}
+
+async function loadSecurityRules() {
+  const statusText = document.querySelector('#security-rules-status');
+  const target = document.querySelector('#security-rules-list');
+  securityRulesButton.disabled = true;
+  statusText.textContent = 'Loading local active-rule metadata…';
+  target.replaceChildren();
+  try {
+    const response = await fetch('/v1/security/rules', { headers: { accept: 'application/json' } });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `Security rules failed (${response.status}).`);
+    if (data.schema_version !== 'threadforge.security-rules.v1' || !Array.isArray(data.rules) ||
+        data.rules.length > 500 || data.count !== data.rules.length) {
+      throw new Error('Security rules response did not match the supported contract.');
+    }
+    renderSecurityRules(data);
+    statusText.textContent = `Loaded ${data.count} active local rule(s). Rule expressions, fixtures, and source paths were not returned.`;
+  } catch (error) {
+    statusText.textContent = error instanceof Error ? error.message : 'Security rules unavailable.';
+  } finally {
+    securityRulesButton.disabled = false;
+  }
+}
+
 async function runInventoryScan() {
   const scanStatus = document.querySelector('#inventory-status');
   const summary = document.querySelector('#inventory-summary');
@@ -517,6 +576,7 @@ scanButton.addEventListener('click', runSecurityScan);
 securityReviewButton.addEventListener('click', loadSecurityReviewHistory);
 securityReviewPrevious.addEventListener('click', () => loadSecurityReviewHistory(securityReviewOffset - securityReviewPageSize));
 securityReviewNext.addEventListener('click', () => loadSecurityReviewHistory(securityReviewOffset + securityReviewPageSize));
+securityRulesButton.addEventListener('click', loadSecurityRules);
 findingDetailsToggle.addEventListener('change', () => {
   if (!findingDetailsToggle.checked) {
     document.querySelector('#security-finding-details').replaceChildren();

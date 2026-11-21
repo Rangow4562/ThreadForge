@@ -1,0 +1,3 @@
+Threadforge is distributed under the Apache License, Version 2.0. See LICENSE.
+
+This repository is being assembled from separately licensed upstream components. Per-component licenses and provenance are recorded in THIRD_PARTY.md. No Mancode (AGPL-3.0-only) source has been copied into this repository.

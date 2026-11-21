@@ -1,7 +1,7 @@
 // Host-permission status and grant flow (src/shared/permissions.ts). Firefox MV3
 // lets the user withhold host permissions; without them the extension captures
 // nothing, so the popup/options must show it and offer the grant.
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from './test-api.js';
 import {
   declaredOrigins,
   describeOrigin,
@@ -20,10 +20,12 @@ const HOSTS = [
 
 function fakeApi(granted: Iterable<string>, opts: { grantOnRequest?: boolean; containsThrows?: boolean } = {}) {
   const have = new Set(granted);
-  const request = vi.fn(async ({ origins }: { origins: string[] }) => {
+  const requestCalls: Array<{ origins: string[] }> = [];
+  const request = async ({ origins }: { origins: string[] }) => {
+    requestCalls.push({ origins: [...origins] });
     if (opts.grantOnRequest) origins.forEach((o) => have.add(o));
     return !!opts.grantOnRequest;
-  });
+  };
   const api: PermissionsApi = {
     runtime: { getManifest: () => ({ host_permissions: HOSTS }) },
     permissions: {
@@ -34,7 +36,7 @@ function fakeApi(granted: Iterable<string>, opts: { grantOnRequest?: boolean; co
       request,
     },
   };
-  return { api, request, have };
+  return { api, requestCalls, have };
 }
 
 interface FakeEl {
@@ -124,26 +126,26 @@ describe('mountPermissionBanner', () => {
 
   it('requests exactly the missing hosts synchronously on click, then hides once granted', async () => {
     const { doc, els } = fakeDoc();
-    const { api, request } = fakeApi(['https://claude.ai/*'], { grantOnRequest: true });
+    const { api, requestCalls } = fakeApi(['https://claude.ai/*'], { grantOnRequest: true });
     mountPermissionBanner(api, doc);
     await settle();
     els['perm-grant'].click!();
     // Called inside the click handler itself: Firefox rejects a request made
     // after the user gesture has been consumed by an await.
-    expect(request).toHaveBeenCalledTimes(1);
-    expect(request.mock.calls[0][0].origins).toEqual(HOSTS.slice(1));
+    expect(requestCalls).toHaveLength(1);
+    expect(requestCalls[0].origins).toEqual(HOSTS.slice(1));
     await settle();
     expect(els['perm-missing'].hidden).toBe(true);
   });
 
   it('keeps the banner when the user declines the prompt', async () => {
     const { doc, els } = fakeDoc();
-    const { api, request } = fakeApi([]);
+    const { api, requestCalls } = fakeApi([]);
     mountPermissionBanner(api, doc);
     await settle();
     els['perm-grant'].click!();
     await settle();
-    expect(request).toHaveBeenCalledTimes(1);
+    expect(requestCalls).toHaveLength(1);
     expect(els['perm-missing'].hidden).toBe(false);
   });
 

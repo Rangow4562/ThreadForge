@@ -237,7 +237,7 @@ func runCutoverApproval(args []string, stdout, stderr io.Writer) int {
 		return attestationError(stderr, errors.New("trusted approver policy changed while writing attestation"))
 	}
 	result := cutoverApprovalResult{
-		SchemaVersion: "threadforge.cutover-approval-attestation-result.v1", Role: *role,
+		SchemaVersion: "threadforge.cutover-approval-attestation-result.v2", Role: *role,
 		ReviewerID: trustedReviewer, Approved: approval.Approved, KeyID: signed.KeyID,
 		Attestation: approval.Attestation, ReportSHA256: hex.EncodeToString(reportHash[:]),
 		TrustedSignatureVerified: true, ApprovalAssertionSigned: true, ExecutionAuthorized: false,

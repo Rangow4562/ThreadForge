@@ -1493,7 +1493,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
     } else if (family === 'cursor' && cursorSubsystem === 'plan-gate' && (action === 'install' || action === 'update')) {
       rejectUnexpected(options, ['project-root', 'command']);
       result = await installCursorProjectPlanGateHook(projectRoot, required(options, 'command'));
-      warning = 'Cursor plan gate is opt-in and fail-closed for direct Write tools only; it emits deny decisions but no allows. It does not gate shell/MCP tools, close path-check races, sandbox execution, or change Cursor permissions.';
+      warning = 'Cursor plan gate is opt-in and fail-closed for direct Write, Shell, and MCP tool matches. Writes are path-scoped; Shell and non-allowlisted MCP calls only require finalized requirements and governed execution, with no effect/path-scope proof. It emits deny or no-opinion, never allow, and does not sandbox execution or change Cursor permissions.';
     } else if (family === 'cursor' && cursorSubsystem === 'plan-gate' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
       result = await removeCursorProjectPlanGateHook(projectRoot);

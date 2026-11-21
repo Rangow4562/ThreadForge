@@ -152,6 +152,11 @@ func TestElasticsearchPowerShellSmokeScriptUsesLocalFixtureForAPIKeyAndBasicAuth
 	}
 	var mu sync.Mutex
 	var captures []capturedRequest
+	snapshotCaptures := func() []capturedRequest {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]capturedRequest(nil), captures...)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, readErr := io.ReadAll(io.LimitReader(r.Body, 4097))
 		if readErr != nil {
@@ -197,8 +202,9 @@ func TestElasticsearchPowerShellSmokeScriptUsesLocalFixtureForAPIKeyAndBasicAuth
 	if !errors.As(noOptInErr, &noOptInExit) || noOptInExit.ExitCode() != 2 || !strings.Contains(string(noOptIn), "No request was sent") {
 		t.Fatalf("PowerShell smoke script did not fail closed without its explicit switch: err=%v output=%s", noOptInErr, noOptIn)
 	}
-	if len(captures) != 0 {
-		t.Fatalf("PowerShell script contacted the local fixture without explicit consent: %#v", captures)
+	noOptInCaptures := snapshotCaptures()
+	if len(noOptInCaptures) != 0 {
+		t.Fatalf("PowerShell script contacted the local fixture without explicit consent: %#v", noOptInCaptures)
 	}
 
 	apiKey := "fixture-api-key-value"
@@ -220,9 +226,7 @@ func TestElasticsearchPowerShellSmokeScriptUsesLocalFixtureForAPIKeyAndBasicAuth
 	}
 
 	expectedBasic := "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
-	mu.Lock()
-	got := append([]capturedRequest(nil), captures...)
-	mu.Unlock()
+	got := snapshotCaptures()
 	if len(got) != 4 {
 		t.Fatalf("expected two preflight/write pairs, got %d requests: %#v", len(got), got)
 	}

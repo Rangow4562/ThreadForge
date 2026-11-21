@@ -22,7 +22,7 @@ import (
 	"github.com/threadforge-ai/threadforge/pkg/privacy"
 )
 
-const SchemaVersion = "threadforge.cutover-evidence.v9"
+const SchemaVersion = "threadforge.cutover-evidence.v10"
 
 const (
 	maxArtifactBytes = 128 << 20
@@ -441,6 +441,13 @@ func AssessWithTrustAndMigrationReviewersAndApprovers(report Report, evidenceRoo
 			assessment.Blockers = append(assessment.Blockers, "approval "+role+" signed attestation is not trusted: "+err.Error())
 		}
 	}
+	if clearance, ok := featureByID["release.product-name-clearance"]; ok {
+		if nameReviewer, exists := approvalByRole["product-name-reviewer"]; exists &&
+			!evidenceSetCovers(nameReviewer.Evidence, clearance.Evidence) {
+			assessment.Blockers = append(assessment.Blockers,
+				"product-name-reviewer approval must attest to all release.product-name-clearance evidence")
+		}
+	}
 	if securityApproval, ok := approvalByRole["security-reviewer"]; ok {
 		validateGitHubMainBranchGovernance(&assessment, verifier, securityApproval.Evidence, report.Repository)
 	} else {
@@ -752,6 +759,22 @@ func verifyEvidence(assessment *Assessment, verifier *artifactVerifier, label st
 			assessment.Blockers = append(assessment.Blockers, fmt.Sprintf("%s evidence digest mismatch for %q", label, item.Path))
 		}
 	}
+}
+
+func evidenceSetCovers(available, required []Evidence) bool {
+	if len(required) == 0 {
+		return false
+	}
+	refs := make(map[string]struct{}, len(available))
+	for _, evidence := range available {
+		refs[evidence.Path+"\x00"+evidence.SHA256] = struct{}{}
+	}
+	for _, evidence := range required {
+		if _, ok := refs[evidence.Path+"\x00"+evidence.SHA256]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (v *artifactVerifier) verify(evidence Evidence) (string, error) {

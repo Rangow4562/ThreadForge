@@ -36,6 +36,7 @@ var RequiredFeatures = []string{
 	"migration.acceptance",
 	"unified.acceptance",
 	"release.license-review",
+	"release.product-name-clearance",
 }
 
 var RequiredSources = []string{
@@ -105,4 +106,4 @@ var RequiredAdapterTests = []string{
 	"retrieval",
 }
 
-var RequiredApproverRoles = []string{"release-manager", "security-reviewer", "license-reviewer"}
+var RequiredApproverRoles = []string{"release-manager", "security-reviewer", "license-reviewer", "product-name-reviewer"}

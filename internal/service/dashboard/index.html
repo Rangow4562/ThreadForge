@@ -32,7 +32,31 @@
         <article class="card"><h2>Recent actions</h2><ul id="actions"></ul></article>
         <article class="card"><h2>Procedure review</h2><ul id="procedures"><li>Enter a project ID to view.</li></ul></article>
         <article class="card"><h2>Task continuity</h2><ul id="tasks"><li>Enter a project ID to view.</li></ul><h3>Recent tasks</h3><ul id="recent-tasks"><li>Enter a project ID to view.</li></ul></article>
-        <article class="card"><h2>Threat scan</h2><label for="security-min-severity">Minimum severity</label><select id="security-min-severity"><option value="info">Info and above</option><option value="low">Low and above</option><option value="medium">Medium and above</option><option value="high">High and above</option><option value="critical">Critical only</option></select><label for="security-session-filter">Session ID contains <span>(optional)</span></label><input id="security-session-filter" maxlength="256" autocomplete="off" placeholder="Filter this local scan by session"><button id="scan-security" type="button">Run local scan</button><label class="option-row"><input id="include-security-findings" type="checkbox">Show finding details for this scan</label><p class="muted">Session filters are used only for the local scan and are never returned or stored. Filtered scans do not update global review state. Detail output is optional and limited to sanitized rule and event metadata; review state stores only finding digests and rule summaries.</p><p id="security-status" class="muted">Scan starts only when requested. Only a complete unfiltered scan reconciles persistent review state.</p><ul id="security-findings"></ul><div id="security-finding-details"></div><h3>Persistent review state</h3><button id="show-security-reviews" type="button">Load review history</button><p id="security-review-status" class="muted">Review history loads only when requested.</p><div class="security-review-pagination"><button id="security-reviews-previous" type="button" disabled>Previous</button><button id="security-reviews-next" type="button" disabled>Next</button></div><div id="security-review-history"></div></article>
+        <article class="card">
+          <h2>Threat scan</h2>
+          <label for="security-min-severity">Minimum severity</label>
+          <select id="security-min-severity"><option value="info">Info and above</option><option value="low">Low and above</option><option value="medium">Medium and above</option><option value="high">High and above</option><option value="critical">Critical only</option></select>
+          <label for="security-session-filter">Session ID contains <span>(optional)</span></label>
+          <input id="security-session-filter" maxlength="256" autocomplete="off" placeholder="Filter this local scan by session">
+          <button id="scan-security" type="button">Run local scan</button>
+          <label class="option-row"><input id="include-security-findings" type="checkbox">Show finding details for this scan</label>
+          <p class="muted">Session filters are used only for the local scan and are never returned or stored. Filtered scans do not update global review state. Detail output is optional and limited to sanitized rule and event metadata; review state stores only finding digests and rule summaries.</p>
+          <p id="security-status" class="muted">Scan starts only when requested. Only a complete unfiltered scan reconciles persistent review state.</p>
+          <ul id="security-findings"></ul>
+          <div id="security-finding-details"></div>
+          <h3>Persistent review state</h3>
+          <button id="show-security-reviews" type="button">Load review history</button>
+          <p id="security-review-status" class="muted">Review history loads only when requested.</p>
+          <div class="security-review-pagination"><button id="security-reviews-previous" type="button" disabled>Previous</button><button id="security-reviews-next" type="button" disabled>Next</button></div>
+          <div id="security-review-history"></div>
+          <details class="security-rule-browser">
+            <summary>Active detection rules</summary>
+            <p class="muted">Load at most 500 local rule summaries on demand. Match expressions, test fixtures, event content, and source paths are never returned.</p>
+            <button id="load-security-rules" type="button">Load active rules</button>
+            <p id="security-rules-status" class="muted" role="status">Rule metadata loads only when requested.</p>
+            <div id="security-rules-list"></div>
+          </details>
+        </article>
         <article class="card"><h2>Migration state</h2><ul id="migrations"></ul></article>
       </section>
       <section class="card recent-card">

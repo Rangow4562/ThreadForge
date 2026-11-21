@@ -83,15 +83,19 @@ test('installs an isolated fail-closed Cursor Write plan gate and preserves othe
     assert.deepEqual(config.hooks.preToolUse[1], {
       command: planGateCommand, matcher: 'Write', timeout: 10, failClosed: true,
     });
+    assert.deepEqual(config.hooks.preToolUse[2], {
+      command: planGateCommand, matcher: 'Shell|MCP:.*', timeout: 10, failClosed: true,
+    });
     assert.equal(await installCursorProjectPlanGateHook(root, planGateCommand), 'unchanged');
     assert.equal(await readFile(file, 'utf8'), first);
 
     const updated = `threadforge task plan guard --host cursor --task-id next ${cursorPlanGateManagedMarker} --threadforge-plan-gate=cursor-v1`;
     assert.equal(await installCursorProjectPlanGateHook(root, updated), 'updated');
     config = JSON.parse(await readFile(file, 'utf8'));
-    assert.equal(config.hooks.preToolUse.length, 2);
+    assert.equal(config.hooks.preToolUse.length, 3);
     assert.equal(config.hooks.preToolUse[0].command, 'user-policy-hook');
     assert.equal(config.hooks.preToolUse[1].command, updated);
+    assert.equal(config.hooks.preToolUse[2].command, updated);
 
     assert.equal(await removeCursorProjectPlanGateHook(root), 'removed');
     config = JSON.parse(await readFile(file, 'utf8'));

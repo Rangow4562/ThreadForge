@@ -166,6 +166,17 @@ func runTaskPlanGuard(args []string, stdout, stderr io.Writer) int {
 			return writeCopilotUnscopedPlanDecision(stdout, stderr, false)
 		}
 	}
+	if *host == "cursor" {
+		if taskPlanGateCursorReadOnlyMCPTool(toolName) {
+			return writeTaskPlanGateResult(stdout, stderr, true, *host)
+		}
+		if taskPlanGateCursorRequiresGovernedPlan(toolName) {
+			if !taskPlanGateCursorUnscopedInputValid(toolName, toolArgs) {
+				return writeTaskPlanGateResult(stdout, stderr, false, *host)
+			}
+			return guardCursorUnscopedTool(*taskID, *projectID, *projectRoot, hookInput.CWD, *database, stdout, stderr)
+		}
+	}
 	if !taskPlanGateToolIsSupported(*host, toolName) {
 		return writeTaskPlanGateResult(stdout, stderr, false, *host)
 	}
@@ -236,6 +247,49 @@ func taskPlanGateCopilotIsMCPTool(toolName string) bool {
 	return toolName == "mcp" || strings.HasPrefix(toolName, "mcp_") || strings.HasPrefix(toolName, "mcp:")
 }
 
+func taskPlanGateCursorRequiresGovernedPlan(toolName string) bool {
+	name := strings.TrimSpace(toolName)
+	return strings.EqualFold(name, "Shell") || taskPlanGateCursorIsMCPTool(name)
+}
+
+func taskPlanGateCursorIsMCPTool(toolName string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(toolName)), "mcp:")
+}
+
+// Cursor only bypasses the task-plan check for an exact set of Threadforge
+// read-only MCP tools. Unknown MCP tools are treated as potentially mutating.
+func taskPlanGateCursorReadOnlyMCPTool(toolName string) bool {
+	if !taskPlanGateCursorIsMCPTool(toolName) {
+		return false
+	}
+	name := strings.ToLower(strings.TrimSpace(toolName))
+	name = strings.TrimSpace(name[len("mcp:"):])
+	switch name {
+	case "threadforge_context_get", "threadforge_project_memory_read_v2",
+		"threadforge_procedure_list", "threadforge_procedure_get", "threadforge_procedure_guide",
+		"threadforge_task_resume_context", "threadforge_task_discover":
+		return true
+	default:
+		return false
+	}
+}
+
+func taskPlanGateCursorUnscopedInputValid(toolName string, raw json.RawMessage) bool {
+	if strings.EqualFold(strings.TrimSpace(toolName), "Shell") {
+		var input taskPlanGateToolInput
+		if json.Unmarshal(raw, &input) != nil {
+			return false
+		}
+		command := input.Command
+		if command == "" {
+			command = input.Cmd
+		}
+		return strings.TrimSpace(command) != ""
+	}
+	var input map[string]json.RawMessage
+	return taskPlanGateCursorIsMCPTool(toolName) && json.Unmarshal(raw, &input) == nil && input != nil
+}
+
 // MCP names are host-controlled. Recognize read-only operations by their final
 // tool component and treat unknown names as potentially mutating.
 func taskPlanGateCopilotReadOnlyMCPTool(toolName string) bool {
@@ -286,6 +340,25 @@ func taskPlanGateCopilotUnsupportedMutationTool(toolName string) bool {
 }
 
 func guardCopilotUnscopedTool(taskID, projectID, projectRoot, cwd, database string, stdout, stderr io.Writer) int {
+	return writeCopilotUnscopedPlanDecision(stdout, stderr,
+		taskPlanGateUnscopedAllowedByPlan(taskID, projectID, projectRoot, cwd, database))
+}
+
+func guardCursorUnscopedTool(taskID, projectID, projectRoot, cwd, database string, stdout, stderr io.Writer) int {
+	result := struct {
+		Permission   string `json:"permission,omitempty"`
+		UserMessage  string `json:"user_message,omitempty"`
+		AgentMessage string `json:"agent_message,omitempty"`
+	}{}
+	if !taskPlanGateUnscopedAllowedByPlan(taskID, projectID, projectRoot, cwd, database) {
+		result.Permission = "deny"
+		result.UserMessage = "Threadforge withheld this Cursor shell or MCP call until requirements are finalized and governed execution is confirmed."
+		result.AgentMessage = "The configured Threadforge task plan gate withheld this shell or MCP call. Review finalized task requirements and the plan decision."
+	}
+	return writeIndentedJSON(stdout, result, stderr)
+}
+
+func taskPlanGateUnscopedAllowedByPlan(taskID, projectID, projectRoot, cwd, database string) bool {
 	root, rootErr := taskPlanGateProjectRoot(projectRoot)
 	permittedByPlan := false
 	if rootErr == nil {
@@ -302,7 +375,7 @@ func guardCopilotUnscopedTool(taskID, projectID, projectRoot, cwd, database stri
 			}
 		}
 	}
-	return writeCopilotUnscopedPlanDecision(stdout, stderr, permittedByPlan)
+	return permittedByPlan
 }
 
 func writeCopilotUnscopedPlanDecision(stdout, stderr io.Writer, permittedByPlan bool) int {

@@ -12,6 +12,25 @@ SCHEMA_DIRECTORY = Path(__file__).resolve().parents[2] / "schema"
 SCHEMA_PATHS = sorted(SCHEMA_DIRECTORY.glob("*.json"))
 
 
+def test_cursor_plan_gate_result_is_no_opinion_or_deny_only():
+    schema = json.loads((SCHEMA_DIRECTORY / "cursor-plan-gate-hook-result-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    validator.validate({})
+    validator.validate({
+        "permission": "deny",
+        "user_message": "Threadforge withheld this Cursor tool call.",
+        "agent_message": "Review finalized requirements and the plan decision.",
+    })
+    for invalid in (
+        {"permission": "allow"},
+        {"permission": "ask"},
+        {"permission": "deny", "user_message": "denied", "agent_message": "denied", "path": "private.txt"},
+        {"permission": "deny", "user_message": "denied"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_handoff_event_list_schema_is_versioned_content_free_and_reports_scan_state():
     schema = json.loads((SCHEMA_DIRECTORY / "handoff-event-list-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)
@@ -183,6 +202,34 @@ def test_aider_auto_read_result_is_project_scoped_guidance_and_never_authorizes_
         {**result, "skill_path": "../outside/SKILL.md"},
         {**result, "config_path": "C:/Users/private/.aider.conf.yml"},
         {**result, "absolute_project_root": "C:/Users/private/project"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
+def test_aider_live_handoff_smoke_receipt_is_loopback_only_and_path_free():
+    schema = json.loads((SCHEMA_DIRECTORY / "aider-handoff-live-smoke-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.aider-handoff-live-smoke.v1",
+        "status": "passed",
+        "aider_version": "aider 0.86.2",
+        "threadforge_exit_code": 0,
+        "read_only_load_confirmed": True,
+        "synthetic_brief_created": True,
+        "source_trace_unchanged": True,
+        "fixture_marker_echoed": False,
+        "api_base_scope": "loopback_fixture_only",
+        "model_prompt_submitted": False,
+        "user_configuration_isolated": True,
+    }
+    validator.validate(result)
+    for invalid in (
+        {**result, "brief_path": "C:/Users/private/handoff.md"},
+        {**result, "fixture_marker_echoed": True},
+        {**result, "api_base_scope": "https://provider.example"},
+        {**result, "model_prompt_submitted": True},
+        {**result, "status": "passed", "source_trace_unchanged": False},
     ):
         with pytest.raises(ValidationError):
             validator.validate(invalid)
@@ -1788,6 +1835,56 @@ def test_rrsi_trajectory_summary_schema_is_bounded_and_content_free():
         })
 
 
+def test_rrsi_declared_heldout_evaluation_schema_never_claims_authority():
+    documents = {
+        path.name: json.loads(path.read_text(encoding="utf-8"))
+        for path in SCHEMA_PATHS
+    }
+    resources = []
+    for path, document in documents.items():
+        resource_id = document.get("$id", (SCHEMA_DIRECTORY / path).as_uri())
+        resources.append((resource_id, Resource.from_contents(document)))
+    registry = Registry().with_resources(resources)
+    schema = documents["rrsi-heldout-evaluation-v1.schema.json"]
+    validator = validator_for(schema)(schema, registry=registry)
+    evaluation = {
+        "schema_version": "threadforge.rrsi-evaluation.v1",
+        "domain": "workspace",
+        "job": "heldout_champ",
+        "trials_per_task": 1,
+        "score": 1.0,
+        "mean_tokens": 100,
+        "expected_trials": 1,
+        "missing_trials": 0,
+        "metrics": {"criteria_passed": 1, "criteria_total": 1, "criterion_rate": 1.0},
+        "per_task": {
+            "law/task-1": {
+                "rewards": [1.0],
+                "weights": [1.0],
+                "tokens": [100],
+                "missing": 0,
+                "metrics": {},
+            }
+        },
+    }
+    heldout = {
+        "schema_version": "threadforge.rrsi-heldout-evaluation.v1",
+        "evaluation_scope": "declared_heldout_job_label",
+        "human_review_required": True,
+        "independent_holdout_verified": False,
+        "execution_verified": False,
+        "cutover_evidence_eligible": False,
+        "evaluation": evaluation,
+    }
+    validator.validate(heldout)
+
+    for field in ("independent_holdout_verified", "execution_verified", "cutover_evidence_eligible"):
+        with pytest.raises(ValidationError):
+            validator.validate({**heldout, field: True})
+    with pytest.raises(ValidationError):
+        validator.validate({**heldout, "source_path": "private/runs/workspace/eval.json"})
+
+
 def test_git_ref_team_sync_schemas_are_project_scoped_and_path_free():
     manifest_schema = json.loads((SCHEMA_DIRECTORY / "team-procedure-manifest-v1.schema.json").read_text(encoding="utf-8"))
     manifest_validator = validator_for(manifest_schema)(manifest_schema)
@@ -2131,6 +2228,29 @@ def test_security_review_contracts_are_versioned_bounded_and_metadata_only():
         "offset": 0,
         "reviews": [review],
     })
+    security_rule = {
+        "rule_id": "suspicious-shell-pipe",
+        "title": "Suspicious shell pipeline",
+        "description": "Detects a risky command sequence.",
+        "severity": "high",
+        "status": "stable",
+        "posture": "detect",
+        "kind": "match",
+        "reason": "A shell pipeline matched the local rule.",
+        "source": "baseline",
+        "test_count": 2,
+    }
+    validate("security-rules-v1.schema.json", {
+        "schema_version": "threadforge.security-rules.v1",
+        "count": 1,
+        "rules": [security_rule],
+    })
+    with pytest.raises(ValidationError):
+        validate("security-rules-v1.schema.json", {
+            "schema_version": "threadforge.security-rules.v1",
+            "count": 1,
+            "rules": [{**security_rule, "match": "raw evaluator expression"}],
+        })
     validate("security-finding-review-history-v1.schema.json", {
         "schema_version": "threadforge.security-finding-review-history.v1",
         "events": [
@@ -5193,3 +5313,66 @@ def test_cutover_v9_binds_repository_and_governance_artifact():
     governance["branch"] = "develop"
     with pytest.raises(ValidationError):
         validator_for(governance_schema)(governance_schema).validate(governance)
+
+
+def test_cutover_v10_requires_product_name_reviewer_contracts():
+    v10_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v10.schema.json").read_text(encoding="utf-8"))
+    v3_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v3.schema.json").read_text(encoding="utf-8"))
+    v2_schema = json.loads((SCHEMA_DIRECTORY / "cutover-evidence-v2.schema.json").read_text(encoding="utf-8"))
+    registry = Registry().with_resources([
+        (v10_schema["$id"], Resource.from_contents(v10_schema)),
+        (v3_schema["$id"], Resource.from_contents(v3_schema)),
+        (v2_schema["$id"], Resource.from_contents(v2_schema)),
+    ])
+    evidence = {"path": "legal/name-clearance-summary.json", "sha256": "a" * 64}
+    report = {
+        "schema_version": "threadforge.cutover-evidence.v10",
+        "repository": "Rangow4562/ThreadForge", "candidate_commit": "1" * 40,
+        "features": [{"id": "release.product-name-clearance", "status": "complete", "evidence": [evidence]}],
+        "adapters": [], "migrations": [], "cross_harness_tests": [], "evaluations": [],
+        "approvals": [{
+            "role": "product-name-reviewer", "reviewer": "independent-name-reviewer", "approved": True,
+            "reason": "Reviewed the exact public name and intended-market clearance artifact.",
+            "approved_at": "2026-11-20T12:00:00Z", "evidence": [evidence], "attestation": evidence,
+        }],
+    }
+    validator_for(v10_schema)(v10_schema, registry=registry).validate(report)
+    invalid_report = json.loads(json.dumps(report))
+    invalid_report["approvals"][0]["role"] = "unscoped-reviewer"
+    with pytest.raises(ValidationError):
+        validator_for(v10_schema)(v10_schema, registry=registry).validate(invalid_report)
+
+    trust_schema = json.loads((SCHEMA_DIRECTORY / "cutover-approval-trust-v2.schema.json").read_text(encoding="utf-8"))
+    trust = {
+        "schema_version": "threadforge.cutover-approval-trust.v2",
+        "keys": [{
+            "key_id": "b" * 64, "public_key": "A" * 44, "reviewer_id": "independent-name-reviewer",
+            "roles": ["product-name-reviewer"], "not_before": "2026-01-01T00:00:00Z", "not_after": "2027-01-01T00:00:00Z",
+        }],
+    }
+    validator_for(trust_schema)(trust_schema).validate(trust)
+
+    attestation_schema = json.loads((SCHEMA_DIRECTORY / "cutover-approval-attestation-v2.schema.json").read_text(encoding="utf-8"))
+    attestation = {
+        "schema_version": "threadforge.cutover-approval-attestation.v2", "key_id": "b" * 64,
+        "role": "product-name-reviewer", "reviewer_id": "independent-name-reviewer", "approved": True,
+        "reason_sha256": "c" * 64, "approved_at": "2026-11-20T12:00:00Z", "candidate_commit": "1" * 40,
+        "report_evidence_sha256": "d" * 64, "supporting_evidence_sha256": "a" * 64,
+        "issued_at": "2026-11-20T12:01:00Z", "signature": "A" * 88,
+    }
+    validator_for(attestation_schema)(attestation_schema).validate(attestation)
+
+    result_schema = json.loads((SCHEMA_DIRECTORY / "cutover-approval-attestation-result-v2.schema.json").read_text(encoding="utf-8"))
+    result_registry = Registry().with_resources([
+        (result_schema["$id"], Resource.from_contents(result_schema)),
+        (attestation_schema["$id"], Resource.from_contents(attestation_schema)),
+        (v2_schema["$id"], Resource.from_contents(v2_schema)),
+    ])
+    result = {
+        "schema_version": "threadforge.cutover-approval-attestation-result.v2",
+        "role": "product-name-reviewer", "reviewer_id": "independent-name-reviewer", "approved": True,
+        "key_id": "b" * 64, "attestation": evidence, "report_sha256": "e" * 64,
+        "trusted_signature_verified": True, "approval_assertion_signed": True,
+        "execution_authorized": False, "cutover_ready": False, "human_review_required": True,
+    }
+    validator_for(result_schema)(result_schema, registry=result_registry).validate(result)

@@ -1,5 +1,5 @@
 // The browser.* / chrome.* namespace shim (src/shared/browser.ts).
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from './test-api.js';
 import { resolveExtensionApi } from '../../src/shared/browser.js';
 
 const chromeNs = { runtime: { id: 'chrome-ext-id' }, tag: 'chrome' };

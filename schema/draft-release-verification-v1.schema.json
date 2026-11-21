@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/draft-release-verification-v1.schema.json",
+  "title": "Threadforge draft release verification receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "repository",
+    "tag",
+    "source_commit",
+    "candidate_provenance_verified",
+    "tag_commit_matches_candidate",
+    "draft_release",
+    "draft_assets_match_candidate",
+    "prepublication_check_only",
+    "asset_count",
+    "payload_count",
+    "license_review_required",
+    "release_clearance",
+    "release_authorized",
+    "publish_authorized"
+  ],
+  "properties": {
+    "schema": {
+      "const": "threadforge.draft-release-verification.v1"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "tag": {
+      "type": "string",
+      "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "candidate_provenance_verified": {
+      "const": true
+    },
+    "tag_commit_matches_candidate": {
+      "const": true
+    },
+    "draft_release": {
+      "const": true
+    },
+    "draft_assets_match_candidate": {
+      "const": true
+    },
+    "prepublication_check_only": {
+      "const": true
+    },
+    "asset_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "payload_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 99
+    },
+    "license_review_required": {
+      "const": true
+    },
+    "release_clearance": {
+      "const": false
+    },
+    "release_authorized": {
+      "const": false
+    },
+    "publish_authorized": {
+      "const": false
+    }
+  }
+}

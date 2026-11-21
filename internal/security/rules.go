@@ -19,6 +19,62 @@ const maxManagedRuleSourceBytes = 64 << 20
 
 // ListManagedRules returns the effective local rule set without exposing file paths.
 func ListManagedRules(storeDir string) ([]RuleSummary, error) {
+	loaded, err := loadActiveRules(storeDir)
+	if err != nil {
+		return nil, err
+	}
+	rules := make([]RuleSummary, 0, len(loaded))
+	for _, item := range loaded {
+		rules = append(rules, RuleSummary{
+			ID: cleanRuleText(item.Rule.ID, 128), Title: cleanRuleText(item.Rule.Title, 240),
+			Severity: beacon.Severity(item.Rule.Severity), Posture: item.Rule.Posture, Source: item.Source,
+		})
+	}
+	return rules, nil
+}
+
+// DashboardRuleSummary contains bounded rule metadata suitable for an explicit,
+// same-origin local dashboard read. It deliberately excludes match expressions,
+// correlation steps, fixture contents, and source paths.
+type DashboardRuleSummary struct {
+	ID          string              `json:"rule_id"`
+	Title       string              `json:"title"`
+	Description string              `json:"description,omitempty"`
+	Severity    beacon.Severity     `json:"severity"`
+	Status      threatrules.Status  `json:"status"`
+	Posture     threatrules.Posture `json:"posture"`
+	Kind        string              `json:"kind"`
+	Reason      string              `json:"reason"`
+	Source      rulestore.Source    `json:"source"`
+	TestCount   int                 `json:"test_count"`
+}
+
+// ListDashboardRules returns bounded, path-free metadata for the effective local
+// rule set. Free-form rule text is credential-screened and truncated before return.
+func ListDashboardRules(storeDir string) ([]DashboardRuleSummary, error) {
+	loaded, err := loadActiveRules(storeDir)
+	if err != nil {
+		return nil, err
+	}
+	rules := make([]DashboardRuleSummary, 0, len(loaded))
+	for _, item := range loaded {
+		kind := "match"
+		if item.Rule.Correlation != nil {
+			kind = "correlation"
+		}
+		rules = append(rules, DashboardRuleSummary{
+			ID: cleanRuleText(item.Rule.ID, 128), Title: cleanRuleText(item.Rule.Title, 240),
+			Description: cleanRuleText(item.Rule.Description, 2048),
+			Severity:    beacon.Severity(item.Rule.Severity), Status: item.Rule.Status,
+			Posture: item.Rule.Posture, Kind: kind,
+			Reason: cleanRuleText(item.Rule.Emit.Reason, 1000), Source: item.Source,
+			TestCount: len(item.Rule.Tests),
+		})
+	}
+	return rules, nil
+}
+
+func loadActiveRules(storeDir string) ([]rulestore.LoadedRule, error) {
 	if err := validateManagedRuleStore(storeDir, false); err != nil {
 		return nil, err
 	}
@@ -34,14 +90,7 @@ func ListManagedRules(storeDir string) ([]RuleSummary, error) {
 	if len(loaded) == 0 || len(loaded) > MaxRules {
 		return nil, fmt.Errorf("active rule set must contain 1 to %d rules", MaxRules)
 	}
-	rules := make([]RuleSummary, 0, len(loaded))
-	for _, item := range loaded {
-		rules = append(rules, RuleSummary{
-			ID: cleanRuleText(item.Rule.ID, 128), Title: cleanRuleText(item.Rule.Title, 240),
-			Severity: beacon.Severity(item.Rule.Severity), Posture: item.Rule.Posture, Source: item.Source,
-		})
-	}
-	return rules, nil
+	return loaded, nil
 }
 
 // InstallManagedRules validates a bounded private source snapshot before the

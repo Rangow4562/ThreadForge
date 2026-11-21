@@ -1,8 +1,18 @@
 # Installed skill, Qoder command, Command Code, and MCP dispatch smoke
 
+## Installed-host refresh — November 19, 2026 (smoke v48)
+
+`npm.cmd run test:installed-skills` completed successfully on the Windows development host with `real_model_invocations=0`. The isolated smoke verified SHA-256-bound procedure and memory-skill installation across 17 project host targets. Versions observed were Claude Code `2.1.328`, Codex CLI `0.170.0`, Antigravity CLI `1.5.12`, OpenCode `1.18.31`, Gemini CLI `0.42.0`, Command Code `1.89.1`, and GitHub Copilot CLI `1.0.64`. OpenCode, Gemini, and Codex skill discovery passed. The Antigravity project MCP config was written and read back, but `agy mcp list` did not enumerate it; a deterministic loopback-backed agent run still loaded it and completed one `threadforge_procedure_get` read. Its `write_file` denial probe observed one callback, a host tool error, and no sentinel write; two attempted external-provider connections were blocked, with zero real-model invocations. Copilot project MCP, task-resume, and approved-memory reads passed; its plan-gate result remains `partial` because `apply_patch` and `str_replace_editor` were not exposed. Command Code project MCP and skill discovery passed, but its agent MCP read was skipped because the isolated CLI requires login. This is current selected-version fixture/configuration evidence only; it does not prove real-model adherence, a host security boundary, task efficacy, or complete parity.
+
+## Installed-host refresh — November 16, 2026 (smoke v48)
+
+`npm.cmd run test:installed-skills` completed successfully on the Windows development host. The `threadforge.installed-skill-smoke.v48` report recorded `real_model_invocations=0`; the isolated-home smoke completed its digest-checked procedure/memory-skill installations and discovery checks. Versions observed in this run were OpenCode `1.18.31`, Claude Code `2.1.325`, Gemini CLI `0.42.0`, Codex CLI `0.169.0`, and Antigravity CLI `1.5.9`. OpenCode, Gemini, and Codex skill discovery passed. The selected Antigravity write-denial probe produced no write effect; Copilot plan-gate coverage remains `partial`, and Command Code agent execution remains gated on isolated login. This validates only selected-version fixture transport and local configuration behavior, not real-model adherence, efficacy, a security boundary, or full host parity.
+
 ## Command Code follow-up — November 15, 2026 (CLI 1.89.1; smoke v48)
 
 The isolated Windows rerun verified that Command Code `1.89.1` lists the project Threadforge MCP server and discovers both the approved procedure and memory-continuity skills. The agent probe was explicitly `skipped` with `isolated_command_code_cli_requires_login_for_agent_run`; the fixture received zero provider requests and made zero real-model invocations. With an isolated home and provider credentials removed, `cmdc mcp --help` exposed management commands only, not a standalone tool-call operation. This remains discovery/configuration evidence; host-mediated retrieval is unverified.
+
+November 16, 2026 follow-up: `npm.cmd run test:command-code-mod-host --offline` passed against CLI `1.89.1` with schema `threadforge.command-code-mod-host-smoke.v1`. The disposable project mod was added, inspected, and removed; the inspector found the event subscription and no behavior-changing hooks. Provider requests and real-model calls were zero, and no agent run was attempted. This verifies local configuration/inspection, not authenticated agent-loop callback execution or task efficacy.
 
 ## Installed-host refresh — November 13, 2026 (smoke v48)
 

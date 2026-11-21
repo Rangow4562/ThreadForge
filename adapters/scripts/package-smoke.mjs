@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -67,6 +68,67 @@ function assertPackagedCLICommand(command, label, cliPath) {
   assert.ok(command.includes(quoteShellArgument(cliPath)), `${label} command does not quote the packaged CLI path`);
   assert.equal(command.includes('cli.ts'), false, `${label} command refers to an omitted TypeScript file`);
   assert.equal(command.includes('--experimental-strip-types'), false, `${label} command keeps the source-only Node flag`);
+}
+async function createTelemetryReceiver() {
+  const events = [];
+  const server = createServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on('end', () => {
+      if (request.method !== 'POST' || request.url !== '/v1/events') {
+        response.writeHead(404).end();
+        return;
+      }
+      try {
+        const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        events.push(...(Array.isArray(payload) ? payload : [payload]));
+        response.writeHead(202, { 'content-type': 'application/json' }).end('{}');
+      } catch {
+        response.writeHead(400).end('{}');
+      }
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('package smoke receiver has no TCP address');
+  return {
+    endpoint: `http://127.0.0.1:${address.port}/v1/events`,
+    events,
+    close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+  };
+}
+async function runPackagedHookCommand(command, payload, endpoint, label) {
+  const child = spawn(command, {
+    shell: true,
+    windowsHide: true,
+    timeout: 10_000,
+    env: { ...process.env, THREADFORGE_EVENT_ENDPOINT: endpoint },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk; });
+  child.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk; });
+  child.stdin.on('error', () => {});
+  const result = await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
+    child.stdin.end(JSON.stringify(payload));
+  });
+  assert.equal(result.code, 0, `${label} packaged hook command failed: ${String(result.stderr).slice(0, 1000)}`);
+  assert.equal(result.stdout, '', `${label} packaged hook wrote to stdout`);
+  assert.equal(result.stderr, '', `${label} packaged hook reported an unexpected error: ${String(result.stderr).slice(0, 1000)}`);
+}
+async function verifyPackagedHookEvent(receiver, command, payload, label, harness, action) {
+  const previousEventCount = receiver.events.length;
+  await runPackagedHookCommand(command, payload, receiver.endpoint, label);
+  assert.equal(receiver.events.length, previousEventCount + 1, `${label} packaged hook did not emit exactly one event`);
+  const event = receiver.events.at(-1);
+  assert.equal(event?.harness?.name, harness, `${label} packaged hook emitted an unexpected harness`);
+  assert.equal(event?.event?.action, action, `${label} packaged hook emitted an unexpected action`);
 }
 assert.equal(manifest.license, 'Apache-2.0', 'adapter package license metadata must match the project license');
 for (const filePath of legalNoticeFiles) {
@@ -137,6 +199,7 @@ let senpiInstalledTemplateVerified = false;
 let ompInstalledTemplateVerified = false;
 let clineInstalledPluginTargetVerified = false;
 let hostHookCommandsResolvePackagedCLI = false;
+let hostHookCommandsExecutePackagedCLI = false;
 try {
   const archive = spawnSync(process.execPath, [npmCli, 'pack', '--json', '--pack-destination', tempRoot], {
     cwd: packageRoot,
@@ -256,41 +319,71 @@ try {
   assert.equal(await ompConfig.removeOmpExtension(ompOptions), 'removed', 'installed OMP extension could not be removed');
   ompInstalledTemplateVerified = true;
 
-  const devinHooks = await import(pathToFileURL(path.join(installedRoot, 'dist', 'devin-hooks-config.js')).href);
-  const devinProject = path.join(tempRoot, 'devin-project');
-  mkdirSync(devinProject);
-  assert.equal(await devinHooks.installDevinHooks({ scope: 'project', projectRoot: devinProject }), 'installed');
-  const devinConfig = JSON.parse(readFileSync(devinHooks.devinHooksConfigPath('project', devinProject), 'utf8'));
-  const devinCommands = collectCommands(devinConfig);
-  assert.ok(devinCommands.length > 0, 'installed Devin config contains no generated hook commands');
-  for (const command of devinCommands) assertPackagedCLICommand(command, 'Devin', packagedCliPath);
-  await devinHooks.removeDevinHooks({ scope: 'project', projectRoot: devinProject });
+  const hookReceiver = await createTelemetryReceiver();
+  try {
+    const devinHooks = await import(pathToFileURL(path.join(installedRoot, 'dist', 'devin-hooks-config.js')).href);
+    const devinProject = path.join(tempRoot, 'devin-project');
+    mkdirSync(devinProject);
+    assert.equal(await devinHooks.installDevinHooks({ scope: 'project', projectRoot: devinProject }), 'installed');
+    const devinConfig = JSON.parse(readFileSync(devinHooks.devinHooksConfigPath('project', devinProject), 'utf8'));
+    const devinCommands = collectCommands(devinConfig);
+    assert.ok(devinCommands.length > 0, 'installed Devin config contains no generated hook commands');
+    for (const command of devinCommands) assertPackagedCLICommand(command, 'Devin', packagedCliPath);
+    const devinSessionCommand = devinCommands.find((command) => command.includes('devin hook SessionStart '));
+    assert.ok(devinSessionCommand, 'installed Devin config has no SessionStart command');
+    await verifyPackagedHookEvent(hookReceiver, devinSessionCommand,
+      { hook_event_name: 'SessionStart', session_id: 'package-smoke-private-session', cwd: 'C:/private/package-smoke' },
+      'Devin', 'devin_cli', 'session.started');
+    await devinHooks.removeDevinHooks({ scope: 'project', projectRoot: devinProject });
 
-  const desktopHooks = await import(pathToFileURL(path.join(installedRoot, 'dist', 'devin-desktop-hooks-config.js')).href);
-  const desktopProject = path.join(tempRoot, 'devin-desktop-project');
-  mkdirSync(desktopProject);
-  assert.equal(await desktopHooks.installDevinDesktopHooks({ scope: 'project', projectRoot: desktopProject }), 'installed');
-  const desktopConfig = JSON.parse(readFileSync(desktopHooks.devinDesktopHooksConfigPath('project', desktopProject), 'utf8'));
-  const desktopCommands = collectCommands(desktopConfig);
-  assert.ok(desktopCommands.length > 0, 'installed Devin Desktop config contains no generated hook commands');
-  for (const command of desktopCommands) assertPackagedCLICommand(command, 'Devin Desktop', packagedCliPath);
-  await desktopHooks.removeDevinDesktopHooks({ scope: 'project', projectRoot: desktopProject });
+    const desktopHooks = await import(pathToFileURL(path.join(installedRoot, 'dist', 'devin-desktop-hooks-config.js')).href);
+    const desktopProject = path.join(tempRoot, 'devin-desktop-project');
+    mkdirSync(desktopProject);
+    assert.equal(await desktopHooks.installDevinDesktopHooks({ scope: 'project', projectRoot: desktopProject }), 'installed');
+    const desktopConfig = JSON.parse(readFileSync(desktopHooks.devinDesktopHooksConfigPath('project', desktopProject), 'utf8'));
+    const desktopCommands = collectCommands(desktopConfig);
+    assert.ok(desktopCommands.length > 0, 'installed Devin Desktop config contains no generated hook commands');
+    for (const command of desktopCommands) assertPackagedCLICommand(command, 'Devin Desktop', packagedCliPath);
+    const desktopReadCommand = desktopCommands.find((command) => command.includes('devin-desktop hook post_read_code '));
+    assert.ok(desktopReadCommand, 'installed Devin Desktop config has no post_read_code command');
+    await verifyPackagedHookEvent(hookReceiver, desktopReadCommand,
+      { trajectory_id: 'package-smoke-private-session', tool_info: { file_path: 'C:/private/package-smoke/file.ts' } },
+      'Devin Desktop', 'devin_desktop', 'file.read');
+    await desktopHooks.removeDevinDesktopHooks({ scope: 'project', projectRoot: desktopProject });
 
-  const openHandsHooks = await import(pathToFileURL(path.join(installedRoot, 'dist', 'openhands-hooks-config.js')).href);
-  const openHandsProject = path.join(tempRoot, 'openhands-project');
-  mkdirSync(openHandsProject);
-  assert.equal(await openHandsHooks.installOpenHandsProjectHooks(openHandsProject), 'installed');
-  const openHandsConfig = JSON.parse(readFileSync(path.join(openHandsProject, '.openhands', 'hooks.json'), 'utf8'));
-  const openHandsCommands = collectCommands(openHandsConfig);
-  assert.ok(openHandsCommands.length > 0, 'installed OpenHands config contains no generated hook commands');
-  for (const command of openHandsCommands) assertPackagedCLICommand(command, 'OpenHands', packagedCliPath);
-  await openHandsHooks.removeOpenHandsProjectHooks(openHandsProject);
+    const openHandsHooks = await import(pathToFileURL(path.join(installedRoot, 'dist', 'openhands-hooks-config.js')).href);
+    const openHandsProject = path.join(tempRoot, 'openhands-project');
+    mkdirSync(openHandsProject);
+    assert.equal(await openHandsHooks.installOpenHandsProjectHooks(openHandsProject), 'installed');
+    const openHandsConfig = JSON.parse(readFileSync(path.join(openHandsProject, '.openhands', 'hooks.json'), 'utf8'));
+    const openHandsCommands = collectCommands(openHandsConfig);
+    assert.ok(openHandsCommands.length > 0, 'installed OpenHands config contains no generated hook commands');
+    for (const command of openHandsCommands) assertPackagedCLICommand(command, 'OpenHands', packagedCliPath);
+    const openHandsSessionCommand = openHandsCommands.find((command) => command.includes('openhands hook session_start '));
+    assert.ok(openHandsSessionCommand, 'installed OpenHands config has no session_start command');
+    await verifyPackagedHookEvent(hookReceiver, openHandsSessionCommand,
+      { session_id: 'package-smoke-private-session', working_dir: 'C:/private/package-smoke' },
+      'OpenHands', 'openhands', 'session.started');
+    await openHandsHooks.removeOpenHandsProjectHooks(openHandsProject);
 
-  const hermesHook = await import(pathToFileURL(path.join(installedRoot, 'dist', 'hermes-hook.js')).href);
-  const hermesCommands = collectCommands(parseYaml(hermesHook.renderHermesHookConfig()));
-  assert.ok(hermesCommands.length > 0, 'installed Hermes config contains no generated hook commands');
-  for (const command of hermesCommands) assertPackagedCLICommand(command, 'Hermes', packagedCliPath);
-  hostHookCommandsResolvePackagedCLI = true;
+    const hermesHook = await import(pathToFileURL(path.join(installedRoot, 'dist', 'hermes-hook.js')).href);
+    const hermesCommands = collectCommands(parseYaml(hermesHook.renderHermesHookConfig()));
+    assert.ok(hermesCommands.length > 0, 'installed Hermes config contains no generated hook commands');
+    for (const command of hermesCommands) assertPackagedCLICommand(command, 'Hermes', packagedCliPath);
+    hostHookCommandsResolvePackagedCLI = true;
+    const hermesSessionCommand = hermesCommands.find((command) => command.includes('hermes hook on_session_start '));
+    assert.ok(hermesSessionCommand, 'installed Hermes config has no on_session_start command');
+    await verifyPackagedHookEvent(hookReceiver, hermesSessionCommand,
+      { session_id: 'package-smoke-private-session' }, 'Hermes', 'hermes', 'session.started');
+    assert.equal(JSON.stringify(hookReceiver.events).includes('package-smoke-private-session'), false,
+      'installed packaged hook events retained a synthetic session identifier');
+    assert.equal(JSON.stringify(hookReceiver.events).includes('C:/private/package-smoke'), false,
+      'installed packaged hook events retained a synthetic workspace path');
+    assert.equal(hookReceiver.events.length, 4, 'expected one sanitized package event per generated host command');
+    hostHookCommandsExecutePackagedCLI = true;
+  } finally {
+    await hookReceiver.close();
+  }
 
   const senpiConfig = await import(pathToFileURL(path.join(installedRoot, 'dist', 'senpi-extension-config.js')).href);
   const senpiProject = path.join(tempRoot, 'senpi-project');
@@ -337,5 +430,6 @@ console.log(JSON.stringify({
   omp_installed_template_verified: ompInstalledTemplateVerified,
   cline_installed_plugin_target_verified: clineInstalledPluginTargetVerified,
   host_hook_commands_resolve_packaged_cli: hostHookCommandsResolvePackagedCLI,
+  host_hook_commands_execute_packaged_cli: hostHookCommandsExecutePackagedCLI,
   importable_exports_verified: Object.keys(manifest.exports).length,
 }));

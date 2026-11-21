@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -228,7 +228,12 @@ try {
   const clineModuleUrl = JSON.parse(clineImport.slice('import plugin from '.length, -1));
   const clineModulePath = fileURLToPath(new URL(clineModuleUrl));
   assert.ok(existsSync(clineModulePath), 'installed Cline wrapper points to a missing plugin module');
-  assert.equal(realpathSync(clineModulePath), realpathSync(path.join(installedRoot, 'dist', 'cline-plugin.js')),
+  const expectedClineModulePath = path.join(installedRoot, 'dist', 'cline-plugin.js');
+  const clinePathsMatch = process.platform === 'win32'
+    ? await (await import(pathToFileURL(path.join(installedRoot, 'dist', 'path-safety.js')).href))
+      .isSameRealPathWithoutLinks(clineModulePath, expectedClineModulePath)
+    : path.resolve(clineModulePath) === path.resolve(expectedClineModulePath);
+  assert.equal(clinePathsMatch, true,
     'installed Cline wrapper does not point to the compiled packaged plugin');
   assert.equal((await clineConfig.uninstallClinePlugin({ scope: 'project', projectRoot: clineProject })).result, 'removed');
   clineInstalledPluginTargetVerified = true;

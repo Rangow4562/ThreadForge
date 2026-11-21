@@ -58,8 +58,13 @@ function collectCommands(value, output = []) {
   }
   return output;
 }
+function quoteShellArgument(value) {
+  return process.platform === 'win32' ? `"${value}"` : `'${value.replaceAll("'", "'\\''")}'`;
+}
 function assertPackagedCLICommand(command, label, cliPath) {
   assert.ok(command.includes(cliPath), `${label} command does not use the packaged CLI entry point`);
+  assert.ok(command.includes(quoteShellArgument(process.execPath)), `${label} command does not quote the Node executable`);
+  assert.ok(command.includes(quoteShellArgument(cliPath)), `${label} command does not quote the packaged CLI path`);
   assert.equal(command.includes('cli.ts'), false, `${label} command refers to an omitted TypeScript file`);
   assert.equal(command.includes('--experimental-strip-types'), false, `${label} command keeps the source-only Node flag`);
 }
@@ -126,7 +131,7 @@ for (const runtimeTemplate of ['omp-extension.ts', 'senpi-extension.ts']) {
     `packaged runtime extension template differs from maintained source: ${runtimeTemplate}`,
   );
 }
-const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'threadforge-adapter-package-smoke-'));
+const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'threadforge adapter package smoke-'));
 let launcherVerified = false;
 let senpiInstalledTemplateVerified = false;
 let ompInstalledTemplateVerified = false;

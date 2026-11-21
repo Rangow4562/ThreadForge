@@ -69,6 +69,13 @@ function assertPackagedCLICommand(command, label, cliPath) {
   assert.equal(command.includes('cli.ts'), false, `${label} command refers to an omitted TypeScript file`);
   assert.equal(command.includes('--experimental-strip-types'), false, `${label} command keeps the source-only Node flag`);
 }
+function assertPackagedModuleCommand(command, label, modulePath) {
+  assert.ok(command.includes(modulePath), `${label} command does not use its packaged hook module`);
+  assert.ok(command.includes(quoteShellArgument(process.execPath)), `${label} command does not quote the Node executable`);
+  assert.ok(command.includes(quoteShellArgument(modulePath)), `${label} command does not quote the packaged hook module`);
+  assert.equal(command.includes('.ts'), false, `${label} command refers to a TypeScript source file`);
+  assert.equal(command.includes('--experimental-strip-types'), false, `${label} command keeps a source-only Node flag`);
+}
 async function createTelemetryReceiver() {
   const events = [];
   const server = createServer((request, response) => {
@@ -100,7 +107,7 @@ async function createTelemetryReceiver() {
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
 }
-async function runPackagedHookCommand(command, payload, endpoint, label) {
+async function runPackagedHookCommand(command, payload, endpoint, label, expectedStdout = '') {
   const child = spawn(command, {
     shell: true,
     windowsHide: true,
@@ -119,12 +126,12 @@ async function runPackagedHookCommand(command, payload, endpoint, label) {
     child.stdin.end(JSON.stringify(payload));
   });
   assert.equal(result.code, 0, `${label} packaged hook command failed: ${String(result.stderr).slice(0, 1000)}`);
-  assert.equal(result.stdout, '', `${label} packaged hook wrote to stdout`);
+  assert.equal(result.stdout, expectedStdout, `${label} packaged hook wrote unexpected stdout`);
   assert.equal(result.stderr, '', `${label} packaged hook reported an unexpected error: ${String(result.stderr).slice(0, 1000)}`);
 }
-async function verifyPackagedHookEvent(receiver, command, payload, label, harness, action) {
+async function verifyPackagedHookEvent(receiver, command, payload, label, harness, action, expectedStdout = '') {
   const previousEventCount = receiver.events.length;
-  await runPackagedHookCommand(command, payload, receiver.endpoint, label);
+  await runPackagedHookCommand(command, payload, receiver.endpoint, label, expectedStdout);
   assert.equal(receiver.events.length, previousEventCount + 1, `${label} packaged hook did not emit exactly one event`);
   const event = receiver.events.at(-1);
   assert.equal(event?.harness?.name, harness, `${label} packaged hook emitted an unexpected harness`);
@@ -200,6 +207,7 @@ let ompInstalledTemplateVerified = false;
 let clineInstalledPluginTargetVerified = false;
 let hostHookCommandsResolvePackagedCLI = false;
 let hostHookCommandsExecutePackagedCLI = false;
+let hostHookModulesExecutePackagedJS = false;
 try {
   const archive = spawnSync(process.execPath, [npmCli, 'pack', '--json', '--pack-destination', tempRoot], {
     cwd: packageRoot,
@@ -375,12 +383,50 @@ try {
     assert.ok(hermesSessionCommand, 'installed Hermes config has no on_session_start command');
     await verifyPackagedHookEvent(hookReceiver, hermesSessionCommand,
       { session_id: 'package-smoke-private-session' }, 'Hermes', 'hermes', 'session.started');
+
+    const kiroHooks = await import(pathToFileURL(path.join(installedRoot, 'dist', 'kiro-hooks-config.js')).href);
+    const kiroProject = path.join(tempRoot, 'kiro-project');
+    mkdirSync(kiroProject);
+    const kiroModule = path.join(installedRoot, 'dist', 'kiro-hook.js');
+    const kiroBaseCommand = [quoteShellArgument(process.execPath), quoteShellArgument(kiroModule), '--threadforge-hook=kiro'].join(' ');
+    assert.equal(await kiroHooks.installKiroHooks({ command: kiroBaseCommand, scope: 'project', projectRoot: kiroProject }), 'installed');
+    const kiroConfig = JSON.parse(readFileSync(kiroHooks.kiroHooksConfigPath('project', kiroProject), 'utf8'));
+    const kiroCommands = collectCommands(kiroConfig);
+    assert.ok(kiroCommands.length > 0, 'installed Kiro config contains no generated hook commands');
+    for (const command of kiroCommands) assertPackagedModuleCommand(command, 'Kiro', kiroModule);
+    const kiroSessionCommand = kiroCommands.find((command) => command.includes('--hook-event=SessionStart'));
+    assert.ok(kiroSessionCommand, 'installed Kiro config has no SessionStart command');
+    await verifyPackagedHookEvent(hookReceiver, kiroSessionCommand,
+      { session_id: 'package-smoke-private-session', cwd: 'C:/private/package-smoke' },
+      'Kiro', 'kiro', 'session.started');
+    assert.equal(await kiroHooks.removeKiroHooks({ scope: 'project', projectRoot: kiroProject }), 'removed');
+
+    const museHooks = await import(pathToFileURL(path.join(installedRoot, 'dist', 'muse-hooks-config.js')).href);
+    const museProject = path.join(tempRoot, 'muse-project');
+    mkdirSync(museProject);
+    const museModule = path.join(installedRoot, 'dist', 'muse-hook.js');
+    const museBaseCommand = [quoteShellArgument(process.execPath), quoteShellArgument(museModule), '--threadforge-hook=muse'].join(' ');
+    assert.equal(await museHooks.installMuseHooks({ command: museBaseCommand, scope: 'project', projectRoot: museProject }), 'installed');
+    const museConfig = JSON.parse(readFileSync(museHooks.museHooksConfigPath('project', museProject), 'utf8'));
+    const museCommands = collectCommands(museConfig);
+    assert.ok(museCommands.length > 0, 'installed Muse config contains no generated hook commands');
+    for (const command of museCommands) assertPackagedModuleCommand(command, 'Muse', museModule);
+    const musePromptCommand = museCommands.find((command) => command.includes('--hook-event=UserPromptSubmit'));
+    assert.ok(musePromptCommand, 'installed Muse config has no UserPromptSubmit command');
+    await verifyPackagedHookEvent(hookReceiver, musePromptCommand,
+      { prompt: 'package-smoke-private-prompt', session_id: 'package-smoke-private-session', cwd: 'C:/private/package-smoke' },
+      'Muse', 'muse_code', 'prompt.submitted', '{}\n');
+    assert.equal(await museHooks.removeMuseHooks({ scope: 'project', projectRoot: museProject }), 'removed');
+
     assert.equal(JSON.stringify(hookReceiver.events).includes('package-smoke-private-session'), false,
       'installed packaged hook events retained a synthetic session identifier');
     assert.equal(JSON.stringify(hookReceiver.events).includes('C:/private/package-smoke'), false,
       'installed packaged hook events retained a synthetic workspace path');
-    assert.equal(hookReceiver.events.length, 4, 'expected one sanitized package event per generated host command');
+    assert.equal(JSON.stringify(hookReceiver.events).includes('package-smoke-private-prompt'), false,
+      'installed Muse hook event retained synthetic prompt text');
+    assert.equal(hookReceiver.events.length, 6, 'expected one sanitized package event per generated host command');
     hostHookCommandsExecutePackagedCLI = true;
+    hostHookModulesExecutePackagedJS = true;
   } finally {
     await hookReceiver.close();
   }
@@ -431,5 +477,6 @@ console.log(JSON.stringify({
   cline_installed_plugin_target_verified: clineInstalledPluginTargetVerified,
   host_hook_commands_resolve_packaged_cli: hostHookCommandsResolvePackagedCLI,
   host_hook_commands_execute_packaged_cli: hostHookCommandsExecutePackagedCLI,
+  host_hook_modules_execute_packaged_js: hostHookModulesExecutePackagedJS,
   importable_exports_verified: Object.keys(manifest.exports).length,
 }));

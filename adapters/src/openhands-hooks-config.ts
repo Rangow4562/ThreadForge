@@ -1,9 +1,9 @@
 import { constants, type Stats } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { lstat, mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { resolveAdapterCLIEntry } from './adapter-cli-entry.ts';
 
 export const openHandsManagedMarker = '--threadforge-openhands-hook=v1';
 export const openHandsHookEvents = ['session_start', 'user_prompt_submit', 'pre_tool_use', 'post_tool_use', 'stop', 'session_end'] as const;
@@ -57,8 +57,9 @@ function commandFor(event: OpenHandsHookEvent, template?: string): string {
     validateCommandTemplate(template);
     command = template.replace('{event}', event);
   } else {
-    const cliPath = fileURLToPath(new URL('./cli.ts', import.meta.url));
-    command = `${quoteShellArgument(process.execPath)} --experimental-strip-types ${quoteShellArgument(cliPath)} openhands hook ${event} ${openHandsManagedMarker}`;
+    const entry = resolveAdapterCLIEntry(import.meta.url);
+    command = [quoteShellArgument(process.execPath), ...entry.nodeArguments.map(quoteShellArgument),
+      quoteShellArgument(entry.scriptPath), 'openhands hook', event, openHandsManagedMarker].join(' ');
   }
   if (command.length > 8192 || /[\r\n\0]/.test(command) || !command.includes(openHandsManagedMarker) || looksCredentialLike(command)) {
     throw new Error('OpenHands hook command is invalid or too long');

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { emitEvents, markPromptHandoff, type ThreadforgeEvent } from './emit.ts';
+import { resolveAdapterCLIEntry } from './adapter-cli-entry.ts';
 
 export const hermesManagedMarker = '--threadforge-hermes-hook=v1';
 export const hermesHookEvents = [
@@ -176,9 +176,10 @@ export function renderHermesHookConfig(commandTemplate?: string): string {
 }
 
 function defaultCommandTemplate(): string {
-  const cli = fileURLToPath(new URL('./cli.ts', import.meta.url));
+  const entry = resolveAdapterCLIEntry(import.meta.url);
   const quote = (value: string) => process.platform === 'win32' ? `"${value.replaceAll('"', '\\"')}"` : `'${value.replaceAll("'", "'\\''")}'`;
-  return `${quote(process.execPath)} --experimental-strip-types ${quote(cli)} hermes hook {event} ${hermesManagedMarker}`;
+  return [quote(process.execPath), ...entry.nodeArguments.map(quote), quote(entry.scriptPath),
+    'hermes hook {event}', hermesManagedMarker].join(' ');
 }
 
 /** Hook runner is fail-open and never writes a decision or context response to stdout. */

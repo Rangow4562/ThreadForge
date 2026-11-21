@@ -15,7 +15,9 @@ if (build.status !== 0) process.exit(build.status ?? 1);
 
 const outputDirectory = path.join(packageRoot, 'dist');
 mkdirSync(outputDirectory, { recursive: true });
-copyFileSync(
-  path.join(packageRoot, 'src', 'senpi-extension.ts'),
-  path.join(outputDirectory, 'senpi-extension.ts'),
-);
+for (const runtimeTemplate of ['omp-extension.ts', 'senpi-extension.ts']) {
+  copyFileSync(
+    path.join(packageRoot, 'src', runtimeTemplate),
+    path.join(outputDirectory, runtimeTemplate),
+  );
+}

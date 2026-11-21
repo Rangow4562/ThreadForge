@@ -2,6 +2,8 @@
 
 This inventory is the migration baseline for Beacon's runtime documentation and Mancode's published platform list. A harness name in Threadforge's event schema is not evidence of capture support. `Partial` records only the slice with local evidence; it is not release acceptance. A row becomes complete only after the host contract, configuration-preservation, packaging, and cross-harness acceptance gates pass.
 
+Adapter npm package runtime-path audit (November 21, 2026): the offline installed-tarball smoke now verifies the packaged OMP and Senpi extension templates, Cline's compiled plugin target, and generated Devin CLI, Devin Desktop, Hermes, and OpenHands hook commands. Packaged commands resolve to the shipped `dist/bin.js` without the source-only `cli.ts` or `--experimental-strip-types` flag. This verifies artifact contents and path construction only; live host loaders, versions, callbacks, and cross-harness behavior remain separately unverified.
+
 GitHub Copilot IDE prompt files are tracked separately from the Copilot CLI row: Threadforge can project an approved procedure into `.github/prompts/*.prompt.md` for manual IDE invocation, but does not configure IDE settings or claim host discovery/use. GitHub's current matrix does not list prompt files for Copilot CLI. See [Copilot IDE prompts](copilot-prompts.md).
 
 OpenCode task-resume note (October 28, 2026): the opt-in project memory plugin can append an explicit project-checked task snapshot via `--memory-task-id` or discover a unique eligible active task via `--memory-discover-active-task`. This uses the existing advisory-only resume formatter; task selection is disabled by default. See [OpenCode approved memory](opencode-memory.md).

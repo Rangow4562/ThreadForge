@@ -1419,7 +1419,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       rejectUnexpected(options, ['project-root']);
       result = await removeOpenHandsProjectHooks(projectRoot);
     } else if (family === 'openclaw' && (action === 'install' || action === 'update' || action === 'uninstall')) {
-      rejectUnexpected(options, ['scope', 'openclaw-cli'], [], ['print', 'acknowledge-local-source']);
+      rejectUnexpected(options, ['scope', 'openclaw-cli', 'timeout-ms'], [], ['print', 'acknowledge-local-source']);
       if (providedOpenClawScope !== 'active-gateway') throw new Error('OpenClaw scope must be active-gateway; run the command under the profile used by the Gateway');
       if (action !== 'install' && options.switches.has('acknowledge-local-source')) {
         throw new Error('--acknowledge-local-source is valid only with OpenClaw install');
@@ -1428,6 +1428,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       const pluginOptions = {
         scope: 'active-gateway' as const,
         ...(options.values.has('openclaw-cli') ? { openclawCli: required(options, 'openclaw-cli') } : {}),
+        ...(options.values.has('timeout-ms') ? { timeoutMs: Number(required(options, 'timeout-ms')) } : {}),
         ...(options.switches.has('acknowledge-local-source') ? { acknowledgeLocalSource: true } : {}),
       };
       if (options.switches.has('print')) {

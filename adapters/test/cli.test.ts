@@ -735,13 +735,17 @@ test('OpenClaw CLI requires active-gateway scope and offers a non-mutating comma
   assert.equal(result.code, 1);
   assert.match(result.stderr, /explicit --scope active-gateway/);
 
-  result = await invoke(['openclaw', 'install', '--scope', 'active-gateway', '--print', '--acknowledge-local-source']);
+  result = await invoke(['openclaw', 'install', '--scope', 'active-gateway', '--print', '--acknowledge-local-source', '--timeout-ms', '15000']);
   assert.equal(result.code, 0, result.stderr);
   const plan = JSON.parse(result.stdout) as { result: string; commands: Array<{ executable: string; args: string[] }> };
   assert.equal(plan.result, 'planned');
   assert.equal(plan.commands.length, 2);
   assert.ok(plan.commands[0]?.args.includes('--force'));
   assert.ok(plan.commands[0]?.args.some((arg) => arg.replace(/[\\/]+$/, '').endsWith(`adapters${path.sep}openclaw-plugin`)));
+
+  result = await invoke(['openclaw', 'install', '--scope', 'active-gateway', '--print', '--timeout-ms', '999']);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /between 1000 and 600000 ms/);
 });
 
 test('OpenClaw OTLP CLI prints local-safe guidance and checks only local log metadata', async () => {

@@ -589,6 +589,17 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 	if code != 0 || unconfirmedError != "" || !strings.Contains(unconfirmedOutput, "\"permissionDecision\": \"deny\"") {
 		t.Fatalf("unconfirmed plan was not denied: code=%d stdout=%s stderr=%s", code, unconfirmedOutput, unconfirmedError)
 	}
+	opencodeWriteInput := map[string]any{
+		"hook_event_name": "PreToolUse", "tool_name": "write", "cwd": projectRoot,
+		"tool_input": map[string]any{"filePath": "src/main.go", "content": "private OpenCode source"},
+	}
+	code, opencodeUnconfirmedOutput, opencodeUnconfirmedError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "opencode", opencodeWriteInput)
+	if code != 0 || opencodeUnconfirmedError != "" || !strings.Contains(opencodeUnconfirmedOutput, `"decision": "deny"`) ||
+		strings.Contains(opencodeUnconfirmedOutput, projectRoot) || strings.Contains(opencodeUnconfirmedOutput, "private OpenCode source") {
+		t.Fatalf("unconfirmed OpenCode write was not privately denied: code=%d stdout=%s stderr=%s",
+			code, opencodeUnconfirmedOutput, opencodeUnconfirmedError)
+	}
 	copilotShellInput := map[string]any{
 		"eventName": "preToolUse", "cwd": projectRoot, "toolName": "bash",
 		"toolArgs": map[string]any{"command": "node -e write-private-sentinel"},
@@ -671,6 +682,12 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 	if !ok || blockedHook["hookEventName"] != "PreToolUse" || blockedHook["permissionDecision"] != "deny" ||
 		strings.Contains(blockedOutput, projectRoot) || strings.Contains(blockedOutput, "private source") {
 		t.Fatalf("plan-only hook response did not deny privately: %s", blockedOutput)
+	}
+	code, opencodePlanOnlyOutput, opencodePlanOnlyError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "opencode", opencodeWriteInput)
+	if code != 0 || opencodePlanOnlyError != "" || !strings.Contains(opencodePlanOnlyOutput, `"decision": "deny"`) {
+		t.Fatalf("plan-only OpenCode write was not denied: code=%d stdout=%s stderr=%s",
+			code, opencodePlanOnlyOutput, opencodePlanOnlyError)
 	}
 	code, copilotPlanOnlyShellOutput, copilotPlanOnlyShellError := runTaskPlanGuardTestHook(t, projectRoot,
 		"plan-gate-task", "plan-gate-project", "github-copilot", copilotShellInput)
@@ -769,6 +786,36 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 	code, inScopeOutput, inScopeError := runClaudeTaskPlanGuardTestHook(t, projectRoot, "plan-gate-task", "plan-gate-project", hookInput)
 	if code != 0 || inScopeError != "" || strings.Contains(inScopeOutput, "permissionDecision") {
 		t.Fatalf("in-scope hook must return no opinion, not an allow: code=%d stdout=%s stderr=%s", code, inScopeOutput, inScopeError)
+	}
+	code, opencodeInScopeOutput, opencodeInScopeError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "opencode", opencodeWriteInput)
+	var opencodeInScope map[string]any
+	if code != 0 || opencodeInScopeError != "" || json.Unmarshal([]byte(opencodeInScopeOutput), &opencodeInScope) != nil ||
+		opencodeInScope["decision"] != "allow" || strings.Contains(opencodeInScopeOutput, "private OpenCode source") {
+		t.Fatalf("in-scope OpenCode write did not return a content-free no-opinion result: code=%d stdout=%s stderr=%s",
+			code, opencodeInScopeOutput, opencodeInScopeError)
+	}
+	opencodeOutsideInput := map[string]any{
+		"hook_event_name": "PreToolUse", "tool_name": "edit", "cwd": projectRoot,
+		"tool_input": map[string]any{"filePath": "docs/readme.md", "oldString": "private", "newString": "changed"},
+	}
+	code, opencodeOutsideOutput, opencodeOutsideError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "opencode", opencodeOutsideInput)
+	if code != 0 || opencodeOutsideError != "" || !strings.Contains(opencodeOutsideOutput, `"decision": "deny"`) ||
+		strings.Contains(opencodeOutsideOutput, "docs/readme.md") || strings.Contains(opencodeOutsideOutput, "private") {
+		t.Fatalf("out-of-scope OpenCode edit was not privately denied: code=%d stdout=%s stderr=%s",
+			code, opencodeOutsideOutput, opencodeOutsideError)
+	}
+	opencodePatchInput := map[string]any{
+		"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": projectRoot,
+		"tool_input": map[string]any{"patch": "*** Begin Patch\n*** Update File: src/main.go\n@@\n-old\n+new\n*** End Patch"},
+	}
+	code, opencodePatchOutput, opencodePatchError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "opencode", opencodePatchInput)
+	if code != 0 || opencodePatchError != "" || strings.Contains(opencodePatchOutput, `"decision": "deny"`) ||
+		strings.Contains(opencodePatchOutput, "permissionDecision") {
+		t.Fatalf("in-scope OpenCode patch should return a content-free no-opinion result: code=%d stdout=%s stderr=%s",
+			code, opencodePatchOutput, opencodePatchError)
 	}
 	codexInScopeInput := map[string]any{
 		"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": projectRoot,
@@ -1224,6 +1271,8 @@ func runTaskPlanGuardTestHook(t *testing.T, projectRoot, taskID, projectID, host
 		args = append(args, "--host", host, "--threadforge-managed-antigravity-plan-gate=v1", "--threadforge-plan-gate=antigravity-v1")
 	} else if host == "cline-cli" {
 		args = append(args, "--host", host, "--threadforge-managed-cline-plan-gate=v1", "--threadforge-plan-gate=cline-v1")
+	} else if host == "opencode" {
+		args = append(args, "--host", host, "--threadforge-managed-opencode-plan-gate=v1", "--threadforge-plan-gate=opencode-v1")
 	} else {
 		args = append(args, "--threadforge-managed-claude-plan-gate=v1", "--threadforge-plan-gate=claude-v1")
 	}

@@ -37,6 +37,7 @@ type taskPlanGateAntigravityTool struct {
 
 type taskPlanGateToolInput struct {
 	FilePath   string `json:"file_path"`
+	FilePathJS string `json:"filePath"`
 	Path       string `json:"path"`
 	TargetFile string `json:"TargetFile"`
 	Patch      string `json:"patch"`
@@ -76,8 +77,12 @@ func runTaskPlanGuard(args []string, stdout, stderr io.Writer) int {
 	cursorMarker := fs.String("threadforge-managed-cursor-plan-gate", "", "required Cursor hook marker")
 	antigravityMarker := fs.String("threadforge-managed-antigravity-plan-gate", "", "required Antigravity hook marker")
 	clineMarker := fs.String("threadforge-managed-cline-plan-gate", "", "required Cline CLI plugin marker")
+	opencodeMarker := fs.String("threadforge-managed-opencode-plan-gate", "", "required OpenCode plugin marker")
 	planGateMarker := fs.String("threadforge-plan-gate", "", "required host-specific plan-gate ownership marker")
 	if err := fs.Parse(args); err != nil || *taskID == "" || *projectID == "" || *projectRoot == "" || fs.NArg() != 0 {
+		return writeTaskPlanGateResult(stdout, stderr, false, *host)
+	}
+	if *host != "opencode" && *opencodeMarker != "" {
 		return writeTaskPlanGateResult(stdout, stderr, false, *host)
 	}
 	switch *host {
@@ -111,6 +116,10 @@ func runTaskPlanGuard(args []string, stdout, stderr io.Writer) int {
 		}
 	case "cline-cli":
 		if *clineMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *geminiMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *planGateMarker != "cline-v1" {
+			return writeTaskPlanGateResult(stdout, stderr, false, *host)
+		}
+	case "opencode":
+		if *opencodeMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *geminiMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *clineMarker != "" || *planGateMarker != "opencode-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	default:
@@ -414,6 +423,8 @@ func taskPlanGateToolIsSupported(host, toolName string) bool {
 		}
 	case "cline-cli":
 		return toolName == "editor" || toolName == "apply_patch"
+	case "opencode":
+		return toolName == "write" || toolName == "edit" || toolName == "apply_patch"
 	default:
 		return false
 	}
@@ -487,6 +498,35 @@ func taskPlanGateToolTargetPaths(host, toolName string, raw json.RawMessage) ([]
 		}
 		return []string{input.Path}, true
 	}
+	if host == "opencode" {
+		if toolName == "apply_patch" {
+			if input.Patch != "" && input.Input != "" {
+				return nil, false
+			}
+			patch := input.Patch
+			if patch == "" {
+				patch = input.Input
+			}
+			return taskPlanGateCopilotPatchPaths(patch)
+		}
+		if toolName != "write" && toolName != "edit" {
+			return nil, false
+		}
+		target := ""
+		for _, candidate := range []string{input.FilePath, input.FilePathJS, input.Path} {
+			if candidate == "" {
+				continue
+			}
+			if target != "" && target != candidate {
+				return nil, false
+			}
+			target = candidate
+		}
+		if target == "" {
+			return nil, false
+		}
+		return []string{target}, true
+	}
 	if host != "github-copilot" {
 		if input.FilePath == "" {
 			return nil, false
@@ -556,6 +596,17 @@ func taskPlanGateCopilotPatchPaths(patch string) ([]string, bool) {
 }
 
 func writeTaskPlanGateResult(stdout, stderr io.Writer, withinScope bool, host string) int {
+	if host == "opencode" {
+		result := struct {
+			Decision string `json:"decision"`
+			Reason   string `json:"reason,omitempty"`
+		}{Decision: "allow"}
+		if !withinScope {
+			result.Decision = "deny"
+			result.Reason = "Threadforge withheld this OpenCode file operation; task requirements, plan decision, or implementation scope did not satisfy the configured guard."
+		}
+		return writeIndentedJSON(stdout, result, stderr)
+	}
 	if host == "cline-cli" {
 		result := struct {
 			Decision string `json:"decision"`

@@ -5,6 +5,7 @@ export type BoundedCommandOptions = {
   timeoutMs: number;
   captureStdout?: boolean;
   maxStdoutBytes?: number;
+  cwd?: string;
 };
 
 /** Run a host CLI with a wall-clock bound and terminate its process tree on Windows. */
@@ -24,6 +25,7 @@ export function runBoundedCommand(
     let child;
     try {
       child = spawn(executable, args, {
+        cwd: options.cwd,
         stdio: captureStdout ? ['ignore', 'pipe', 'ignore'] : 'inherit',
         detached: process.platform !== 'win32',
         windowsHide: true,

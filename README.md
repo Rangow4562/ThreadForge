@@ -37,7 +37,7 @@
 **Threadforge** is the local-first successor architecture unifying and advancing the capabilities of **Beacon**, **Mancode**, **AnyJev**, and **RRSI**. Its core objective is to prevent repeated failure modes across disparate AI coding agent harnesses by enforcing strict source-freshness checking, cryptographic procedure provenance, revision-controlled task state, calibrated typed decisions, and verifiable evolution loops.
 
 > [!NOTE]
-> Threadforge operates strictly **local-first** and **loopback-only** (`127.0.0.1`). It never transmits telemetry traces, private session stores, or raw credentials over external networks, and requires human-in-the-loop review for all memory promotions.
+> Threadforge is **local-first by default**. Internal intake listeners bind only to loopback (`127.0.0.1`); raw telemetry traces, private session stores, and credentials are not transmitted as telemetry. Individual inference operations may use a remote provider only through their explicit opt-in. For `memory learn`, that opt-in sends only bounded, normalized action/harness/severity/summary observations to a configured HTTPS OpenAI-compatible endpoint; raw prompts, paths, session IDs, and API keys are excluded from the request body. Review the provider's data handling before opting in. Every learned procedure remains a draft requiring held-out evaluation and human approval.
 
 ```
                       ┌──────────────────────────────────────────────┐

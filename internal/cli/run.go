@@ -2422,17 +2422,32 @@ type learningCandidateStep struct {
 	Instruction string                  `json:"instruction"`
 }
 
-type memoryLearnPythonRunner func(context.Context, string, []byte) ([]byte, error)
+type memoryLearnPythonRunner func(context.Context, string, []byte, bool) ([]byte, error)
 
 func learnMemory(args []string, stdout, stderr io.Writer) int {
 	return learnMemoryWithRunner(args, stdout, stderr, invokeMemoryLearnPython)
 }
 
-func invokeMemoryLearnPython(ctx context.Context, python string, request []byte) ([]byte, error) {
+func invokeMemoryLearnPython(ctx context.Context, python string, request []byte, remoteOptIn bool) ([]byte, error) {
 	command := exec.CommandContext(ctx, python, "-m", "threadforge_py")
-	command.Env = pythonEnvironment()
+	command.Env = memoryLearnPythonEnvironment(remoteOptIn)
 	command.Stdin = bytes.NewReader(append(request, '\n'))
 	return command.Output()
+}
+
+func memoryLearnPythonEnvironment(remoteOptIn bool) []string {
+	env := pythonEnvironment()
+	if remoteOptIn {
+		return env
+	}
+	filtered := make([]string, 0, len(env))
+	for _, entry := range env {
+		if strings.HasPrefix(strings.ToUpper(entry), "THREADFORGE_MEMORY_API_KEY=") {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
 }
 
 func learnMemoryWithRunner(args []string, stdout, stderr io.Writer, runPython memoryLearnPythonRunner) int {
@@ -2447,17 +2462,31 @@ func learnMemoryWithRunner(args []string, stdout, stderr io.Writer, runPython me
 	modelPath := fs.String("model-path", os.Getenv("THREADFORGE_MODEL_PATH"), "local HF model directory (or THREADFORGE_MODEL_PATH)")
 	device := fs.String("device", "cpu", "local inference device: cpu, mps, cuda, or cuda:N")
 	dtype := fs.String("dtype", "float32", "local model dtype: auto, float32, float16, or bfloat16")
+	remoteOptIn := fs.Bool("remote-opt-in", false, "explicitly allow remote memory-learning inference")
+	remoteEndpoint := fs.String("remote-endpoint", "", "OpenAI-compatible remote API base URL; requires --remote-opt-in")
+	remoteModel := fs.String("remote-model", "", "remote model name; requires --remote-opt-in")
 	python := fs.String("python", defaultPythonCommand(), "Python executable for the versioned JSON-stdio module")
 	actor := fs.String("actor", "local-user", "proposal author")
 	database := fs.String("db", "", "SQLite path (defaults under the local Threadforge data directory)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	localInferenceFlagSet := false
+	fs.Visit(func(current *flag.Flag) {
+		if current.Name == "model-path" || current.Name == "device" || current.Name == "dtype" {
+			localInferenceFlagSet = true
+		}
+	})
 	fromSession := strings.TrimSpace(*sessionID) != ""
 	hasInput := strings.TrimSpace(*input) != ""
 	if hasInput == fromSession || strings.TrimSpace(*projectID) == "" || fs.NArg() != 0 ||
 		(!fromSession && (*harness != "" || *tracePath != "")) {
-		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory learn (--input <events.jsonl> | --session-id <id> [--harness <name>] [--trace-path <file>]) --project-id <id> [--project-root <root>] [--model-path <local-dir>] [--device cpu] [--dtype float32] [--python python] [--actor local-user] [--db <path>]")
+		_, _ = fmt.Fprintln(stderr, "usage: threadforge memory learn (--input <events.jsonl> | --session-id <id> [--harness <name>] [--trace-path <file>]) --project-id <id> [--project-root <root>] ([--model-path <local-dir> [--device cpu] [--dtype float32]] | [--remote-opt-in --remote-endpoint <url> --remote-model <name>]) [--python python] [--actor local-user] [--db <path>]")
+		return 2
+	}
+	if (*remoteOptIn && (strings.TrimSpace(*remoteEndpoint) == "" || strings.TrimSpace(*remoteModel) == "" || localInferenceFlagSet)) ||
+		(!*remoteOptIn && (strings.TrimSpace(*remoteEndpoint) != "" || strings.TrimSpace(*remoteModel) != "")) {
+		_, _ = fmt.Fprintln(stderr, "remote learning requires --remote-opt-in with --remote-endpoint and --remote-model, and cannot be combined with local inference flags")
 		return 2
 	}
 	if *projectRoot != "" {
@@ -2468,7 +2497,7 @@ func learnMemoryWithRunner(args []string, stdout, stderr io.Writer, runPython me
 			return 2
 		}
 	}
-	if strings.TrimSpace(*modelPath) == "" {
+	if !*remoteOptIn && strings.TrimSpace(*modelPath) == "" {
 		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "local_model_not_configured", "candidate": nil}, stderr)
 	}
 	var events []beacon.Event
@@ -2523,11 +2552,17 @@ func learnMemoryWithRunner(args []string, stdout, stderr io.Writer, runPython me
 	if len(events) < 2 {
 		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "insufficient_evidence", "candidate": nil}, stderr)
 	}
+	backend := map[string]any{"type": "hf", "model_path": *modelPath, "device": *device, "dtype": *dtype}
+	if *remoteOptIn {
+		backend = map[string]any{
+			"type": "openai_compatible", "base_url": *remoteEndpoint, "model": *remoteModel, "remote_opt_in": true,
+		}
+	}
 	request := map[string]any{
 		"schema_version": "threadforge.python.v1", "request_id": "memory-learn",
 		"operation": "memory.learn", "params": map[string]any{
 			"observations": observations,
-			"backend":      map[string]any{"type": "hf", "model_path": *modelPath, "device": *device, "dtype": *dtype},
+			"backend":      backend,
 		},
 	}
 	requestBytes, err := json.Marshal(request)
@@ -2537,9 +2572,13 @@ func learnMemoryWithRunner(args []string, stdout, stderr io.Writer, runPython me
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	responseBytes, err := runPython(ctx, *python, requestBytes)
+	responseBytes, err := runPython(ctx, *python, requestBytes, *remoteOptIn)
 	if err != nil || len(responseBytes) > 1<<20 {
-		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": "local_inference_unavailable", "candidate": nil}, stderr)
+		reason := "local_inference_unavailable"
+		if *remoteOptIn {
+			reason = "remote_inference_unavailable"
+		}
+		return writeIndentedJSON(stdout, map[string]any{"status": "no_candidate", "reason": reason, "candidate": nil}, stderr)
 	}
 	var response struct {
 		SchemaVersion string `json:"schema_version"`
@@ -4604,7 +4643,7 @@ Commands:
   migrate status [--db <path>]
   migrate records --id <migration-id> [--limit 50] [--offset 0]
   migrate rollback --id <migration-id> --reason <reason> [--db <path>]
-  memory learn (--input <events.jsonl> | --session-id <id> [--harness <name>] [--trace-path <file>]) --project-id <id> [--project-root <root>] [--model-path <local-dir>] [--device cpu] [--dtype float32] [--python python] [--actor local-user] [--db <path>]
+  memory learn (--input <events.jsonl> | --session-id <id> [--harness <name>] [--trace-path <file>]) --project-id <id> [--project-root <root>] ([--model-path <local-dir> [--device cpu] [--dtype float32]] | [--remote-opt-in --remote-endpoint <url> --remote-model <name>]) [--python python] [--actor local-user] [--db <path>]
   memory export-skill --project-root <root>
   memory feedback record --project-root <root> --project-id <id> --task-id <id> --target-kind <procedure|fact|decision|policy> --target-id <id> --target-revision <n> --exposure <used|shown_not_used> --utility <helpful|neutral|harmful|not_assessed> --task-result <passed|failed|inconclusive> --harness <id> [--db <path>]
   memory feedback list --project-id <id> [--task-id <id>] [--target-kind <kind>] [--target-id <id>] [--harness <id>] [--limit 50] [--offset 0]

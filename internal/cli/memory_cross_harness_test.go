@@ -62,7 +62,10 @@ func TestMemoryLearningCrossHarnessMCPRetrieval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := func(ctx context.Context, python string, requestBytes []byte) ([]byte, error) {
+	runner := func(ctx context.Context, python string, requestBytes []byte, remoteOptIn bool) ([]byte, error) {
+		if remoteOptIn {
+			return nil, errors.New("local cross-harness learning was marked remote")
+		}
 		if python != "fixture-python" {
 			return nil, fmt.Errorf("unexpected Python command %q", python)
 		}

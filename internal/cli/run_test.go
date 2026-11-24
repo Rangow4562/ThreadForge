@@ -6814,6 +6814,97 @@ func TestMemoryLearnWithoutConfiguredLocalModelProducesNoCandidate(t *testing.T)
 	}
 }
 
+func TestMemoryLearnRemoteRequiresExplicitOptInAndCompleteConfiguration(t *testing.T) {
+	runnerCalled := false
+	runner := func(context.Context, string, []byte, bool) ([]byte, error) {
+		runnerCalled = true
+		return nil, errors.New("inference must not start")
+	}
+	for _, args := range [][]string{
+		{"--input", "unused.jsonl", "--project-id", "demo", "--remote-endpoint", "https://inference.example/v1", "--remote-model", "model"},
+		{"--input", "unused.jsonl", "--project-id", "demo", "--remote-opt-in"},
+		{"--input", "unused.jsonl", "--project-id", "demo", "--remote-opt-in", "--remote-endpoint", "https://inference.example/v1", "--remote-model", "model", "--model-path", "local-model"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := learnMemoryWithRunner(args, &stdout, &stderr, runner); code != 2 {
+			t.Fatalf("invalid remote configuration code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		}
+	}
+	if runnerCalled {
+		t.Fatal("remote inference ran without a valid explicit opt-in configuration")
+	}
+}
+
+func TestMemoryLearnRemoteOptInKeepsCredentialOutOfProtocolRequest(t *testing.T) {
+	t.Setenv("THREADFORGE_MEMORY_API_KEY", "fixture-secret-not-in-request")
+	inputPath := filepath.Join(t.TempDir(), "events.jsonl")
+	var input bytes.Buffer
+	encoder := json.NewEncoder(&input)
+	for _, action := range []string{"test.failed", "task.failed"} {
+		if err := encoder.Encode(beacon.NewEvent(beacon.NewEventOptions{
+			Action: action, Harness: beacon.HarnessInfo{Name: "codex"}, Message: "A focused test failure repeated.",
+		})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(inputPath, input.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	runner := func(ctx context.Context, python string, requestBytes []byte, remoteOptIn bool) ([]byte, error) {
+		if python != "fixture-python" || !remoteOptIn {
+			return nil, errors.New("remote inference invocation was not explicitly marked")
+		}
+		if _, ok := ctx.Deadline(); !ok {
+			return nil, errors.New("remote inference request omitted its timeout")
+		}
+		if bytes.Contains(requestBytes, []byte("fixture-secret-not-in-request")) {
+			return nil, errors.New("remote credential was serialized into the protocol request")
+		}
+		var request struct {
+			Operation string `json:"operation"`
+			Params    struct {
+				Backend map[string]any `json:"backend"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(requestBytes, &request); err != nil || request.Operation != "memory.learn" ||
+			request.Params.Backend["type"] != "openai_compatible" ||
+			request.Params.Backend["base_url"] != "https://inference.example/v1" ||
+			request.Params.Backend["model"] != "remote-model" || request.Params.Backend["remote_opt_in"] != true ||
+			len(request.Params.Backend) != 4 {
+			return nil, errors.New("memory learning sent an invalid remote backend request")
+		}
+		return []byte(`{"schema_version":"threadforge.python.v1","request_id":"memory-learn","status":"ok","result":{"status":"no_candidate","reason":"remote_inference_unavailable","candidate":null}}`), nil
+	}
+	code := learnMemoryWithRunner([]string{
+		"--input", inputPath, "--project-id", "demo", "--remote-opt-in",
+		"--remote-endpoint", "https://inference.example/v1", "--remote-model", "remote-model",
+		"--python", "fixture-python",
+	}, &stdout, &stderr, runner)
+	if code != 0 || !strings.Contains(stdout.String(), `"reason": "remote_inference_unavailable"`) ||
+		strings.Contains(stdout.String(), "fixture-secret-not-in-request") {
+		t.Fatalf("remote learning code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestMemoryLearnPythonEnvironmentWithholdsRemoteCredentialByDefault(t *testing.T) {
+	t.Setenv("THREADFORGE_MEMORY_API_KEY", "local-mode-must-not-inherit-this")
+	containsKey := func(environment []string) bool {
+		for _, entry := range environment {
+			if strings.HasPrefix(strings.ToUpper(entry), "THREADFORGE_MEMORY_API_KEY=") {
+				return true
+			}
+		}
+		return false
+	}
+	if containsKey(memoryLearnPythonEnvironment(false)) {
+		t.Fatal("local inference subprocess inherited the remote memory API key")
+	}
+	if !containsKey(memoryLearnPythonEnvironment(true)) {
+		t.Fatal("explicit remote inference did not receive its environment-only API key")
+	}
+}
+
 func TestMemoryLearnTreatsPromptTextAsUntrustedAndBlocksTraceCredentials(t *testing.T) {
 	input := filepath.Join(t.TempDir(), "events.jsonl")
 	var content bytes.Buffer
@@ -6957,9 +7048,12 @@ func TestMemoryLearnCLIStoresSourceBoundDraftWithoutSendingLocalPaths(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := func(ctx context.Context, python string, requestBytes []byte) ([]byte, error) {
+	runner := func(ctx context.Context, python string, requestBytes []byte, remoteOptIn bool) ([]byte, error) {
 		if python != "fixture-python" {
 			return nil, fmt.Errorf("unexpected python command %q", python)
+		}
+		if remoteOptIn {
+			return nil, errors.New("local inference was unexpectedly marked remote")
 		}
 		if _, ok := ctx.Deadline(); !ok {
 			return nil, errors.New("learning inference request omitted its timeout")
@@ -7061,7 +7155,7 @@ func TestMemoryLearnCLIWithRequestedBindingDoesNotPersistWithoutApplicableFiles(
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := func(context.Context, string, []byte) ([]byte, error) { return response, nil }
+	runner := func(context.Context, string, []byte, bool) ([]byte, error) { return response, nil }
 	databasePath := filepath.Join(root, "must-not-exist.sqlite")
 	var stdout, stderr bytes.Buffer
 	code := learnMemoryWithRunner([]string{

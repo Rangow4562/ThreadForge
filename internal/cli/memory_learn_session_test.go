@@ -57,7 +57,10 @@ func TestMemoryLearnFromCapturedSessionUsesBoundedPrivateObservations(t *testing
 		t.Fatal(err)
 	}
 	databasePath := filepath.Join(root, "threadforge.sqlite")
-	runner := func(ctx context.Context, python string, requestBytes []byte) ([]byte, error) {
+	runner := func(ctx context.Context, python string, requestBytes []byte, remoteOptIn bool) ([]byte, error) {
+		if remoteOptIn {
+			return nil, errors.New("local session learning was marked remote")
+		}
 		if python != "fixture-python" {
 			return nil, fmt.Errorf("unexpected python command %q", python)
 		}
@@ -158,7 +161,7 @@ func TestMemoryLearnFromCapturedSessionFailsClosedForAmbiguousOrMalformedTrace(t
 				}
 			}
 			runnerCalled := false
-			runner := func(context.Context, string, []byte) ([]byte, error) {
+			runner := func(context.Context, string, []byte, bool) ([]byte, error) {
 				runnerCalled = true
 				return nil, errors.New("must not invoke model for unsafe source")
 			}

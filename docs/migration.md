@@ -267,6 +267,8 @@ Clarification to the generic non-JSON note above: classification, typed-decision
 
 The entries below distinguish code support from migration acceptance. Some listed formats have strict, fixture-tested converters, but have not been reconciled against a populated source-state inventory; other formats or producer variants still lack complete converters. A converter or synthetic lifecycle test is not evidence that a user's data was migrated. Keep every product-level migration gate open until the actual source is snapshotted, per-format counts and hashes reconcile, conflicts and exclusions are reviewed, and rollback is verified.
 
+Read-only supplied-root recheck (November 24, 2026): `migrate inspect --product mancode --root <supplied-mancode-checkout>` and the equivalent RRSI command each reported zero files, records, and bytes, with the empty-set fingerprint `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`. `migrate sources --root <supplied-mancode-checkout>` reported `source_set_report_created=false` and only the project source role. No snapshot or apply was run. The supplied directories are code checkouts, not populated operational histories; this does not establish that separate operator-managed roots do not exist. Actual-source reconciliation remains blocked on owners providing and authenticating those roots.
+
 ### Mancode external coordination-root snapshots (fixture-verified; aggregate cutover open)
 
 The strict coordination converters can be exercised through the CLI by selecting an individual workspace directory as the Mancode source root:

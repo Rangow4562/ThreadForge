@@ -508,6 +508,54 @@ def test_opencode_v2_plugin_smoke_proves_fixture_context_delivery_not_real_infer
         validator.validate({**result, "host_cli_version": "opencode v1.18.31"})
 
 
+def test_opencode_v2_plugin_smoke_v2_requires_host_surfaced_task_plan_denial():
+    schema = json.loads((SCHEMA_DIRECTORY / "opencode-v2-plugin-smoke-v2.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.opencode-v2-plugin-smoke.v2",
+        "status": "verified",
+        "host_cli_version": "opencode v2.3.0",
+        "isolated_storage_paths_verified": True,
+        "agent_config_free_temp_ancestors_verified": True,
+        "real_user_home_path_in_host_logs": False,
+        "approved_fixture_procedure_readback_verified": True,
+        "project_plugin_setup_invoked": True,
+        "registered_hooks": ["session.prompt", "session.context", "tool.execute.before", "tool.execute.after"],
+        "context_hook_invoked_with_memory": True,
+        "retrieved_memory_received_by_loopback_provider": True,
+        "loopback_provider_requests": 5,
+        "telemetry_events_received": 3,
+        "task_plan_gate": {
+            "unconfirmed_task_write_attempted": True,
+            "before_hook_rejection_observed": True,
+            "denial_surfaced_to_host": True,
+            "sentinel_file_absent": True,
+            "write_payload_absent_from_telemetry": True,
+            "coverage_scope": "direct_file_callback_only",
+        },
+        "package_manager_invocations": 0,
+        "external_proxy_attempts": 0,
+        "real_model_invocations": 0,
+        "real_credentials_used": False,
+        "execution_authorized": False,
+    }
+    validator.validate(result)
+    for name, value in [
+        ("before_hook_rejection_observed", False),
+        ("denial_surfaced_to_host", False),
+        ("sentinel_file_absent", False),
+        ("write_payload_absent_from_telemetry", False),
+    ]:
+        with pytest.raises(ValidationError):
+            validator.validate({**result, "task_plan_gate": {**result["task_plan_gate"], name: value}})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "execution_authorized": True})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "real_model_invocations": 1})
+    with pytest.raises(ValidationError):
+        validator.validate({**result, "task_plan_gate": {**result["task_plan_gate"], "task_id": "private-task"}})
+
+
 def test_opencode_procedure_freshness_smoke_requires_fresh_and_stale_withholding_evidence():
     schema = json.loads((SCHEMA_DIRECTORY / "opencode-procedure-freshness-smoke-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

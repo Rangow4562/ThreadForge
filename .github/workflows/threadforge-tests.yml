@@ -68,7 +68,7 @@ jobs:
         run: bash scripts/verify_release_source.sh
 
   opencode-v2-plugin:
-    name: OpenCode V2 memory/context delivery (2.3.0)
+    name: OpenCode V2 memory/context and task-plan gate (2.3.0)
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
@@ -110,7 +110,7 @@ jobs:
           chmod 0755 "$executable_directory/opencode"
           printf 'THREADFORGE_OPENCODE_V2_BIN=%s\n' "$executable_directory/opencode" >> "$GITHUB_ENV"
 
-      - name: Run isolated V2 memory/context smoke with loopback provider
+      - name: Run isolated V2 memory/context and direct-file task-plan smoke
         shell: bash
         env:
           THREADFORGE_OPENCODE_V2_VERSION: '2.3.0'

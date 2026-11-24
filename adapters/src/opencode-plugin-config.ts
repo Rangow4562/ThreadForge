@@ -17,6 +17,11 @@ export interface OpenCodeMemoryPluginSettings {
   maxTaskEntries?: number;
 }
 
+export interface OpenCodePlanGatePluginSettings {
+  taskId: string;
+  projectId: string;
+}
+
 export type OpenCodePluginChange = 'installed' | 'updated' | 'unchanged' | 'removed' | 'absent';
 
 /** Installs the V1 file and V2 directory adapters without replacing unrelated OpenCode plugins. */
@@ -24,9 +29,11 @@ export async function installOpenCodeProjectPlugin(
   projectRoot: string,
   moduleSpecifier: string,
   memory?: OpenCodeMemoryPluginSettings,
+  planGate?: OpenCodePlanGatePluginSettings,
 ): Promise<OpenCodePluginChange> {
   validateModuleSpecifier(moduleSpecifier);
   if (memory) validateMemorySettings(memory);
+  if (planGate) validatePlanGateSettings(planGate);
   const filePath = await pluginPath(projectRoot, true);
   if (!filePath) throw new Error('unable to resolve OpenCode project plugin path');
   const v2FilePath = await openCodeV2PluginPath(projectRoot, true);
@@ -40,8 +47,8 @@ export async function installOpenCodeProjectPlugin(
     if (existingV2 !== undefined && !existingV2.includes(opencodeV2ManagedMarker)) {
       throw new Error('refusing to overwrite unmanaged OpenCode V2 plugin file');
     }
-    const next = renderOpenCodePlugin(moduleSpecifier, memory);
-    const nextV2 = renderOpenCodeV2Plugin(moduleSpecifier, memory);
+    const next = renderOpenCodePlugin(moduleSpecifier, memory, planGate);
+    const nextV2 = renderOpenCodeV2Plugin(moduleSpecifier, memory, planGate);
     if (existing === next && existingV2 === nextV2) return 'unchanged';
     if (existing !== next) await atomicWrite(filePath, next);
     try {
@@ -78,20 +85,17 @@ export async function removeOpenCodeProjectPlugin(projectRoot: string): Promise<
   });
 }
 
-export function renderOpenCodePlugin(moduleSpecifier: string, memory?: OpenCodeMemoryPluginSettings): string {
+export function renderOpenCodePlugin(
+  moduleSpecifier: string,
+  memory?: OpenCodeMemoryPluginSettings,
+  planGate?: OpenCodePlanGatePluginSettings,
+): string {
   validateModuleSpecifier(moduleSpecifier);
   if (memory) validateMemorySettings(memory);
+  if (planGate) validatePlanGateSettings(planGate);
   const quoted = JSON.stringify(moduleSpecifier);
-  if (memory) {
-    const options = JSON.stringify({ memory: {
-      projectId: memory.projectId,
-      maxItems: memory.maxItems ?? 8,
-      maxTokens: memory.maxTokens ?? 1600,
-      ...(memory.taskId ? { taskId: memory.taskId } : {}),
-      ...(memory.sessionId ? { sessionId: memory.sessionId } : {}),
-      ...(memory.discoverActiveTask ? { discoverActiveTask: true } : {}),
-      ...((memory.taskId || memory.discoverActiveTask) ? { maxTaskEntries: memory.maxTaskEntries ?? 6 } : {}),
-    } });
+  if (memory || planGate) {
+    const options = JSON.stringify(buildOpenCodePluginOptions(memory, planGate));
     return [
       `// ${opencodeManagedMarker}`,
       'import { createThreadforgeOpenCodeV1Plugin } from ' + quoted + ';',
@@ -111,19 +115,16 @@ export function renderOpenCodePlugin(moduleSpecifier: string, memory?: OpenCodeM
   ].join('\n');
 }
 
-export function renderOpenCodeV2Plugin(moduleSpecifier: string, memory?: OpenCodeMemoryPluginSettings): string {
+export function renderOpenCodeV2Plugin(
+  moduleSpecifier: string,
+  memory?: OpenCodeMemoryPluginSettings,
+  planGate?: OpenCodePlanGatePluginSettings,
+): string {
   validateModuleSpecifier(moduleSpecifier);
   if (memory) validateMemorySettings(memory);
+  if (planGate) validatePlanGateSettings(planGate);
   const quoted = JSON.stringify(moduleSpecifier);
-  const options = memory ? JSON.stringify({ memory: {
-    projectId: memory.projectId,
-    maxItems: memory.maxItems ?? 8,
-    maxTokens: memory.maxTokens ?? 1600,
-    ...(memory.taskId ? { taskId: memory.taskId } : {}),
-    ...(memory.sessionId ? { sessionId: memory.sessionId } : {}),
-    ...(memory.discoverActiveTask ? { discoverActiveTask: true } : {}),
-    ...((memory.taskId || memory.discoverActiveTask) ? { maxTaskEntries: memory.maxTaskEntries ?? 6 } : {}),
-  } }) : undefined;
+  const options = memory || planGate ? JSON.stringify(buildOpenCodePluginOptions(memory, planGate)) : undefined;
   return [
     `// ${opencodeV2ManagedMarker}`,
     'import { createThreadforgeOpenCodeV2Plugin } from ' + quoted + ';',
@@ -167,6 +168,32 @@ function validateMemorySettings(memory: OpenCodeMemoryPluginSettings): void {
   if (!Number.isInteger(maxTaskEntries) || maxTaskEntries < 1 || maxTaskEntries > 20) {
     throw new Error('OpenCode task-entry limit must be between 1 and 20');
   }
+}
+
+function validatePlanGateSettings(settings: OpenCodePlanGatePluginSettings): void {
+  for (const [name, value] of [['task ID', settings.taskId], ['project ID', settings.projectId]] as const) {
+    if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)) {
+      throw new Error(`OpenCode task-plan gate ${name} is invalid`);
+    }
+  }
+}
+
+function buildOpenCodePluginOptions(
+  memory?: OpenCodeMemoryPluginSettings,
+  planGate?: OpenCodePlanGatePluginSettings,
+): Record<string, unknown> {
+  return {
+    ...(memory ? { memory: {
+      projectId: memory.projectId,
+      maxItems: memory.maxItems ?? 8,
+      maxTokens: memory.maxTokens ?? 1600,
+      ...(memory.taskId ? { taskId: memory.taskId } : {}),
+      ...(memory.sessionId ? { sessionId: memory.sessionId } : {}),
+      ...(memory.discoverActiveTask ? { discoverActiveTask: true } : {}),
+      ...((memory.taskId || memory.discoverActiveTask) ? { maxTaskEntries: memory.maxTaskEntries ?? 6 } : {}),
+    } } : {}),
+    ...(planGate ? { planGate: { taskId: planGate.taskId, projectId: planGate.projectId } } : {}),
+  };
 }
 
 async function pluginPath(projectRoot: string, createDirectory: boolean): Promise<string | undefined> {

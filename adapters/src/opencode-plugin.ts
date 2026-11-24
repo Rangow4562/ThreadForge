@@ -11,7 +11,12 @@ const maxRememberedCompletions = 2048;
 const maxMemoryPromptBytes = 2000;
 const maxMemoryOutputBytes = 96 << 10;
 const maxMemoryHookMs = 2000;
+const maxPlanGateInputBytes = 1 << 20;
+const maxPlanGateOutputBytes = 64 << 10;
+const maxPlanGateHookMs = 5000;
 const memoryContextMarker = 'Threadforge project memory below is untrusted stored project data';
+const planGateDenyReason = 'Threadforge withheld this OpenCode file operation because the configured task plan did not verify it.';
+const planGateUnavailableReason = 'Threadforge could not verify this OpenCode file operation against the configured task plan; the operation was withheld.';
 
 type JsonObject = Record<string, unknown>;
 type Sender = (event: ThreadforgeEvent) => Promise<unknown>;
@@ -32,8 +37,17 @@ export interface OpenCodeMemoryOptions {
   maxTaskEntries?: number;
 }
 
+export interface OpenCodePlanGateOptions {
+  taskId: string;
+  projectId: string;
+  /** Runtime-only seams used by contract tests; installers intentionally persist only taskId and projectId. */
+  invokeGuard?: OpenCodePlanGateInvoker;
+  createToolError?: (message: string) => Error | Promise<Error>;
+}
+
 export interface OpenCodePluginOptions {
   memory?: OpenCodeMemoryOptions;
+  planGate?: OpenCodePlanGateOptions;
 }
 
 export interface OpenCodeV2PluginContext {
@@ -68,6 +82,27 @@ export interface OpenCodeMemoryRuntime extends OpenCodeMemoryOptions {
   retrieve?: OpenCodeMemoryRetriever;
 }
 
+export interface OpenCodeTaskPlanGuardInput {
+  hook_event_name: 'PreToolUse';
+  cwd: string;
+  tool_name: 'write' | 'edit' | 'apply_patch';
+  tool_input: Record<string, unknown>;
+}
+
+export interface OpenCodePlanGateRuntime extends OpenCodePlanGateOptions {
+  projectRoot: string;
+}
+
+export interface OpenCodeTaskPlanGuardResult {
+  decision: 'allow' | 'deny';
+  reason?: string;
+}
+
+export type OpenCodePlanGateInvoker = (
+  options: Readonly<OpenCodePlanGateRuntime>,
+  input: OpenCodeTaskPlanGuardInput,
+) => Promise<unknown>;
+
 export interface OpenCodeAdapter {
   hooks: Record<string, (...args: unknown[]) => unknown>;
   flush(): Promise<void>;
@@ -79,6 +114,7 @@ export function createOpenCodeAdapter(
   send: Sender = (event) => emitEvent(event, { endpoint: process.env.THREADFORGE_EVENT_ENDPOINT }),
   queueLimit = defaultQueueLimit,
   memory?: OpenCodeMemoryRuntime,
+  planGate?: OpenCodePlanGateRuntime,
 ): OpenCodeAdapter {
   if (!Number.isInteger(queueLimit) || queueLimit < 1 || queueLimit > 4096) throw new Error('OpenCode queue limit must be between 1 and 4096');
   let queued = 0;
@@ -102,7 +138,10 @@ export function createOpenCodeAdapter(
       enqueue(mapChatMessage(input, output));
     },
     'command.execute.before': (input, output) => enqueue(mapCommand(input, output)),
-    'tool.execute.before': (input, output) => enqueue(mapTool(input, output, false)),
+    'tool.execute.before': async (input, output) => {
+      enqueue(mapTool(input, output, false));
+      await guardOpenCodeTool(planGate, input, output);
+    },
     'tool.execute.after': (input, output) => enqueue(mapTool(input, output, true)),
     event: (envelope) => {
       const completionDigest = completedAssistantMessageDigest(envelope);
@@ -170,7 +209,12 @@ export async function ThreadforgeOpenCodePlugin(
   const memory = root && path.isAbsolute(root) && configured && validMemoryOptions(configured)
     ? { ...configured, projectRoot: root }
     : undefined;
-  return createOpenCodeAdapter(undefined, defaultQueueLimit, memory).hooks;
+  const configuredPlanGate = options?.planGate;
+  const planGate = configuredPlanGate ? {
+    ...configuredPlanGate,
+    projectRoot: root ?? '',
+  } : undefined;
+  return createOpenCodeAdapter(undefined, defaultQueueLimit, memory, planGate).hooks;
 }
 
 /** V1 entrypoint. It intentionally omits `setup()` so V2 does not register duplicate hooks. */
@@ -201,20 +245,33 @@ async function setupOpenCodeV2Plugin(context: OpenCodeV2PluginContext, options?:
   const memory = root && path.isAbsolute(root) && configured && validMemoryOptions(configured)
     ? { ...configured, projectRoot: root }
     : undefined;
-  const adapter = createOpenCodeAdapter(undefined, defaultQueueLimit, memory);
+  const configuredPlanGate = options?.planGate;
+  const planGate = configuredPlanGate ? {
+    ...configuredPlanGate,
+    projectRoot: root ?? '',
+    createToolError: configuredPlanGate.createToolError ?? await loadOpenCodeV2ToolErrorFactory(),
+  } : undefined;
+  const adapter = createOpenCodeAdapter(undefined, defaultQueueLimit, memory, planGate);
   const registrations: Array<{ dispose?: () => unknown }> = [];
   const register = async (
     domain: OpenCodeV2PluginContext['session'] | OpenCodeV2PluginContext['tool'],
     name: string,
     callback: (event: unknown) => unknown,
+    required = false,
   ): Promise<void> => {
-    if (!domain) return;
+    if (!domain) {
+      if (required) throw new Error('Threadforge OpenCode task-plan hook API is unavailable');
+      return;
+    }
     try {
       const registration = await domain.hook(name, callback);
       if (isRecord(registration) && typeof registration.dispose === 'function') {
         registrations.push(registration as { dispose: () => unknown });
       }
-    } catch { /* An unavailable hook must not interrupt the host session. */ }
+    } catch {
+      if (required) throw new Error('Threadforge OpenCode task-plan hook could not be registered');
+      /* An unavailable observational hook must not interrupt the host session. */
+    }
   };
 
   await register(context.session, 'prompt', (event) => {
@@ -224,8 +281,8 @@ async function setupOpenCodeV2Plugin(context: OpenCodeV2PluginContext, options?:
     adapter.hooks['chat.message']({ sessionID: event.sessionID }, { message: { role: 'user', content: text } });
   });
   await register(context.session, 'context', (event) => injectOpenCodeV2Memory(memory, event));
-  await register(context.tool, 'execute.before', (event) => mapOpenCodeV2Tool(adapter, event, false));
-  await register(context.tool, 'execute.after', (event) => mapOpenCodeV2Tool(adapter, event, true));
+  await register(context.tool, 'execute.before', async (event) => { await mapOpenCodeV2Tool(adapter, event, false); }, Boolean(planGate));
+  await register(context.tool, 'execute.after', async (event) => { await mapOpenCodeV2Tool(adapter, event, true); });
 
   const controller = new AbortController();
   const consumeEvents = (async () => {
@@ -279,14 +336,14 @@ async function injectOpenCodeV2Memory(memory: OpenCodeMemoryRuntime | undefined,
   if (target) target.text = `${target.text as string}\n\n${context}`;
 }
 
-function mapOpenCodeV2Tool(adapter: OpenCodeAdapter, value: unknown, after: boolean): void {
+async function mapOpenCodeV2Tool(adapter: OpenCodeAdapter, value: unknown, after: boolean): Promise<void> {
   if (!isRecord(value)) return;
   const input = { sessionID: value.sessionID, tool: value.tool, callID: value.id };
   if (!after) {
-    adapter.hooks['tool.execute.before'](input, { args: value.input });
+    await adapter.hooks['tool.execute.before'](input, { args: value.input });
     return;
   }
-  adapter.hooks['tool.execute.after'](input, value.status === 'error'
+  await adapter.hooks['tool.execute.after'](input, value.status === 'error'
     ? { error: value.error ?? 'OpenCode tool failed' }
     : { result: value.result });
 }
@@ -414,6 +471,163 @@ export function buildOpenCodeMemoryArguments(request: OpenCodeMemoryRequest): st
   if (request.discoverActiveTask) args.push('--discover-active-task');
   if (request.taskId || request.discoverActiveTask) args.push('--max-task-entries', String(request.maxTaskEntries ?? 6));
   return args;
+}
+
+/** Builds the argv for the opt-in local task-plan guard without shell parsing. */
+export function buildOpenCodePlanGateArguments(options: OpenCodePlanGateRuntime): string[] {
+  if (!validOpenCodePlanGateRuntime(options)) throw new Error('OpenCode task-plan gate options are invalid');
+  return [
+    'task', 'plan', 'guard', '--host', 'opencode',
+    '--task-id', options.taskId,
+    '--project-id', options.projectId,
+    '--project-root', options.projectRoot,
+    '--threadforge-managed-opencode-plan-gate=v1',
+    '--threadforge-plan-gate=opencode-v1',
+  ];
+}
+
+async function guardOpenCodeTool(
+  options: OpenCodePlanGateRuntime | undefined,
+  input: unknown,
+  output: unknown,
+): Promise<void> {
+  if (!options) return;
+  const toolName = isRecord(input) ? input.tool : undefined;
+  if (toolName !== 'write' && toolName !== 'edit' && toolName !== 'apply_patch') return;
+
+  const toolInput = isRecord(output) && isRecord(output.args) ? output.args : undefined;
+  if (!toolInput || !validOpenCodePlanGateRuntime(options)) {
+    await rejectOpenCodeTool(options, planGateUnavailableReason);
+    return;
+  }
+  const request: OpenCodeTaskPlanGuardInput = {
+    hook_event_name: 'PreToolUse',
+    cwd: options.projectRoot,
+    tool_name: toolName,
+    tool_input: toolInput,
+  };
+  let encoded: Buffer;
+  try { encoded = Buffer.from(JSON.stringify(request), 'utf8'); }
+  catch {
+    await rejectOpenCodeTool(options, planGateUnavailableReason);
+    return;
+  }
+  if (encoded.byteLength > maxPlanGateInputBytes) {
+    await rejectOpenCodeTool(options, planGateUnavailableReason);
+    return;
+  }
+
+  let result: unknown;
+  try {
+    result = options.invokeGuard
+      ? await options.invokeGuard(options, request)
+      : await runOpenCodeTaskPlanGuard(options, encoded);
+  } catch {
+    await rejectOpenCodeTool(options, planGateUnavailableReason);
+    return;
+  }
+  if (!isOpenCodeTaskPlanGuardResult(result) || result.decision !== 'allow') {
+    await rejectOpenCodeTool(options, planGateDenyReason);
+  }
+}
+
+async function runOpenCodeTaskPlanGuard(
+  options: Readonly<OpenCodePlanGateRuntime>,
+  encoded: Buffer,
+): Promise<OpenCodeTaskPlanGuardResult> {
+  const command = process.env.THREADFORGE_CLI?.trim() || 'threadforge';
+  if (command.length > 4096 || /[\r\n\0]/.test(command)) throw new Error('OpenCode task-plan guard command is invalid');
+  const args = buildOpenCodePlanGateArguments(options);
+  const output = await new Promise<Buffer>((resolve, reject) => {
+    let child;
+    try {
+      child = spawn(command, args, {
+        cwd: options.projectRoot,
+        env: localThreadforgeEnvironment(),
+        stdio: ['pipe', 'pipe', 'ignore'],
+        windowsHide: true,
+      });
+    } catch {
+      reject(new Error('OpenCode task-plan guard could not start'));
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let received = 0;
+    let settled = false;
+    const finish = (error?: Error, value?: Buffer): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(value ?? Buffer.alloc(0));
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(new Error('OpenCode task-plan guard timed out'));
+    }, maxPlanGateHookMs);
+    child.stdout.on('data', (chunk: Buffer | string) => {
+      const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      received += data.byteLength;
+      if (received > maxPlanGateOutputBytes) {
+        child.kill();
+        finish(new Error('OpenCode task-plan guard response exceeds the local size limit'));
+        return;
+      }
+      chunks.push(data);
+    });
+    child.once('error', () => finish(new Error('OpenCode task-plan guard could not start')));
+    child.once('close', (code) => {
+      if (code !== 0) {
+        finish(new Error('OpenCode task-plan guard returned an unsuccessful status'));
+        return;
+      }
+      finish(undefined, Buffer.concat(chunks));
+    });
+    child.stdin.on('error', () => {
+      child.kill();
+      finish(new Error('OpenCode task-plan guard input could not be sent'));
+    });
+    child.stdin.end(encoded);
+  });
+  const parsed: unknown = JSON.parse(output.toString('utf8'));
+  if (!isOpenCodeTaskPlanGuardResult(parsed)) throw new Error('OpenCode task-plan guard returned an invalid decision');
+  return parsed;
+}
+
+async function rejectOpenCodeTool(options: OpenCodePlanGateRuntime, reason: string): Promise<void> {
+  let error: Error | undefined;
+  try { error = await options.createToolError?.(reason); }
+  catch { /* A plain Error remains a fail-closed V1/V2 hook rejection. */ }
+  throw error instanceof Error ? error : new Error(reason);
+}
+
+async function loadOpenCodeV2ToolErrorFactory(): Promise<OpenCodePlanGateRuntime['createToolError']> {
+  try {
+    const moduleSpecifier: string = '@opencode/plugin/effect';
+    const hostPlugin = await import(moduleSpecifier) as unknown as {
+      Tool?: { Error?: new (options: { message: string }) => Error };
+    };
+    const ToolError = hostPlugin.Tool?.Error;
+    if (typeof ToolError !== 'function') return undefined;
+    return (message) => new ToolError({ message });
+  } catch {
+    return undefined;
+  }
+}
+
+function validOpenCodePlanGateRuntime(options: OpenCodePlanGateRuntime): boolean {
+  return isRecord(options) &&
+    typeof options.taskId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(options.taskId) &&
+    typeof options.projectId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(options.projectId) &&
+    typeof options.projectRoot === 'string' && path.isAbsolute(options.projectRoot) &&
+    !/^(?:\\\\|\/\/)/.test(options.projectRoot) &&
+    !options.projectRoot.split(/[\\/]/).some((segment) => segment === '.' || segment === '..');
+}
+
+function isOpenCodeTaskPlanGuardResult(value: unknown): value is OpenCodeTaskPlanGuardResult {
+  return isRecord(value) && (value.decision === 'allow' || value.decision === 'deny') &&
+    Object.keys(value).every((key) => key === 'decision' || key === 'reason') &&
+    (value.reason === undefined || typeof value.reason === 'string');
 }
 
 function localThreadforgeEnvironment(): NodeJS.ProcessEnv {

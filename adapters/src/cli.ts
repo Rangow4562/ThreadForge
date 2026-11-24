@@ -1535,7 +1535,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
       result = await removeOpenCodeProjectPlanAgent(required(options, 'project-root'));
     } else if (family === 'opencode' && (action === 'install' || action === 'update')) {
       rejectUnexpected(options,
-        ['project-root', 'module', 'memory-project-id', 'memory-max-items', 'memory-max-tokens', 'memory-task-id', 'memory-session-id', 'memory-max-task-entries'],
+        ['project-root', 'module', 'memory-project-id', 'memory-max-items', 'memory-max-tokens', 'memory-task-id', 'memory-session-id', 'memory-max-task-entries', 'plan-gate-task-id', 'plan-gate-project-id'],
         [], ['memory-discover-active-task']);
       const memoryProjectId = options.values.has('memory-project-id') ? required(options, 'memory-project-id') : undefined;
       const taskId = options.values.get('memory-task-id');
@@ -1559,8 +1559,20 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
         ...(discoverActiveTask ? { discoverActiveTask: true } : {}),
         ...(hasTaskSelection ? { maxTaskEntries: Number(options.values.get('memory-max-task-entries') ?? 6) } : {}),
       } : undefined;
-      result = await installOpenCodeProjectPlugin(projectRoot, required(options, 'module'), memory);
-      if (memory) warning = 'OpenCode approved-memory retrieval is opt-in and uses the experimental messages-transform hook. Bounded user text is sent to the local Threadforge CLI for ranking; optional task snapshots require explicit task selection or unique-task discovery, remain advisory, and do not authorize actions.';
+      const planTaskId = options.values.get('plan-gate-task-id');
+      const planProjectId = options.values.get('plan-gate-project-id');
+      if ((planTaskId === undefined) !== (planProjectId === undefined)) {
+        throw new Error('--plan-gate-task-id and --plan-gate-project-id must be supplied together');
+      }
+      const planGate = planTaskId !== undefined && planProjectId !== undefined
+        ? { taskId: planTaskId, projectId: planProjectId }
+        : undefined;
+      result = await installOpenCodeProjectPlugin(projectRoot, required(options, 'module'), memory, planGate);
+      const warnings = [
+        ...(memory ? ['OpenCode approved-memory retrieval is opt-in and uses the experimental messages-transform hook. Bounded user text is sent to the local Threadforge CLI for ranking; optional task snapshots require explicit task selection or unique-task discovery, remain advisory, and do not authorize actions.'] : []),
+        ...(planGate ? ['OpenCode task-plan gate is opt-in and best-effort for direct write/edit/apply_patch callbacks only; it does not cover shell, MCP, subagents, or TOCTOU races, and normal OpenCode permissions remain authoritative.'] : []),
+      ];
+      if (warnings.length > 0) warning = warnings.join(' ');
     } else if (family === 'opencode' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
       result = await removeOpenCodeProjectPlugin(projectRoot);
@@ -1966,7 +1978,7 @@ function usage(): string {
     '  npm run adapter -- codex sync [--codex-home <absolute-path>] [--state-path <absolute-path>] [--endpoint <loopback-v1-events-url>] [--print] [--include-content]',
     '  npm run adapter -- gemini install|update|uninstall',
     '  npm run adapter -- telemetry install|update|uninstall --host <claude-code|codex-cli>',
-    '  npm run adapter -- opencode install|update --project-root <absolute-path> --module <Threadforge-package-export-or-file-url> [--memory-project-id <id> [--memory-task-id <id> [--memory-session-id <id>] | --memory-discover-active-task] [--memory-max-items 1-32] [--memory-max-tokens 1-16000] [--memory-max-task-entries 1-20]]',
+    '  npm run adapter -- opencode install|update --project-root <absolute-path> --module <Threadforge-package-export-or-file-url> [--memory-project-id <id> [--memory-task-id <id> [--memory-session-id <id>] | --memory-discover-active-task] [--memory-max-items 1-32] [--memory-max-tokens 1-16000] [--memory-max-task-entries 1-20]] [--plan-gate-task-id <id> --plan-gate-project-id <id>]',
     '  npm run adapter -- opencode uninstall --project-root <absolute-path>',
     '  npm run adapter -- mcp install --host <claude-code|command-code|github-copilot|qoder|zcode|kimi-code|cursor|antigravity|gemini-cli|qwen-code|opencode|codex-cli|chatgpt-desktop-codex|codex-ide> --project-root <absolute-path> --command <executable> [--arg <value> ...] [--cwd <path>] [--name threadforge]',
     '  npm run adapter -- mcp update --host <claude-code|command-code|github-copilot|qoder|zcode|kimi-code|cursor|antigravity|gemini-cli|qwen-code|opencode|codex-cli|chatgpt-desktop-codex|codex-ide> --project-root <absolute-path> --command <executable> [--arg <value> ...] [--cwd <path>] [--name threadforge]',

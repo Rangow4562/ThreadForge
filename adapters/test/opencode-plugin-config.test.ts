@@ -72,6 +72,37 @@ test('renders explicitly configured bounded project-memory retrieval without ena
   assert.throws(() => renderOpenCodePlugin(packageSpecifier, { projectId: 'parser-project', maxTokens: 0 }), /limits/);
 });
 
+test('renders the task-plan gate only when explicitly configured for both plugin generations', () => {
+  const gate = { taskId: 'task-parser', projectId: 'parser-project' };
+  const v1 = renderOpenCodePlugin(packageSpecifier, undefined, gate);
+  const v2 = renderOpenCodeV2Plugin(packageSpecifier, undefined, gate);
+  assert.match(v1, /planGate":\{"taskId":"task-parser","projectId":"parser-project"\}/);
+  assert.match(v2, /planGate":\{"taskId":"task-parser","projectId":"parser-project"\}/);
+  assert.doesNotMatch(renderOpenCodePlugin(packageSpecifier), /planGate/);
+  assert.doesNotMatch(renderOpenCodeV2Plugin(packageSpecifier), /planGate/);
+  assert.throws(() => renderOpenCodePlugin(packageSpecifier, undefined, { taskId: '', projectId: 'parser-project' }), /task ID/);
+  assert.throws(() => renderOpenCodeV2Plugin(packageSpecifier, undefined, { taskId: 'task-parser', projectId: 'API_TOKEN=secret' }), /project ID/);
+});
+
+test('installs and updates the opt-in task-plan gate without touching sibling plugins', async () => {
+  await withProject(async (root) => {
+    const sibling = path.join(root, '.opencode', 'plugins', 'user-plugin.ts');
+    await mkdir(path.dirname(sibling), { recursive: true });
+    await writeFile(sibling, 'export const UserPlugin = async () => ({});\n');
+    const gate = { taskId: 'task-parser', projectId: 'parser-project' };
+    assert.equal(await installOpenCodeProjectPlugin(root, packageSpecifier, undefined, gate), 'installed');
+    const firstV1 = await readFile(pluginPath(root), 'utf8');
+    const firstV2 = await readFile(v2PluginPath(root), 'utf8');
+    assert.match(firstV1, /planGate":\{"taskId":"task-parser","projectId":"parser-project"\}/);
+    assert.match(firstV2, /planGate":\{"taskId":"task-parser","projectId":"parser-project"\}/);
+    assert.equal(await installOpenCodeProjectPlugin(root, packageSpecifier, undefined, gate), 'unchanged');
+    assert.equal(await installOpenCodeProjectPlugin(root, packageSpecifier), 'updated');
+    assert.doesNotMatch(await readFile(pluginPath(root), 'utf8'), /planGate/);
+    assert.doesNotMatch(await readFile(v2PluginPath(root), 'utf8'), /planGate/);
+    assert.equal(await readFile(sibling, 'utf8'), 'export const UserPlugin = async () => ({});\n');
+  });
+});
+
 test('refuses to overwrite an unmanaged plugin and leaves its bytes unchanged', async () => {
   await withProject(async (root) => {
     const file = pluginPath(root);

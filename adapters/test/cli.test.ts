@@ -853,9 +853,11 @@ test('adapter CLI installs and uninstalls the isolated OpenCode project plugin',
       'opencode', 'update', '--project-root', root, '--module', moduleSpecifier,
       '--memory-project-id', 'parser-project', '--memory-max-items', '4', '--memory-max-tokens', '900',
       '--memory-task-id', 'task-parser', '--memory-session-id', 'session-parser', '--memory-max-task-entries', '3',
+      '--plan-gate-task-id', 'task-parser', '--plan-gate-project-id', 'parser-project',
     ]);
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, /experimental messages-transform hook/);
+    assert.match(result.stdout, /best-effort for direct write\/edit\/apply_patch callbacks only/);
     const configuredMemory = await readFile(pluginPath, 'utf8');
     assert.match(configuredMemory, /projectId":"parser-project"/);
     assert.match(configuredMemory, /maxItems":4/);
@@ -863,6 +865,9 @@ test('adapter CLI installs and uninstalls the isolated OpenCode project plugin',
     assert.match(configuredMemory, /taskId":"task-parser"/);
     assert.match(configuredMemory, /sessionId":"session-parser"/);
     assert.match(configuredMemory, /maxTaskEntries":3/);
+    assert.match(configuredMemory, /planGate":\{"taskId":"task-parser","projectId":"parser-project"\}/);
+    const configuredV2 = await readFile(path.join(root, '.opencode', 'plugins', 'threadforge-v2', 'index.ts'), 'utf8');
+    assert.match(configuredV2, /planGate":\{"taskId":"task-parser","projectId":"parser-project"\}/);
     result = await invoke([
       'opencode', 'update', '--project-root', root, '--module', moduleSpecifier,
       '--memory-project-id', 'parser-project', '--memory-discover-active-task', '--memory-max-task-entries', '2',
@@ -871,6 +876,13 @@ test('adapter CLI installs and uninstalls the isolated OpenCode project plugin',
     const discoveredMemory = await readFile(pluginPath, 'utf8');
     assert.match(discoveredMemory, /discoverActiveTask":true/);
     assert.match(discoveredMemory, /maxTaskEntries":2/);
+    assert.doesNotMatch(discoveredMemory, /planGate/);
+    result = await invoke([
+      'opencode', 'update', '--project-root', root, '--module', moduleSpecifier,
+      '--plan-gate-task-id', 'task-parser',
+    ]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /must be supplied together/);
     result = await invoke([
       'opencode', 'update', '--project-root', root, '--module', moduleSpecifier,
       '--memory-project-id', 'parser-project', '--memory-task-id', 'task-parser', '--memory-discover-active-task',

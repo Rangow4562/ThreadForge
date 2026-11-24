@@ -368,6 +368,8 @@ def test_opencode_task_resume_smoke_schema_records_guidance_without_task_content
     with pytest.raises(ValidationError):
         validator.validate({**result, "execution_authorized": True})
     with pytest.raises(ValidationError):
+        validator.validate({**result, "real_model_invocations": 1})
+    with pytest.raises(ValidationError):
         validator.validate({**result, "task_id": "opencode-mcp-resume-smoke-task"})
     with pytest.raises(ValidationError):
         validator.validate({**result, "plugin_event_delivery": {
@@ -554,6 +556,57 @@ def test_opencode_v2_plugin_smoke_v2_requires_host_surfaced_task_plan_denial():
         validator.validate({**result, "real_model_invocations": 1})
     with pytest.raises(ValidationError):
         validator.validate({**result, "task_plan_gate": {**result["task_plan_gate"], "task_id": "private-task"}})
+
+
+def test_cross_harness_procedure_capture_smoke_requires_installed_trace_and_advisory_retrieval():
+    schema = json.loads((SCHEMA_DIRECTORY / "cross-harness-procedure-capture-smoke-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.cross-harness-procedure-capture-smoke.v1",
+        "status": "verified",
+        "capture_harness": "opencode",
+        "capture_host_version": "opencode 1.18.31",
+        "installed_host_events_observed": 5,
+        "prompt_event_observed": True,
+        "tool_invocation_and_completion_observed": True,
+        "trace_digest_bound_to_draft": True,
+        "trace_file_removed_after_import": True,
+        "raw_trace_content_retained": False,
+        "procedure_text_is_synthetic_fixture": True,
+        "procedure_approved_in_isolated_store": True,
+        "approval_and_validation_are_synthetic_fixtures": True,
+        "retrieval_harness": "antigravity",
+        "retrieval_host_version": "agy 1.5.16",
+        "installed_retrieval_verified": True,
+        "retrieval_markers_verified": True,
+        "authorization_grant_absent": True,
+        "retrieval_freshness": "verified",
+        "guidance_only": True,
+        "action_ready": False,
+        "execution_authorized": False,
+        "validation_is_acceptance_evidence": False,
+        "cutover_evidence_eligible": False,
+        "real_model_invocations": 0,
+    }
+    validator.validate(result)
+    for invalid in (
+        {**result, "installed_host_events_observed": 0},
+        {**result, "trace_file_removed_after_import": False},
+        {**result, "raw_trace_content_retained": True},
+        {**result, "procedure_text_is_synthetic_fixture": False},
+        {**result, "approval_and_validation_are_synthetic_fixtures": False},
+        {**result, "installed_retrieval_verified": False},
+        {**result, "retrieval_markers_verified": False},
+        {**result, "authorization_grant_absent": False},
+        {**result, "execution_authorized": True},
+        {**result, "validation_is_acceptance_evidence": True},
+        {**result, "cutover_evidence_eligible": True},
+        {**result, "procedure_id": "private-procedure-id"},
+        {**result, "local_trace_path": "C:/private/events.jsonl"},
+        {**result, "real_model_invocations": 1},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
 
 
 def test_opencode_procedure_freshness_smoke_requires_fresh_and_stale_withholding_evidence():

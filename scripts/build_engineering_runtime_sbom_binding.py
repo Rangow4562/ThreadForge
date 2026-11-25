@@ -129,9 +129,10 @@ def build_binding(
 
     receipt = _read_json(build_receipt, limit=MAX_RECEIPT_BYTES, description="Engineering image build receipt")
     if not isinstance(receipt, dict) or receipt != {
-        "schema_version": "threadforge.engineering-image-build.v1",
+        "schema_version": "threadforge.engineering-image-build.v2",
         "platform": "linux/amd64",
         "image_id": receipt.get("image_id") if isinstance(receipt, dict) else None,
+        "image_config_digest": receipt.get("image_config_digest") if isinstance(receipt, dict) else None,
         "tag": expected_tag,
         "base_image": base_image,
         "runtime_requirements_sha256": receipt.get("runtime_requirements_sha256") if isinstance(receipt, dict) else None,
@@ -142,6 +143,8 @@ def build_binding(
         raise EngineeringSBOMError("Engineering image receipt does not match the expected safe build contract")
     if not isinstance(receipt.get("image_id"), str) or not IMAGE_ID_RE.fullmatch(receipt["image_id"]):
         raise EngineeringSBOMError("Engineering image receipt has an invalid immutable image ID")
+    if not isinstance(receipt.get("image_config_digest"), str) or not IMAGE_ID_RE.fullmatch(receipt["image_config_digest"]):
+        raise EngineeringSBOMError("Engineering image receipt has an invalid immutable image config digest")
 
     runtime_hash, _ = _sha256(runtime_lock, limit=16 * 1024 * 1024)
     build_hash, _ = _sha256(build_lock, limit=4 * 1024 * 1024)
@@ -168,13 +171,14 @@ def build_binding(
         raise EngineeringSBOMError("Syft output is not a bounded, non-empty SPDX 2.3 package inventory")
 
     binding = {
-        "schema_version": "threadforge.engineering-image-sbom-binding.v1",
+        "schema_version": "threadforge.engineering-image-sbom-binding.v2",
         "release_version": version,
         "source_commit": source_commit,
         "source_ref": source_ref,
         "platform": "linux/amd64",
         "image_tag": image_tag,
         "image_id": receipt["image_id"],
+        "image_config_digest": receipt["image_config_digest"],
         "base_image": base_image,
         "runtime_requirements_sha256": runtime_hash,
         "build_requirements_sha256": build_hash,
@@ -211,6 +215,7 @@ def build_binding(
         "binding": binding_name,
         "checksums": checksums_path.name,
         "image_id": receipt["image_id"],
+        "image_config_digest": receipt["image_config_digest"],
         "package_record_count": len(packages),
         "license_review_required": True,
         "release_clearance": False,

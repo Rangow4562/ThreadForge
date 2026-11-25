@@ -67,8 +67,8 @@ def _docker_archive(path, *, tag=TAG, unsafe_member=None):
         "rootfs": {"type": "layers", "diff_ids": [f"sha256:{hashlib.sha256(layer_data).hexdigest()}"]},
     }
     config_bytes = json.dumps(config, separators=(",", ":")).encode()
-    image_id = f"sha256:{hashlib.sha256(config_bytes).hexdigest()}"
-    config_name = f"{image_id.removeprefix('sha256:')}.json"
+    image_config_digest = f"sha256:{hashlib.sha256(config_bytes).hexdigest()}"
+    config_name = f"{image_config_digest.removeprefix('sha256:')}.json"
     manifest = [{"Config": config_name, "RepoTags": [tag], "Layers": ["layer.tar"]}]
     with tarfile.open(path, mode="w") as archive:
         for name, data in {
@@ -85,27 +85,31 @@ def _docker_archive(path, *, tag=TAG, unsafe_member=None):
             info.size = 0
             info.mode = 0o644
             archive.addfile(info, io.BytesIO())
-    return image_id
+    # Docker may report the attested image-index digest as its local image ID,
+    # while `docker save` contains only the runnable config and layers.
+    image_id = f"sha256:{hashlib.sha256(b'synthetic image index').hexdigest()}"
+    return image_id, image_config_digest
 
 
 def _checksums(bundle):
     names = [ARCHIVE_NAME, SBOM_NAME, f"threadforge_{VERSION}_engineering_linux_amd64.binding.json"]
     lines = [f"{_hash(bundle / name)}  {name}" for name in sorted(names)]
-    (bundle / "checksums.txt").write_text("\n".join(lines) + "\n", encoding="ascii")
+    (bundle / "checksums.txt").write_text("\n".join(lines) + "\n", encoding="ascii", newline="\n")
 
 
 def _fixture(tmp_path, *, tag=TAG, unsafe_member=None, sbom=None):
     bundle = tmp_path / "artifact"
     bundle.mkdir(parents=True)
     archive = bundle / ARCHIVE_NAME
-    image_id = _docker_archive(archive, tag=tag, unsafe_member=unsafe_member)
+    image_id, image_config_digest = _docker_archive(archive, tag=tag, unsafe_member=unsafe_member)
     sbom_path = bundle / SBOM_NAME
     sbom_path.write_text(json.dumps(sbom if sbom is not None else CANDIDATE_TESTS.python_lock_sbom()), encoding="utf-8")
     receipt = tmp_path / "image-build-receipt.json"
     receipt.write_text(json.dumps({
-        "schema_version": "threadforge.engineering-image-build.v1",
+        "schema_version": "threadforge.engineering-image-build.v2",
         "platform": "linux/amd64",
         "image_id": image_id,
+        "image_config_digest": image_config_digest,
         "tag": TAG,
         "base_image": (ROOT / "containers" / "engineering" / "base-image.txt").read_text(encoding="utf-8").strip(),
         "runtime_requirements_sha256": _hash(ROOT / "containers" / "engineering" / "requirements-linux-x86_64-py312.lock"),
@@ -162,9 +166,11 @@ def _verify(bundle, fake=None):
 def test_builds_and_verifies_source_bound_engineering_image_sbom(tmp_path):
     bundle = _fixture(tmp_path)
     fake = FakeGitHub()
+    binding = json.loads((bundle / f"threadforge_{VERSION}_engineering_linux_amd64.binding.json").read_text(encoding="utf-8"))
 
     result = _verify(bundle, fake)
 
+    assert binding["image_id"] != binding["image_config_digest"]
     assert result["schema_version"] == "threadforge.engineering-runtime-sbom-verification.v1"
     assert result["image_archive_verified"] is True
     assert result["spdx_schema_verified"] is True
@@ -237,6 +243,32 @@ def test_rejects_wrong_image_tag_and_unsafe_docker_archive_members(tmp_path):
     unsafe_bundle = _fixture(tmp_path / "unsafe", unsafe_member="../escape")
     with pytest.raises(VERIFIER.EngineeringRuntimeSBOMError, match="unsafe member path"):
         _verify(unsafe_bundle)
+
+
+def test_rejects_archive_when_build_config_digest_does_not_match(tmp_path):
+    bundle = _fixture(tmp_path)
+    binding_path = bundle / f"threadforge_{VERSION}_engineering_linux_amd64.binding.json"
+    binding = json.loads(binding_path.read_text(encoding="utf-8"))
+    binding["image_config_digest"] = "sha256:" + "0" * 64
+    binding_path.write_text(json.dumps(binding, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    _checksums(bundle)
+
+    with pytest.raises(VERIFIER.EngineeringRuntimeSBOMError, match="build config digest"):
+        _verify(bundle)
+
+
+def test_verifies_legacy_v1_binding_using_image_id_as_config_digest(tmp_path):
+    bundle = _fixture(tmp_path)
+    binding_path = bundle / f"threadforge_{VERSION}_engineering_linux_amd64.binding.json"
+    binding = json.loads(binding_path.read_text(encoding="utf-8"))
+    binding["schema_version"] = "threadforge.engineering-image-sbom-binding.v1"
+    binding["image_id"] = binding.pop("image_config_digest")
+    binding_path.write_text(json.dumps(binding, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    _checksums(bundle)
+
+    result = _verify(bundle)
+
+    assert result["image_archive_verified"] is True
 
 
 def test_rejects_source_or_license_clearance_claims_in_binding(tmp_path):

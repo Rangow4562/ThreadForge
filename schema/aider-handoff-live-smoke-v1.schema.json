@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/aider-handoff-live-smoke-v1.schema.json",
+  "title": "Threadforge Aider live handoff smoke receipt v1",
+  "description": "Path-free result of a local Aider startup smoke using only a synthetic handoff brief and a loopback-only provider endpoint.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "aider_version",
+    "threadforge_exit_code",
+    "read_only_load_confirmed",
+    "synthetic_brief_created",
+    "source_trace_unchanged",
+    "fixture_marker_echoed",
+    "api_base_scope",
+    "model_prompt_submitted",
+    "user_configuration_isolated"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.aider-handoff-live-smoke.v1" },
+    "status": { "enum": ["passed", "failed"] },
+    "aider_version": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^aider .+" },
+    "threadforge_exit_code": { "type": "integer", "minimum": -1, "maximum": 255 },
+    "read_only_load_confirmed": { "type": "boolean" },
+    "synthetic_brief_created": { "type": "boolean" },
+    "source_trace_unchanged": { "type": "boolean" },
+    "fixture_marker_echoed": { "type": "boolean" },
+    "api_base_scope": { "const": "loopback_fixture_only" },
+    "model_prompt_submitted": { "const": false },
+    "user_configuration_isolated": { "const": true }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "status": { "const": "passed" },
+        "threadforge_exit_code": { "const": 0 },
+        "read_only_load_confirmed": { "const": true },
+        "synthetic_brief_created": { "const": true },
+        "source_trace_unchanged": { "const": true },
+        "fixture_marker_echoed": { "const": false }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "failed" }
+      }
+    }
+  ]
+}

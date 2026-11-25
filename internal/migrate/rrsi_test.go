@@ -44,7 +44,9 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 		},
 	}
 	for domain, result := range taskResults {
-		writeMancodeJSONFixture(t, root, filepath.ToSlash(filepath.Join("runs", domain, "jobs", "base", "eval.json")), result)
+		job := result.(map[string]any)["job"].(string)
+		relative := filepath.ToSlash(filepath.Join("runs", domain, "jobs", job, "eval.json"))
+		writeMancodeJSONFixture(t, root, relative, result)
 	}
 	writeMancodeJSONFixture(t, root, "runs/coding/calibration.json", map[string]any{
 		"delta": 0.02, "z": 2.0, "sd_null": 0.01, "sd_null_bootstrap": 0.012, "se_bootstrap": 0.008,
@@ -99,7 +101,28 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 		if record.Scope != "local_pending_review" {
 			t.Fatalf("RRSI result became active evidence: %#v", record)
 		}
-		if record.Type == "rrsi_evaluation_result" {
+		if record.Type == "rrsi_evaluation_result" || record.Type == "rrsi_heldout_evaluation_result" {
+			evaluationPayload := record.Payload
+			if record.Type == "rrsi_heldout_evaluation_result" {
+				var heldout struct {
+					SchemaVersion              string          `json:"schema_version"`
+					EvaluationScope            string          `json:"evaluation_scope"`
+					HumanReviewRequired        bool            `json:"human_review_required"`
+					IndependentHoldoutVerified bool            `json:"independent_holdout_verified"`
+					ExecutionVerified          bool            `json:"execution_verified"`
+					CutoverEvidenceEligible    bool            `json:"cutover_evidence_eligible"`
+					Evaluation                 json.RawMessage `json:"evaluation"`
+				}
+				if err := json.Unmarshal(record.Payload, &heldout); err != nil {
+					t.Fatal(err)
+				}
+				if heldout.SchemaVersion != rrsiHeldoutEvaluationSchema || heldout.EvaluationScope != "declared_heldout_job_label" ||
+					!heldout.HumanReviewRequired || heldout.IndependentHoldoutVerified || heldout.ExecutionVerified ||
+					heldout.CutoverEvidenceEligible || len(heldout.Evaluation) == 0 {
+					t.Fatalf("RRSI held-out label became verified or cutover-eligible evidence: %#v", heldout)
+				}
+				evaluationPayload = heldout.Evaluation
+			}
 			var payload struct {
 				SchemaVersion string             `json:"schema_version"`
 				Domain        string             `json:"domain"`
@@ -119,7 +142,7 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 					} `json:"metrics"`
 				} `json:"per_task"`
 			}
-			if err := json.Unmarshal(record.Payload, &payload); err != nil {
+			if err := json.Unmarshal(evaluationPayload, &payload); err != nil {
 				t.Fatal(err)
 			}
 			if payload.SchemaVersion != rrsiEvaluationImportSchema {
@@ -182,6 +205,83 @@ func TestRRSIDomainEvaluationsAndRunHistoryAreSanitizedAndTyped(t *testing.T) {
 	for _, kind := range []string{"noise_calibration", "evolution_frontier", "rrsi_edit_history", "rrsi_attribution", "rrsi_selection_decision"} {
 		if !gotTypes[kind] {
 			t.Errorf("RRSI snapshot is missing typed record %q", kind)
+		}
+	}
+	if !gotTypes["rrsi_heldout_evaluation_result"] {
+		t.Error("RRSI held-out-labelled run did not get its non-authorizing record type")
+	}
+}
+
+func TestRRSIEvaluationJobMustMatchSourcePath(t *testing.T) {
+	for _, test := range []struct {
+		path string
+		job  string
+	}{
+		{path: "runs/workspace/jobs/base/eval.json", job: "heldout_champ"},
+		{path: "runs/workspace/jobs/heldout_champ/eval.json", job: "heldout_other"},
+		{path: "runs/coding/r0/A/eval.json", job: "r0B"},
+	} {
+		_, recognized, err := normalizeRRSIItems(test.path, map[string]any{"job": test.job})
+		if !recognized || err == nil {
+			t.Errorf("RRSI evaluation path/job mismatch was accepted: path=%q job=%q recognized=%t err=%v",
+				test.path, test.job, recognized, err)
+		}
+	}
+}
+
+func TestRRSICustomRunsRootImportReadback(t *testing.T) {
+	root := t.TempDir()
+	writeMancodeJSONFixture(t, root, "coding/jobs/base/eval.json", map[string]any{
+		"job": "base", "k": 1, "S": 1.0, "C": nil, "n_expected": 1, "missing": 0,
+		"extra": map[string]any{"total_passes": 1, "n_trials": 1, "pass_rate": 1.0},
+		"per_task": map[string]any{"task-1": map[string]any{
+			"rewards": []any{1.0}, "weights": []any{1.0}, "tokens": []any{nil}, "missing": 0,
+		}},
+	})
+
+	inspected, err := Inspect(RRSI, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspected.Summary.FilesScanned != 1 || inspected.Summary.RecordsImported != 1 || inspected.Summary.RecordsRejected != 0 {
+		t.Fatalf("explicit RRSI --runs root did not reconcile: %#v", inspected.Summary)
+	}
+
+	dataRoot := t.TempDir()
+	snapshot, err := CreateSnapshot(RRSI, root, dataRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dataRoot, "migrations", "snapshots", string(RRSI), snapshot.SourceFingerprint, "manifest.json")
+	records, err := ReadSnapshotRecords(manifestPath, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Type != "rrsi_evaluation_result" || records[0].Scope != "local_pending_review" {
+		t.Fatalf("custom --runs root changed RRSI projection or review scope: %#v", records)
+	}
+}
+
+func TestRRSICustomRunsRootRecognitionIsTopLevelOnly(t *testing.T) {
+	for _, test := range []struct {
+		path   string
+		domain string
+		valid  bool
+	}{
+		{path: "coding/jobs/base/eval.json", domain: "coding", valid: true},
+		{path: "Workspace/r0/A/eval.json", domain: "workspace", valid: true},
+		{path: "eng/global_analysis.json", domain: "eng", valid: true},
+		{path: "nested/coding/jobs/base/eval.json", valid: false},
+		{path: "codingish/jobs/base/eval.json", valid: false},
+		{path: "nested/runs/coding/jobs/base/eval.json", domain: "coding", valid: true},
+	} {
+		domain, ok := rrsiDomain(test.path)
+		if ok != test.valid || (ok && domain != test.domain) {
+			t.Errorf("rrsiDomain(%q) = (%q, %t), expected (%q, %t)", test.path, domain, ok, test.domain, test.valid)
+		}
+		_, tailOK := rrsiRunTailOriginal(test.path)
+		if tailOK != test.valid {
+			t.Errorf("rrsiRunTailOriginal(%q) recognized=%t, expected %t", test.path, tailOK, test.valid)
 		}
 	}
 }

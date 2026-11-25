@@ -11,6 +11,8 @@ import (
 
 const (
 	rrsiEvaluationImportSchema  = "threadforge.rrsi-evaluation.v1"
+	rrsiHeldoutEvaluationSchema = "threadforge.rrsi-heldout-evaluation.v1"
+	rrsiHeldoutEvaluationType   = "rrsi_heldout_evaluation_result"
 	rrsiFrontierImportSchema    = "threadforge.rrsi-frontier.v1"
 	rrsiCalibrationImportSchema = "threadforge.rrsi-noise-calibration.v1"
 	rrsiHistoryImportSchema     = "threadforge.rrsi-edit-history.v1"
@@ -31,8 +33,33 @@ func normalizeRRSIItems(relative string, value any) ([]normalizedItem, bool, err
 		if !supportedDomain {
 			return nil, true, errors.New("RRSI evaluation is outside a supported domain directory")
 		}
+		pathJob, jobScoped, err := rrsiEvaluationJobForPath(relative)
+		if err != nil {
+			return nil, true, err
+		}
+		if jobScoped {
+			source, ok := rrsiObject(value)
+			job, jobOK := source["job"].(string)
+			if !ok || !jobOK || job != pathJob {
+				return nil, true, errors.New("RRSI evaluation job does not match its source path")
+			}
+		}
 		payload, err := normalizeRRSIEvaluation(domain, value)
-		return []normalizedItem{{Type: "rrsi_evaluation_result", Payload: payload}}, true, err
+		if err != nil {
+			return nil, true, err
+		}
+		recordType := "rrsi_evaluation_result"
+		if jobScoped && strings.HasPrefix(strings.ToLower(pathJob), "heldout_") {
+			if strings.TrimSpace(pathJob[len("heldout_"):]) == "" {
+				return nil, true, errors.New("RRSI held-out evaluation label is empty")
+			}
+			payload, err = normalizeRRSIHeldoutEvaluation(payload)
+			if err != nil {
+				return nil, true, err
+			}
+			recordType = rrsiHeldoutEvaluationType
+		}
+		return []normalizedItem{{Type: recordType, Payload: payload}}, true, nil
 	case "calibration.json":
 		if !supportedDomain {
 			return nil, true, errors.New("RRSI calibration is outside a supported domain directory")
@@ -68,51 +95,111 @@ func normalizeRRSIItems(relative string, value any) ([]normalizedItem, bool, err
 	}
 }
 
+func rrsiEvaluationRecordTypeForPath(relative string) string {
+	job, scoped, err := rrsiEvaluationJobForPath(relative)
+	if err == nil && scoped && len(job) > len("heldout_") &&
+		strings.HasPrefix(strings.ToLower(job), "heldout_") {
+		return rrsiHeldoutEvaluationType
+	}
+	return "rrsi_evaluation_result"
+}
+
+func rrsiEvaluationJobForPath(relative string) (string, bool, error) {
+	tail, ok := rrsiRunTailOriginal(relative)
+	if !ok || len(tail) != 3 || !strings.EqualFold(tail[2], "eval.json") {
+		return "", false, nil
+	}
+	if strings.EqualFold(tail[0], "jobs") {
+		if strings.TrimSpace(tail[1]) == "" {
+			return "", true, errors.New("RRSI evaluation job path is empty")
+		}
+		return tail[1], true, nil
+	}
+	if isRRSIRoundName(tail[0]) {
+		if len(tail[1]) != 1 || !isRRSIEvaluationVariant(tail[1][0]) {
+			return "", true, errors.New("RRSI round evaluation variant path is invalid")
+		}
+		return tail[0] + tail[1], true, nil
+	}
+	return "", false, nil
+}
+
+func isRRSIEvaluationVariant(value byte) bool {
+	if value >= 'a' && value <= 'h' {
+		value -= 'a' - 'A'
+	}
+	return value >= 'A' && value <= 'H'
+}
+
+func normalizeRRSIHeldoutEvaluation(evaluation json.RawMessage) (json.RawMessage, error) {
+	return rrsiMarshal(map[string]any{
+		"schema_version":               rrsiHeldoutEvaluationSchema,
+		"evaluation_scope":             "declared_heldout_job_label",
+		"human_review_required":        true,
+		"independent_holdout_verified": false,
+		"execution_verified":           false,
+		"cutover_evidence_eligible":    false,
+		"evaluation":                   evaluation,
+	})
+}
+
 func rrsiDomain(relative string) (string, bool) {
-	parts := strings.Split(strings.ToLower(filepath.ToSlash(relative)), "/")
+	parts, domainIndex, ok := rrsiDomainPathParts(relative)
+	if !ok {
+		return "", false
+	}
+	return strings.ToLower(parts[domainIndex]), true
+}
+
+// rrsiDomainPathParts accepts both repository-relative runs/<domain>/... paths
+// and paths relative to an explicitly supplied RRSI --runs directory, where
+// <domain>/... is the first component. The direct form is deliberately limited
+// to the root component so unrelated nested directories are not classified as
+// RRSI run artifacts.
+func rrsiDomainPathParts(relative string) ([]string, int, bool) {
+	parts := strings.Split(filepath.ToSlash(relative), "/")
 	for i, part := range parts {
-		if part != "runs" || i+1 >= len(parts) {
+		if !strings.EqualFold(part, "runs") {
 			continue
 		}
-		domain := parts[i+1]
-		switch domain {
-		case "coding", "workspace", "eng":
-			return domain, true
-		default:
-			return "", false
+		if i+1 < len(parts) && isRRSIDomainName(parts[i+1]) {
+			return parts, i + 1, true
 		}
+		return nil, 0, false
 	}
-	return "", false
+	if len(parts) > 1 && isRRSIDomainName(parts[0]) {
+		return parts, 0, true
+	}
+	return nil, 0, false
+}
+
+func isRRSIDomainName(value string) bool {
+	switch strings.ToLower(value) {
+	case "coding", "workspace", "eng":
+		return true
+	default:
+		return false
+	}
 }
 
 func rrsiRunTail(relative string) ([]string, bool) {
-	parts := strings.Split(strings.ToLower(filepath.ToSlash(relative)), "/")
-	for i, part := range parts {
-		if part != "runs" || i+2 > len(parts) {
-			continue
-		}
-		domain := parts[i+1]
-		if domain != "coding" && domain != "workspace" && domain != "eng" {
-			return nil, false
-		}
-		return parts[i+2:], true
+	parts, domainIndex, ok := rrsiDomainPathParts(relative)
+	if !ok {
+		return nil, false
 	}
-	return nil, false
+	lowerParts := make([]string, len(parts))
+	for i, part := range parts {
+		lowerParts[i] = strings.ToLower(part)
+	}
+	return lowerParts[domainIndex+1:], true
 }
 
 func rrsiRunTailOriginal(relative string) ([]string, bool) {
-	parts := strings.Split(filepath.ToSlash(relative), "/")
-	for i, part := range parts {
-		if !strings.EqualFold(part, "runs") || i+2 > len(parts) {
-			continue
-		}
-		domain := strings.ToLower(parts[i+1])
-		if domain != "coding" && domain != "workspace" && domain != "eng" {
-			return nil, false
-		}
-		return parts[i+2:], true
+	parts, domainIndex, ok := rrsiDomainPathParts(relative)
+	if !ok {
+		return nil, false
 	}
-	return nil, false
+	return parts[domainIndex+1:], true
 }
 
 func isRRSIRawTrialArtifactPath(relative string) bool {

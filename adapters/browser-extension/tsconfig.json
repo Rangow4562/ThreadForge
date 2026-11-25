@@ -11,5 +11,5 @@
     "noEmit": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src/**/*.ts", "e2e/**/*.ts", "test/**/*.ts", "tools/**/*.ts", "playwright.config.ts", "vitest.config.ts", "esbuild.config.mjs"]
+  "include": ["src/**/*.ts", "e2e/**/*.ts", "test/**/*.ts", "tools/**/*.ts", "playwright.config.ts", "playwright.unit.config.ts", "esbuild.config.mjs"]
 }

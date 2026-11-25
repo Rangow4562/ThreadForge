@@ -1172,6 +1172,7 @@ try {
     .split(/\r?\n/).find((line) => /threadforge/i.test(line));
   assert.ok(openCodeMcpStatus, 'OpenCode MCP listing did not include the project Threadforge server');
   assert.match(openCodeMcpStatus, /connected/i, 'OpenCode did not establish the Threadforge MCP connection');
+  const openCodeInstalledTraceEvents = [];
   const openCodeAgentMcpRead = await runOpenCodeAgentMcpRead(procedureID, graph.nodes[0].instruction, {
     hostVersion: openCodeVersion,
     requiredResultMarkers: [
@@ -1179,7 +1180,119 @@ try {
       '"guidance_only":true', '"action_ready":false',
     ],
     forbiddenResultMarkers: ['local://smoke/private-trace'],
+    onCapturedEvents: (events) => openCodeInstalledTraceEvents.push(...events),
   });
+  const capturedActions = new Set(openCodeInstalledTraceEvents.map((event) => event?.event?.action));
+  assert.ok(openCodeInstalledTraceEvents.length > 0 && openCodeInstalledTraceEvents.length <= 200,
+    'installed OpenCode run did not yield bounded capture events');
+  assert.ok(openCodeInstalledTraceEvents.every((event) => event?.harness?.name === 'opencode' &&
+    (event.content === undefined || event.content.included === false)),
+  'installed OpenCode trace capture contained another harness or retained event content');
+  assert.ok(capturedActions.has('prompt.submitted') && capturedActions.has('tool.invoked') &&
+    capturedActions.has('tool.completed'), 'installed OpenCode trace did not include prompt and tool lifecycle events');
+
+  // Exercise the production trace-backed proposal path with events captured by
+  // the installed OpenCode host. The procedure text and validation result are
+  // deliberately synthetic fixtures and remain non-cutover evidence.
+  const crossHarnessProcedureID = 'opencode-antigravity-capture-smoke';
+  const crossHarnessTraceReference = 'opencode:installed-smoke-session';
+  const crossHarnessDraftPath = path.join(isolatedHome, 'cross-harness-captured-draft.json');
+  const crossHarnessTracePath = path.join(isolatedHome, 'opencode-installed-events.jsonl');
+  const crossHarnessValidationPath = path.join(isolatedHome, 'cross-harness-captured-validation.json');
+  const crossHarnessInstruction = 'Inspect the relevant source and run focused verification before summarizing a change.';
+  const crossHarnessDraft = {
+    schema_version: 'threadforge.procedure-graph.v1',
+    id: crossHarnessProcedureID,
+    project_id: 'cross-harness-smoke',
+    title: 'Fixture procedure captured from an installed OpenCode session',
+    revision: 1,
+    status: 'draft',
+    applicability: { paths: ['src/**'] },
+    nodes: [{ id: 'verify', kind: 'trigger', instruction: crossHarnessInstruction }],
+    edges: [],
+    source_files: [{ path: freshnessSourceRelativePath, sha256: freshnessSourceSHA256 }],
+    evidence: [],
+  };
+  writeFileSync(crossHarnessDraftPath, `${JSON.stringify(crossHarnessDraft)}\n`, { flag: 'wx', mode: 0o600 });
+  writeFileSync(crossHarnessTracePath,
+    `${openCodeInstalledTraceEvents.map((event) => JSON.stringify(event)).join('\n')}\n`,
+    { flag: 'wx', mode: 0o600 });
+  const serializedHostTrace = readFileSync(crossHarnessTracePath, 'utf8');
+  for (const privateValue of [crossHarnessTracePath, 'private-smoke-prompt-do-not-store', 'smoke-session-private']) {
+    assert.equal(serializedHostTrace.includes(privateValue), false,
+      'installed OpenCode trace file retained a private prompt, session ID, or local path');
+  }
+  const capturedProposal = JSON.parse(runThreadforge([
+    'procedure', 'propose', '--file', crossHarnessDraftPath,
+    '--trace-input', crossHarnessTracePath, '--trace-ref', crossHarnessTraceReference,
+    '--actor', 'smoke-capture', '--reason', 'isolated installed-host trace lifecycle fixture',
+    '--db', databasePath,
+  ]));
+  const capturedTraceEvidence = capturedProposal.evidence?.filter((item) => item.origin === 'trace') ?? [];
+  assert.equal(capturedProposal.status, 'draft');
+  assert.equal(capturedTraceEvidence.length, 1, 'production proposal path did not bind exactly one host-trace record');
+  assert.equal(capturedTraceEvidence[0].harness, 'opencode');
+  assert.equal(capturedTraceEvidence[0].redacted, true);
+  assert.match(capturedTraceEvidence[0].content_sha256, /^[a-f0-9]{64}$/);
+  assert.equal(capturedTraceEvidence[0].local_trace_ref, crossHarnessTraceReference);
+  assert.equal(JSON.stringify(capturedProposal).includes(crossHarnessTracePath), false,
+    'trace-backed proposal retained the local trace path');
+  const capturedEvidenceDigest = capturedTraceEvidence[0].content_sha256;
+  rmSync(crossHarnessTracePath, { force: true });
+  assert.equal(existsSync(crossHarnessTracePath), false, 'temporary trace input was not removed after proposal');
+
+  writeFileSync(crossHarnessValidationPath, `${JSON.stringify({
+    dataset_fingerprint: capturedEvidenceDigest,
+    held_out: true,
+    baseline_runs: 2,
+    baseline_score: 0.8,
+    candidate_score: 0.8,
+    noise_floor: 0,
+    cost_unit: 'tokens',
+    baseline_cost: 100,
+    candidate_cost: 100,
+    max_cost_increase: 0,
+    status: 'passed',
+  })}\n`, { flag: 'wx', mode: 0o600 });
+  const capturedValidation = JSON.parse(runThreadforge([
+    'procedure', 'record-validation', '--id', crossHarnessProcedureID,
+    '--expected-revision', '1', '--report', crossHarnessValidationPath, '--db', databasePath,
+  ]));
+  assert.equal(capturedValidation.status, 'validated');
+  const capturedApproval = JSON.parse(runThreadforge([
+    'procedure', 'approve', '--id', crossHarnessProcedureID, '--expected-revision', '2',
+    '--reviewer', 'smoke-reviewer', '--reason', 'isolated synthetic cross-harness fixture only',
+    '--privacy-reviewed', '--db', databasePath,
+  ]));
+  assert.equal(capturedApproval.status, 'approved');
+  assert.equal(capturedApproval.revision, 3);
+  const crossHarnessProcedureCaptureChecks = {
+    schema_version: 'threadforge.cross-harness-procedure-capture-smoke.v1',
+    status: 'verified',
+    capture_harness: 'opencode',
+    capture_host_version: openCodeVersion,
+    installed_host_events_observed: openCodeInstalledTraceEvents.length,
+    prompt_event_observed: capturedActions.has('prompt.submitted'),
+    tool_invocation_and_completion_observed: capturedActions.has('tool.invoked') && capturedActions.has('tool.completed'),
+    trace_digest_bound_to_draft: capturedTraceEvidence.length === 1 && capturedTraceEvidence[0].content_sha256 === capturedEvidenceDigest,
+    trace_file_removed_after_import: !existsSync(crossHarnessTracePath),
+    raw_trace_content_retained: false,
+    procedure_text_is_synthetic_fixture: true,
+    procedure_approved_in_isolated_store: true,
+    approval_and_validation_are_synthetic_fixtures: true,
+    retrieval_harness: 'antigravity',
+    retrieval_host_version: 'pending',
+    installed_retrieval_verified: false,
+    retrieval_markers_verified: false,
+    authorization_grant_absent: false,
+    retrieval_freshness: 'pending',
+    guidance_only: true,
+    action_ready: false,
+    execution_authorized: false,
+    validation_is_acceptance_evidence: false,
+    cutover_evidence_eligible: false,
+    real_model_invocations: 0,
+  };
   writeFileSync(freshnessSourcePath, 'export const smokeSource = "changed-after-approval";\n', { mode: 0o600 });
   const openCodeAgentStaleMcpRead = await runOpenCodeAgentMcpRead(
     procedureID,
@@ -1667,11 +1780,31 @@ try {
   const antigravityMcpListed = antigravityMcpOutput.includes('threadforge');
   const antigravityVersion = runHost('agy', ['--version']).trim();
   const antigravityAgentMcpRead = await runAntigravityAgentMcpRead({
-    projectRoot, home: isolatedHome, cliPath, procedureID,
-    expectedGuidance: graph.nodes[0].instruction,
+    projectRoot, home: isolatedHome, cliPath, procedureID: crossHarnessProcedureID,
+    expectedGuidance: crossHarnessInstruction,
     isolatedEnvironment,
     hostVersion: antigravityVersion,
+    requiredResultMarkers: [
+      '"status":"complete"', '"freshness":"verified"',
+      '"guidance_only":true', '"action_ready":false',
+    ],
+    forbiddenResultMarkers: ['"execution_authorized":true', '"action_ready":true', '"permission":"allow"'],
   });
+  assert.equal(antigravityAgentMcpRead.status, 'verified',
+    `Antigravity did not retrieve the installed-OpenCode trace-backed procedure: ${JSON.stringify({
+      reason: antigravityAgentMcpRead.reason,
+      provider_requests: antigravityAgentMcpRead.provider_requests,
+      tool_call_count: antigravityAgentMcpRead.tool_call_count,
+      tool_result_observed: antigravityAgentMcpRead.tool_result_observed,
+      procedure_result_check_diagnostics: antigravityAgentMcpRead.procedure_result_check_diagnostics,
+    })}`);
+  crossHarnessProcedureCaptureChecks.retrieval_host_version = antigravityVersion;
+  crossHarnessProcedureCaptureChecks.installed_retrieval_verified = true;
+  crossHarnessProcedureCaptureChecks.retrieval_markers_verified =
+    antigravityAgentMcpRead.procedure_result_check_diagnostics?.required_markers_verified === true;
+  crossHarnessProcedureCaptureChecks.authorization_grant_absent =
+    Object.values(antigravityAgentMcpRead.procedure_result_check_diagnostics?.forbidden_marker_flags ?? {}).every(Boolean);
+  crossHarnessProcedureCaptureChecks.retrieval_freshness = 'verified';
   const antigravityTaskResumeResult = await runAntigravityAgentMcpRead({
     projectRoot, home: isolatedHome, cliPath, procedureID: openCodeTaskFixture.id,
     expectedGuidance: openCodeTaskFixture.objective,
@@ -2203,7 +2336,7 @@ try {
   if (blockedLauncherError) throw blockedLauncherError;
 
   console.log(JSON.stringify({
-    schema_version: 'threadforge.installed-skill-smoke.v48',
+    schema_version: 'threadforge.installed-skill-smoke.v49',
     source_event_fixture: 'opencode-plugin-payload',
     captured_events: capturedEvents.length,
     capture_content_retained: false,
@@ -2234,6 +2367,7 @@ try {
     opencode_agent_mcp_read: openCodeAgentMcpRead,
     opencode_agent_stale_mcp_read: openCodeAgentStaleMcpRead,
     opencode_procedure_freshness: openCodeProcedureFreshness,
+    cross_harness_procedure_capture: crossHarnessProcedureCaptureChecks,
     opencode_agent_task_resume: openCodeAgentTaskResume,
     opencode_agent_task_resume_with_receipt: openCodeAgentTaskResumeWithReceipt,
     opencode_memory_injection: opencodeMemoryInjectionReport,
@@ -2381,6 +2515,7 @@ async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = 
     expectedProjectRootForProbe,
     expectedProjectIdForProbe,
     expectedMemoryTextForProbe,
+    onCapturedEvents,
   } = options;
   const providerID = 'threadforge-fixture';
   const modelID = 'fixture-model';
@@ -2611,6 +2746,7 @@ async function runOpenCodeAgentMcpRead(procedureID, expectedGuidance, options = 
     for (const privateValue of [prompt, expectedGuidance, procedureID, 'threadforge-fixture-only', ...forbiddenResultMarkers, ...privateTelemetryMarkers]) {
       assert.equal(serializedPluginEvents.includes(privateValue), false, `OpenCode plugin telemetry retained ${privateValue}`);
     }
+    if (typeof onCapturedEvents === 'function') onCapturedEvents(structuredClone(pluginEvents));
     if (toolSuffix === 'threadforge_task_resume_context' ||
         toolSuffix === 'threadforge_task_resume_context_with_receipt' || toolSuffix === 'threadforge_task_handoffs') {
       assert.equal(serializedPluginEvents.includes(toolArguments.task_id), false,

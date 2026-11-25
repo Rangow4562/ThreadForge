@@ -68,7 +68,7 @@ jobs:
         run: bash scripts/verify_release_source.sh
 
   opencode-v2-plugin:
-    name: OpenCode V2 memory/context delivery (2.3.0)
+    name: OpenCode V2 memory/context and task-plan gate (2.3.0)
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
@@ -110,7 +110,7 @@ jobs:
           chmod 0755 "$executable_directory/opencode"
           printf 'THREADFORGE_OPENCODE_V2_BIN=%s\n' "$executable_directory/opencode" >> "$GITHUB_ENV"
 
-      - name: Run isolated V2 memory/context smoke with loopback provider
+      - name: Run isolated V2 memory/context and direct-file task-plan smoke
         shell: bash
         env:
           THREADFORGE_OPENCODE_V2_VERSION: '2.3.0'
@@ -244,7 +244,12 @@ jobs:
         run: |
           uv run --project python --locked --extra test --extra decisions --extra workspace go test ./...
           uv run --project python --locked --extra test --extra decisions --extra workspace go vet ./...
-          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+          python scripts/run_govulncheck.py
+
+      - name: Run module-wide Go race tests
+        if: runner.os == 'Linux' && matrix.python == '3.11'
+        shell: bash
+        run: uv run --project python --locked --extra test --extra decisions --extra workspace go test -race ./...
 
       - name: Run vendored Beacon contract tests
         shell: bash
@@ -281,10 +286,10 @@ jobs:
         working-directory: adapters
         run: npm ci
 
-      - name: Audit TypeScript adapter dependencies
+      - name: Audit TypeScript adapter dependencies (low and above)
         shell: bash
         working-directory: adapters
-        run: npm audit --audit-level=moderate
+        run: npm audit --audit-level=low
 
       - name: Run TypeScript adapter typecheck and tests
         shell: bash
@@ -303,10 +308,10 @@ jobs:
         working-directory: adapters/browser-extension
         run: npm ci
 
-      - name: Audit browser extension dependencies
+      - name: Audit browser extension dependencies (low and above)
         shell: bash
         working-directory: adapters/browser-extension
-        run: npm audit --audit-level=moderate
+        run: npm audit --audit-level=low
 
       - name: Install Playwright Chromium and Linux dependencies
         if: runner.os == 'Linux'
@@ -865,12 +870,159 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  browser-extension-candidate:
+    name: Build and attest browser extension candidate
+    if: >-
+      (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
+      || (github.event_name == 'workflow_dispatch' && inputs.release_version != '' && github.ref == 'refs/heads/main')
+    needs: [test, release-source-policy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Resolve candidate version
+        id: release
+        shell: bash
+        env:
+          RELEASE_VERSION_INPUT: ${{ inputs.release_version }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_TYPE" == tag ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$RELEASE_VERSION_INPUT"
+          fi
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Invalid release candidate version." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the exact tested source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify browser package source identity
+        shell: bash
+        run: |
+          if [[ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]]; then
+            echo "Browser extension source does not match the tested workflow commit." >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js for browser extension packages
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.19.0'
+
+      - name: Install and build Chromium and Firefox packages
+        shell: bash
+        working-directory: adapters/browser-extension
+        env:
+          BROWSER_ARTIFACT_DIR: ${{ runner.temp }}/threadforge-browser-extension
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run check
+          npm run test:unit -- --reporter=dot
+          npm run package:chromium
+          npm run package:firefox
+          mkdir -p "$BROWSER_ARTIFACT_DIR"
+          cp artifacts/chromium/threadforge-browser-chromium.zip \
+            "$BROWSER_ARTIFACT_DIR/threadforge_browser_extension_${RELEASE_VERSION}_chromium.zip"
+          cp artifacts/firefox/threadforge-browser-firefox.zip \
+            "$BROWSER_ARTIFACT_DIR/threadforge_browser_extension_${RELEASE_VERSION}_firefox.zip"
+
+      - name: Generate Chromium distribution SPDX inventory
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: adapters/browser-extension/dist
+          format: spdx-json
+          output-file: ${{ runner.temp }}/threadforge-browser-extension/threadforge_browser_extension_${{ steps.release.outputs.version }}_chromium.spdx.json
+          syft-version: v1.56.0
+          dependency-snapshot: false
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate Firefox distribution SPDX inventory
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: adapters/browser-extension/dist-firefox
+          format: spdx-json
+          output-file: ${{ runner.temp }}/threadforge-browser-extension/threadforge_browser_extension_${{ steps.release.outputs.version }}_firefox.spdx.json
+          syft-version: v1.56.0
+          dependency-snapshot: false
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate locked browser build-dependency SPDX inventory
+        shell: bash
+        working-directory: adapters/browser-extension
+        env:
+          BROWSER_ARTIFACT_DIR: ${{ runner.temp }}/threadforge-browser-extension
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: >-
+          npm sbom --package-lock-only --sbom-format spdx
+          > "$BROWSER_ARTIFACT_DIR/threadforge_browser_extension_${RELEASE_VERSION}_build_dependencies.spdx.json"
+
+      - name: Checksum browser packages and SPDX inventories
+        shell: bash
+        env:
+          BROWSER_ARTIFACT_DIR: ${{ runner.temp }}/threadforge-browser-extension
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd "$BROWSER_ARTIFACT_DIR"
+          sha256sum \
+            "threadforge_browser_extension_${RELEASE_VERSION}_chromium.zip" \
+            "threadforge_browser_extension_${RELEASE_VERSION}_firefox.zip" \
+            "threadforge_browser_extension_${RELEASE_VERSION}_chromium.spdx.json" \
+            "threadforge_browser_extension_${RELEASE_VERSION}_firefox.spdx.json" \
+            "threadforge_browser_extension_${RELEASE_VERSION}_build_dependencies.spdx.json" \
+            > checksums.txt
+          sha256sum --check checksums.txt
+
+      - name: Attest Chromium browser archive and SPDX binding
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/threadforge-browser-extension/threadforge_browser_extension_${{ steps.release.outputs.version }}_chromium.zip
+          sbom-path: ${{ runner.temp }}/threadforge-browser-extension/threadforge_browser_extension_${{ steps.release.outputs.version }}_chromium.spdx.json
+
+      - name: Attest Firefox browser archive and SPDX binding
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/threadforge-browser-extension/threadforge_browser_extension_${{ steps.release.outputs.version }}_firefox.zip
+          sbom-path: ${{ runner.temp }}/threadforge-browser-extension/threadforge_browser_extension_${{ steps.release.outputs.version }}_firefox.spdx.json
+
+      - name: Attest browser build-dependency SPDX inventory
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/threadforge-browser-extension/threadforge_browser_extension_${{ steps.release.outputs.version }}_build_dependencies.spdx.json
+
+      - name: Attest browser package checksums
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/threadforge-browser-extension/checksums.txt
+
+      - name: Upload separate browser extension candidate artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: threadforge-browser-extension-${{ steps.release.outputs.version }}
+          path: ${{ runner.temp }}/threadforge-browser-extension/
+          if-no-files-found: error
+          retention-days: 14
+
   release-candidate-bundle:
     name: Assemble, checksum, and attest release-candidate bundle
     if: >-
       (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
       || (github.event_name == 'workflow_dispatch' && inputs.release_version != '' && github.ref == 'refs/heads/main')
-    needs: [release-candidate, python-license-evidence, engineering-runtime-sbom, release-source-policy]
+    needs: [release-candidate, python-license-evidence, engineering-runtime-sbom, release-source-policy, browser-extension-candidate]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

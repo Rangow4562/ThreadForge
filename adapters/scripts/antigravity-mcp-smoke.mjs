@@ -11,6 +11,7 @@ const maxRequestBytes = 8 << 20;
 export async function runAntigravityAgentMcpRead({
   projectRoot, home, cliPath, procedureID, expectedGuidance, isolatedEnvironment,
   toolName = 'threadforge_procedure_get', toolArguments, prompt, expectedFinalResponse,
+  forbiddenResultMarkers = [],
   requiredResultMarkers = [], hostVersion = 'unknown', scriptedFunctionCall, expectedToolResponseMarker,
   verifyTaskResumeReceipt,
   toolAction = 'read', agentName,
@@ -32,6 +33,7 @@ export async function runAntigravityAgentMcpRead({
   let blockedExternalRequests = 0;
   let expectedContentObserved = false;
   let resultMarkerFlags = {};
+  let forbiddenResultMarkerFlags = {};
   let taskResumeReceiptChecks;
   const observedTools = new Set();
   const providerTrace = [];
@@ -141,6 +143,10 @@ export async function runAntigravityAgentMcpRead({
             marker.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, ''),
             compactResultText.includes(marker.replace(/\s+/g, '')),
           ]));
+          forbiddenResultMarkerFlags = Object.fromEntries(forbiddenResultMarkers.map((marker) => [
+            marker.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+            !compactResultText.includes(marker.replace(/\s+/g, '')),
+          ]));
           if (toolName === 'threadforge_task_resume_context_with_receipt') {
             const envelope = findJsonObjectWithSchema(
               functionResponses,
@@ -177,8 +183,11 @@ export async function runAntigravityAgentMcpRead({
             };
             resultMarkerFlags = { ...resultMarkerFlags, ...taskResumeReceiptChecks };
           }
-          toolResultObserved = expectedContentObserved && Object.values(resultMarkerFlags).every(Boolean);
-          if (!toolResultObserved) fixtureReason ??= toolName === 'threadforge_task_resume_context'
+          toolResultObserved = expectedContentObserved && Object.values(resultMarkerFlags).every(Boolean) &&
+            Object.values(forbiddenResultMarkerFlags).every(Boolean);
+          if (!toolResultObserved) fixtureReason ??= Object.values(forbiddenResultMarkerFlags).some((value) => !value)
+            ? 'forbidden_result_marker_observed'
+            : toolName === 'threadforge_task_resume_context'
             ? 'task_resume_result_missing_advisory_fields'
             : toolName === 'threadforge_task_resume_context_with_receipt'
               ? 'task_resume_receipt_contract_or_persistence_not_verified'
@@ -395,6 +404,14 @@ export async function runAntigravityAgentMcpRead({
       tool: toolCalls === 1 ? toolName : undefined,
       tool_call_count: toolCalls,
       tool_result_observed: toolResultObserved,
+      ...(toolName === 'threadforge_procedure_get' ? {
+        procedure_result_check_diagnostics: {
+          expected_guidance_observed: expectedContentObserved,
+          marker_flags: resultMarkerFlags,
+          forbidden_marker_flags: forbiddenResultMarkerFlags,
+          required_markers_verified: requiredResultMarkers.length > 0 && toolResultObserved,
+        },
+      } : {}),
       ...(toolName === 'threadforge_task_resume_context' ? {
         schema_version: 'threadforge.antigravity-task-resume-smoke.v1',
         task_context_content_retained_in_report: false,

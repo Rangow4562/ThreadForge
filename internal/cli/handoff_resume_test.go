@@ -57,6 +57,28 @@ func TestHandoffResumePrintsBoundedCrossHarnessPlanWithoutWriting(t *testing.T) 
 	}
 }
 
+func TestHandoffResumePrintsAiderReadOnlyBriefPlanWithoutWriting(t *testing.T) {
+	stubResumeRuntime(t)
+	tracePath, workspace := resumeTraceFixture(t)
+	outputDir := filepath.Join(t.TempDir(), "aider briefs not created")
+	var stdout, stderr bytes.Buffer
+	code := RunWithInput([]string{"handoff", "resume", "resume-source-123", "--source", "runtime-log", "--harness", "codex", "--agent", "aider", "--traces", tracePath, "--output-dir", outputDir, "--print", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	var plan resumePlan
+	if code != 0 || json.Unmarshal(stdout.Bytes(), &plan) != nil || stderr.Len() != 0 {
+		t.Fatalf("Aider plan code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	wantArgs := []string{"--chat-mode", "ask", "--read", plan.BriefPath, "--no-auto-commits", "--no-analytics", "--no-check-update"}
+	if plan.SchemaVersion != handoffResumePlanSchema || plan.Mode != "new_session" || plan.Target != "aider" ||
+		plan.Executable != filepath.Join("/fixture/bin", "aider") || plan.Directory != workspace ||
+		plan.BriefPath == "" || plan.LinkStatus != "" || !reflect.DeepEqual(plan.Args, wantArgs) ||
+		strings.Contains(strings.Join(plan.Args, " "), "PRIVATE_SOURCE_PROMPT") || strings.Contains(stdout.String(), "[beacon-handoff") {
+		t.Fatalf("Aider plan should use a read-only interactive brief without prompt/link claims: %#v", plan)
+	}
+	if _, err := os.Lstat(outputDir); !os.IsNotExist(err) {
+		t.Fatalf("--print created Aider brief directory: %v", err)
+	}
+}
+
 func TestHandoffResumeNativeCodexPlanKeepsSourcePathOutOfJSON(t *testing.T) {
 	stubResumeRuntime(t)
 	root := t.TempDir()
@@ -213,6 +235,15 @@ func TestResumePromptCarriesSourceLinkClaimMarker(t *testing.T) {
 	}
 }
 
+func TestAiderIsHandoffDestinationOnly(t *testing.T) {
+	if _, ok := canonicalHandoffHarness("aider"); ok {
+		t.Fatal("Aider must not be advertised as a native/runtime-log source without a collector")
+	}
+	if target, ok := canonicalHandoffTarget(" Aider "); !ok || target != "aider" {
+		t.Fatalf("Aider target alias = %q, ok=%t", target, ok)
+	}
+}
+
 func TestResumeTargetCommandsCoverDocumentedStartableRuntimes(t *testing.T) {
 	targets := resumeTargets()
 	want := map[string]struct {
@@ -228,17 +259,29 @@ func TestResumeTargetCommandsCoverDocumentedStartableRuntimes(t *testing.T) {
 		"qwen_code": {"qwen", []string{"--approval-mode", "default", "--prompt-interactive"}}, "kiro": {"kiro-cli", []string{"chat"}},
 		"antigravity_cli": {"agy", []string{"--prompt-interactive"}}, "devin-cli": {"devin", []string{"--permission-mode", "auto", "--"}},
 		"muse_code": {"muse", []string{"--approval-mode", "on-request"}}, "openhands": {"openhands", []string{"--task"}},
-		"goose": {"goose", []string{"run", "--interactive", "--text"}},
+		"goose": {"goose", []string{"run", "--interactive", "--text"}}, "aider": {"aider", []string{"--chat-mode", "ask", "--read"}},
 	}
 	seen := 0
 	for harness, target := range targets {
-		if target.newArgs == nil {
+		if target.newArgs == nil && target.newBriefArgs == nil {
 			continue
 		}
 		seen++
 		expected, ok := want[harness]
 		if !ok || target.executable != expected.executable {
 			t.Errorf("unexpected new-session target %q -> %q", harness, target.executable)
+			continue
+		}
+		if target.newBriefArgs != nil {
+			briefPath := filepath.Join(t.TempDir(), "private handoffs", "brief.md")
+			wantArgs := []string{"--chat-mode", "ask", "--read", briefPath, "--no-auto-commits", "--no-analytics", "--no-check-update"}
+			if harness != "aider" || target.newArgs != nil || !reflect.DeepEqual(target.newBriefArgs(briefPath), wantArgs) {
+				t.Errorf("unexpected read-only brief target %q", harness)
+			}
+			continue
+		}
+		if target.newArgs == nil {
+			t.Errorf("startable target %q has no prompt launcher", harness)
 			continue
 		}
 		prompt := "bounded prompt fixture"
@@ -257,7 +300,8 @@ func TestResumeTargetCommandsCoverDocumentedStartableRuntimes(t *testing.T) {
 	if seen != len(want) {
 		t.Fatalf("startable runtime count=%d, want %d", seen, len(want))
 	}
-	if targets["hermes"].newArgs != nil || targets["vercel_fx"].newArgs != nil {
+	if targets["hermes"].newArgs != nil || targets["hermes"].newBriefArgs != nil ||
+		targets["vercel_fx"].newArgs != nil || targets["vercel_fx"].newBriefArgs != nil {
 		t.Fatal("runtimes without safe interactive brief-start modes must not appear as new-session targets")
 	}
 	if !reflect.DeepEqual(targets["cursor"].fallbackExecutables, []string{"cursor-agent"}) {

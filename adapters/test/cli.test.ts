@@ -735,13 +735,17 @@ test('OpenClaw CLI requires active-gateway scope and offers a non-mutating comma
   assert.equal(result.code, 1);
   assert.match(result.stderr, /explicit --scope active-gateway/);
 
-  result = await invoke(['openclaw', 'install', '--scope', 'active-gateway', '--print', '--acknowledge-local-source']);
+  result = await invoke(['openclaw', 'install', '--scope', 'active-gateway', '--print', '--acknowledge-local-source', '--timeout-ms', '15000']);
   assert.equal(result.code, 0, result.stderr);
   const plan = JSON.parse(result.stdout) as { result: string; commands: Array<{ executable: string; args: string[] }> };
   assert.equal(plan.result, 'planned');
   assert.equal(plan.commands.length, 2);
   assert.ok(plan.commands[0]?.args.includes('--force'));
   assert.ok(plan.commands[0]?.args.some((arg) => arg.replace(/[\\/]+$/, '').endsWith(`adapters${path.sep}openclaw-plugin`)));
+
+  result = await invoke(['openclaw', 'install', '--scope', 'active-gateway', '--print', '--timeout-ms', '999']);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /between 1000 and 600000 ms/);
 });
 
 test('OpenClaw OTLP CLI prints local-safe guidance and checks only local log metadata', async () => {
@@ -849,9 +853,11 @@ test('adapter CLI installs and uninstalls the isolated OpenCode project plugin',
       'opencode', 'update', '--project-root', root, '--module', moduleSpecifier,
       '--memory-project-id', 'parser-project', '--memory-max-items', '4', '--memory-max-tokens', '900',
       '--memory-task-id', 'task-parser', '--memory-session-id', 'session-parser', '--memory-max-task-entries', '3',
+      '--plan-gate-task-id', 'task-parser', '--plan-gate-project-id', 'parser-project',
     ]);
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, /experimental messages-transform hook/);
+    assert.match(result.stdout, /best-effort for direct write\/edit\/apply_patch callbacks only/);
     const configuredMemory = await readFile(pluginPath, 'utf8');
     assert.match(configuredMemory, /projectId":"parser-project"/);
     assert.match(configuredMemory, /maxItems":4/);
@@ -859,6 +865,9 @@ test('adapter CLI installs and uninstalls the isolated OpenCode project plugin',
     assert.match(configuredMemory, /taskId":"task-parser"/);
     assert.match(configuredMemory, /sessionId":"session-parser"/);
     assert.match(configuredMemory, /maxTaskEntries":3/);
+    assert.match(configuredMemory, /planGate":\{"taskId":"task-parser","projectId":"parser-project"\}/);
+    const configuredV2 = await readFile(path.join(root, '.opencode', 'plugins', 'threadforge-v2', 'index.ts'), 'utf8');
+    assert.match(configuredV2, /planGate":\{"taskId":"task-parser","projectId":"parser-project"\}/);
     result = await invoke([
       'opencode', 'update', '--project-root', root, '--module', moduleSpecifier,
       '--memory-project-id', 'parser-project', '--memory-discover-active-task', '--memory-max-task-entries', '2',
@@ -867,6 +876,13 @@ test('adapter CLI installs and uninstalls the isolated OpenCode project plugin',
     const discoveredMemory = await readFile(pluginPath, 'utf8');
     assert.match(discoveredMemory, /discoverActiveTask":true/);
     assert.match(discoveredMemory, /maxTaskEntries":2/);
+    assert.doesNotMatch(discoveredMemory, /planGate/);
+    result = await invoke([
+      'opencode', 'update', '--project-root', root, '--module', moduleSpecifier,
+      '--plan-gate-task-id', 'task-parser',
+    ]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /must be supplied together/);
     result = await invoke([
       'opencode', 'update', '--project-root', root, '--module', moduleSpecifier,
       '--memory-project-id', 'parser-project', '--memory-task-id', 'task-parser', '--memory-discover-active-task',
@@ -1334,13 +1350,17 @@ test('adapter CLI installs and removes Cursor plan gate without replacing user h
     let result = await invoke(['cursor', 'plan-gate', 'install', '--project-root', root, '--command', command]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).result, 'installed');
-    assert.match(JSON.parse(result.stdout).warning, /direct Write tools only/);
+    assert.match(JSON.parse(result.stdout).warning, /direct Write, Shell, and MCP/);
+    assert.match(JSON.parse(result.stdout).warning, /no effect\/path-scope proof/);
     let config = JSON.parse(await readFile(hooksPath, 'utf8'));
     assert.deepEqual(config.userOption, original.userOption);
     assert.deepEqual(config.hooks.preToolUse[0], original.hooks.preToolUse[0]);
     assert.deepEqual(config.hooks.sessionStart, original.hooks.sessionStart);
     assert.deepEqual(config.hooks.preToolUse[1], {
       command, matcher: 'Write', timeout: 10, failClosed: true,
+    });
+    assert.deepEqual(config.hooks.preToolUse[2], {
+      command, matcher: 'Shell|MCP:.*', timeout: 10, failClosed: true,
     });
 
     result = await invoke(['cursor', 'plan-gate', 'update', '--project-root', root, '--command', command]);

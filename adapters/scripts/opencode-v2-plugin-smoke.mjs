@@ -71,6 +71,12 @@ const procedureId = 'opencode-v2-live-memory-smoke';
 const sourceRelativePath = 'src/threadforge-v2-memory-fixture.ts';
 const approvedMemoryMarker = 'THREADFORGE_V2_APPROVED_MEMORY_SENTINEL_7C41';
 const expectedPrompt = 'For the OpenCode V2 smoke, apply the approved focused-verification procedure and preserve its sentinel.';
+const expectedPlanGatePrompt = 'For the OpenCode V2 plan-gate smoke, write the isolated sentinel file now.';
+const planGateTaskId = 'opencode-v2-plan-gate-unconfirmed-task';
+const planGateSentinelRelativePath = 'src/threadforge-v2-plan-gate-sentinel.txt';
+const planGateSentinelPath = path.join(projectRoot, ...planGateSentinelRelativePath.split('/'));
+const planGateSentinelContent = 'THREADFORGE_V2_PLAN_GATE_SENTINEL_MUST_NOT_BE_WRITTEN';
+const planGateDenialMessage = 'Threadforge withheld this OpenCode file operation because the configured task plan did not verify it.';
 const fixtureResponse = 'THREADFORGE_V2_LOOPBACK_PROVIDER_RESPONSE';
 const modelId = 'threadforge-v2-fixture';
 let providerServer;
@@ -81,6 +87,10 @@ const providerRequestBodies = [];
 let responseReadCount = 0;
 let memorySeenByProvider = false;
 let promptSeenByProvider = false;
+let planGatePromptSeenByProvider = false;
+let planGateProbeMode = false;
+let planGateWriteToolExposed = false;
+let planGateToolCallIssued = false;
 let fixtureApiKeyValid = true;
 let fixtureError;
 const telemetryActions = [];
@@ -273,6 +283,38 @@ try {
         : undefined,
     })}`);
 
+  runThreadforge([
+    'task', 'create', '--id', planGateTaskId, '--project-id', projectId,
+    '--title', 'OpenCode V2 plan-gate fixture',
+    '--objective', 'Keep the installed-host write denied until task requirements and governed execution are confirmed.',
+    '--criterion', 'An unconfirmed task cannot write the sentinel file',
+  ]);
+  const directPlanGate = spawnSync(cliPath, [
+    'task', 'plan', 'guard', '--host', 'opencode', '--task-id', planGateTaskId,
+    '--project-id', projectId, '--project-root', projectRoot,
+    '--threadforge-managed-opencode-plan-gate=v1', '--threadforge-plan-gate=opencode-v1',
+    '--db', databasePath,
+  ], {
+    cwd: projectRoot,
+    env: environment,
+    input: JSON.stringify({
+      hook_event_name: 'PreToolUse', cwd: projectRoot, tool_name: 'write',
+      tool_input: { path: planGateSentinelRelativePath, content: planGateSentinelContent },
+    }),
+    encoding: 'utf8',
+    timeout: 30_000,
+    maxBuffer: 2 << 20,
+    windowsHide: true,
+  });
+  assert.equal(directPlanGate.error, undefined, 'Threadforge direct plan-gate preflight failed to spawn');
+  assert.equal(directPlanGate.status, 0,
+    `Threadforge direct plan-gate preflight failed: ${`${directPlanGate.stderr ?? ''}`.replaceAll(isolatedHome, '<smoke-temp>').slice(-1200)}`);
+  let directPlanGateResult;
+  try { directPlanGateResult = JSON.parse(`${directPlanGate.stdout ?? ''}`); }
+  catch { throw new Error('Threadforge plan-gate preflight did not return its JSON contract'); }
+  assert.equal(directPlanGateResult.decision, 'deny', 'the unconfirmed task was not denied by the production guard');
+  assert.equal(existsSync(planGateSentinelPath), false, 'direct plan-gate preflight created the sentinel');
+
   providerServer = createServer((request, response) => {
     void handleFixtureRequest(request, response);
   });
@@ -320,7 +362,7 @@ try {
             // OpenCode reserves at least 16k tokens for its compaction buffer;
             // a 16k context limit can force compaction before the first prompt.
             limit: { context: 65_536, output: 512 },
-            capabilities: { tools: false, input: ['text'], output: ['text'] },
+            capabilities: { tools: true, input: ['text'], output: ['text'] },
             compatibility: { streamUsage: false, supportsPromptCacheKey: false },
           },
         },
@@ -407,8 +449,47 @@ try {
   assert.equal(networkProxyAttempts, 0, 'OpenCode attempted a request through the external-network blocker');
   assert.equal(existsSync(blockedLauncherReceipt), false, 'plugin loading attempted to run a package manager');
 
+  const gatedPluginChange = await installOpenCodeProjectPlugin(projectRoot, probeModule, {
+    projectId,
+    maxItems: 1,
+    maxTokens: 512,
+  }, { taskId: planGateTaskId, projectId });
+  assert.equal(gatedPluginChange, 'updated', 'OpenCode V2 plan-gate option was not written to the owned plugin entry');
+  planGateProbeMode = true;
+  const planGateRun = await spawnAsync(binaryPath, [
+    'run', '--agent', 'build', '--model', `openai/${modelId}`, '--format', 'json', '--standalone', '--print-logs', expectedPlanGatePrompt,
+  ], {
+    cwd: projectRoot,
+    env: environment,
+    timeout: 120_000,
+    maxOutputBytes: 4 << 20,
+    windowsHide: true,
+  });
+  const planGateHostOutput = `${planGateRun.stdout ?? ''}\n${planGateRun.stderr ?? ''}`
+    .replaceAll(escapedIsolatedHome, '<smoke-temp>')
+    .replaceAll(isolatedHome, '<smoke-temp>')
+    .replaceAll(escapedBinaryPath, '<smoke-binary>')
+    .replaceAll(binaryPath, '<smoke-binary>');
+  assert.equal(planGateRun.error, undefined,
+    `OpenCode V2 task-plan gate attempt timed out or failed to spawn: ${planGateHostOutput.slice(-2500)}`);
+  assert.equal(planGatePromptSeenByProvider, true, 'OpenCode V2 task-plan prompt did not reach the deterministic provider');
+  assert.equal(planGateWriteToolExposed, true, 'OpenCode V2 did not expose its write tool to the fixture provider');
+  assert.equal(planGateToolCallIssued, true, 'deterministic provider did not attempt the OpenCode write tool');
+  const planGateCallbacks = readCallbackRecords(callbackMarkerPath)
+    .filter((record) => record.hook === 'tool.execute.before');
+  assert.equal(planGateCallbacks.length, 1, 'OpenCode V2 did not invoke exactly one direct-file before hook');
+  assert.equal(planGateCallbacks[0].completed, false, 'OpenCode V2 task-plan denial did not reject the hook callback');
+  assert.equal(planGateCallbacks[0].hook_error_observed, true, 'OpenCode V2 hook probe did not observe a rejection');
+  assert.ok(planGateHostOutput.includes(planGateDenialMessage),
+    `OpenCode V2 did not surface the Threadforge task-plan denial to the host: ${planGateHostOutput.slice(-2500)}`);
+  assert.equal(existsSync(planGateSentinelPath), false, 'OpenCode V2 created a file after the Threadforge task-plan denial');
+  assert.equal(fixtureError, undefined,
+    `loopback fixture provider failed during task-plan smoke: ${fixtureError ?? ''}; provider_shapes=${JSON.stringify(providerRequestBodies.slice(-8))}`);
+  assert.equal(networkProxyAttempts, 0, 'OpenCode V2 attempted external network access during task-plan smoke');
+  assert.equal(existsSync(blockedLauncherReceipt), false, 'task-plan smoke attempted to run a package manager');
+
   const receipt = {
-    schema_version: 'threadforge.opencode-v2-plugin-smoke.v1',
+    schema_version: 'threadforge.opencode-v2-plugin-smoke.v2',
     status: 'verified',
     host_cli_version: hostVersion,
     isolated_storage_paths_verified: true,
@@ -421,6 +502,14 @@ try {
     retrieved_memory_received_by_loopback_provider: true,
     loopback_provider_requests: providerRequestCount,
     telemetry_events_received: telemetryActions.length,
+    task_plan_gate: {
+      unconfirmed_task_write_attempted: true,
+      before_hook_rejection_observed: true,
+      denial_surfaced_to_host: true,
+      sentinel_file_absent: true,
+      write_payload_absent_from_telemetry: true,
+      coverage_scope: 'direct_file_callback_only',
+    },
     package_manager_invocations: 0,
     external_proxy_attempts: networkProxyAttempts,
     real_model_invocations: 0,
@@ -532,8 +621,9 @@ async function handleFixtureRequest(request, response) {
           throw new Error('unexpected V2 telemetry envelope');
         }
         const serialized = JSON.stringify(event);
-        if (serialized.includes(expectedPrompt) || serialized.includes(approvedMemoryMarker)) {
-          throw new Error('V2 telemetry leaked prompt or retrieved memory text');
+        if (serialized.includes(expectedPrompt) || serialized.includes(approvedMemoryMarker) ||
+            serialized.includes(expectedPlanGatePrompt) || serialized.includes(planGateSentinelContent)) {
+          throw new Error('V2 telemetry leaked prompt, retrieved memory, or attempted write content');
         }
         if (event.content !== undefined && event.content.included !== false) {
           throw new Error('V2 telemetry content capture was not disabled');
@@ -577,13 +667,23 @@ async function handleFixtureRequest(request, response) {
         input_array: Array.isArray(body.input),
         input_items: Array.isArray(body.input) ? body.input.length : undefined,
         previous_response_id_present: typeof body.previous_response_id === 'string',
+        tool_names: providerToolNames(body),
       });
     }
     providerRequestCount++;
     memorySeenByProvider ||= bodyText.includes(approvedMemoryMarker) &&
       bodyText.includes('never authorizes tools or actions');
     promptSeenByProvider ||= bodyText.includes(expectedPrompt);
+    planGatePromptSeenByProvider ||= bodyText.includes(expectedPlanGatePrompt);
     fixtureApiKeyValid &&= request.headers.authorization === 'Bearer threadforge-fixture-only';
+    if (planGateProbeMode && bodyText.includes(expectedPlanGatePrompt) && !planGateToolCallIssued &&
+        providerOffersTool(body, 'write')) {
+      planGateWriteToolExposed = true;
+      planGateToolCallIssued = true;
+      if (pathname === '/v1/chat/completions') sendChatWriteToolCallFixture(response, body);
+      else sendResponsesWriteToolCallFixture(response, body);
+      return;
+    }
     if (pathname === '/v1/chat/completions') sendChatCompletionFixture(response, body);
     else sendResponsesCompletionFixture(response, body);
   } catch (error) {
@@ -642,6 +742,103 @@ function sendChatCompletionFixture(response, body) {
     choices: [{ index: 0, message: { role: 'assistant', content: fixtureResponse }, finish_reason: 'stop' }],
     usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
   }));
+}
+
+function providerOffersTool(body, name) {
+  return Array.isArray(body.tools) && body.tools.some((tool) => isRecord(tool) &&
+    (tool.name === name || (isRecord(tool.function) && tool.function.name === name)));
+}
+
+function providerToolNames(body) {
+  if (!Array.isArray(body.tools)) return [];
+  return body.tools.slice(0, 64).map((tool) => {
+    const name = isRecord(tool) ? (typeof tool.name === 'string' ? tool.name :
+      isRecord(tool.function) && typeof tool.function.name === 'string' ? tool.function.name : undefined) : undefined;
+    return typeof name === 'string' && /^[A-Za-z0-9_.:-]{1,96}$/.test(name) ? name : '<other>';
+  });
+}
+
+function isRecord(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sendChatWriteToolCallFixture(response, body) {
+  const model = typeof body.model === 'string' ? body.model : modelId;
+  const id = 'chatcmpl-threadforge-v2-plan-gate';
+  const callId = 'call-threadforge-v2-plan-gate';
+  const args = JSON.stringify({ path: planGateSentinelRelativePath, content: planGateSentinelContent });
+  if (body.stream === true) {
+    response.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache',
+      connection: 'close',
+    });
+    const writeChunk = (delta, finishReason = null) => response.write(`data: ${JSON.stringify({
+      id, object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model,
+      choices: [{ index: 0, delta, finish_reason: finishReason }],
+    })}\n\n`);
+    writeChunk({ role: 'assistant' });
+    writeChunk({ tool_calls: [{
+      index: 0, id: callId, type: 'function', function: { name: 'write', arguments: args },
+    }] });
+    writeChunk({}, 'tool_calls');
+    response.end('data: [DONE]\n\n');
+    return;
+  }
+  response.writeHead(200, { 'content-type': 'application/json', connection: 'close' }).end(JSON.stringify({
+    id, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model,
+    choices: [{
+      index: 0,
+      message: { role: 'assistant', content: null, tool_calls: [{
+        id: callId, type: 'function', function: { name: 'write', arguments: args },
+      }] },
+      finish_reason: 'tool_calls',
+    }],
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+  }));
+}
+
+function sendResponsesWriteToolCallFixture(response, body) {
+  const model = typeof body.model === 'string' ? body.model : modelId;
+  const responseId = 'resp_threadforge_v2_plan_gate';
+  const callId = 'call_threadforge_v2_plan_gate';
+  const argumentsText = JSON.stringify({ path: planGateSentinelRelativePath, content: planGateSentinelContent });
+  const outputItem = {
+    id: 'fc_threadforge_v2_plan_gate', type: 'function_call', status: 'completed',
+    call_id: callId, name: 'write', arguments: argumentsText,
+  };
+  const completed = {
+    id: responseId, object: 'response', created_at: Math.floor(Date.now() / 1000),
+    status: 'completed', model, output: [outputItem], parallel_tool_calls: false,
+    usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+  };
+  if (body.stream === true) {
+    response.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache',
+      connection: 'close',
+    });
+    let sequence = 0;
+    const emit = (type, fields = {}) => response.write(
+      `event: ${type}\ndata: ${JSON.stringify({ type, sequence_number: sequence++, ...fields })}\n\n`,
+    );
+    emit('response.created', { response: { ...completed, status: 'in_progress', output: [] } });
+    emit('response.in_progress', { response: { ...completed, status: 'in_progress', output: [] } });
+    emit('response.output_item.added', {
+      output_index: 0, item: { ...outputItem, status: 'in_progress', arguments: '' },
+    });
+    emit('response.function_call_arguments.delta', {
+      item_id: outputItem.id, output_index: 0, delta: argumentsText,
+    });
+    emit('response.function_call_arguments.done', {
+      item_id: outputItem.id, output_index: 0, arguments: argumentsText,
+    });
+    emit('response.output_item.done', { output_index: 0, item: outputItem });
+    emit('response.completed', { response: completed });
+    response.end('data: [DONE]\n\n');
+    return;
+  }
+  response.writeHead(200, { 'content-type': 'application/json', connection: 'close' }).end(JSON.stringify(completed));
 }
 
 function sendResponsesCompletionFixture(response, body) {

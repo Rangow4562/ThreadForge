@@ -193,6 +193,37 @@ func TestRRSISyntheticTrialMigrationReadback(t *testing.T) {
 	}
 }
 
+func TestRRSICustomRunsRootMigrationReadback(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "custom-rrsi-output")
+	resultPath := filepath.Join(root, "coding", "jobs", "base", "task-1__trialhash", "result.json")
+	if err := os.MkdirAll(filepath.Dir(resultPath), 0o700); err != nil {
+		t.Fatal("create custom RRSI runs-root fixture directory")
+	}
+	result := `{"task_name":"terminal-bench/task-1","verifier_result":{"rewards":{"reward":0.5}},"agent_result":{"n_input_tokens":11,"n_output_tokens":7,"metadata":{"n_episodes":2,"private_note":"raw-trial-content-marker"}},"exception_info":null,"transcript":"raw-trial-content-marker","local_path":"C:/Users/private/trial"}`
+	if err := os.WriteFile(resultPath, []byte(result), 0o600); err != nil {
+		t.Fatal("write custom RRSI trial fixture")
+	}
+
+	readback := runConfiguredMigrationSourceReadback(t, migrate.RRSI, root)
+	if readback.Snapshot.Summary.FilesScanned != 1 || readback.Snapshot.Summary.FilesUnsupported != 0 ||
+		readback.Snapshot.Summary.RecordsImported != 1 || readback.Verification.Status != "reconciled" ||
+		readback.Verification.CutoverAuthorized || readback.Coverage.UnconvertedFiles != 0 {
+		t.Fatalf("custom RRSI --runs root lifecycle did not reconcile as review-only: %#v", readback)
+	}
+	records, err := migrate.ReadSnapshotRecords(readback.ManifestPath, readback.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Type != "rrsi_trial_artifact" || records[0].Scope != "local_pending_review" {
+		t.Fatalf("custom RRSI --runs root produced an unexpected record: %#v", records)
+	}
+	for _, private := range []string{"raw-trial-content-marker", "C:/Users/private/trial", "result.json"} {
+		if strings.Contains(string(records[0].Payload), private) || strings.Contains(records[0].SourcePath, private) {
+			t.Fatalf("custom RRSI migration leaked source content or filename %q: %#v", private, records[0])
+		}
+	}
+}
+
 func TestRRSICriticSummaryMigrationReadback(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "rrsi-critic")
 	fixtures := map[string]string{

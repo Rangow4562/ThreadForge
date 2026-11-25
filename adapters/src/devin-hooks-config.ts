@@ -1,10 +1,10 @@
 import { constants, type Stats } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { lstat, mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { isSameRealPathWithoutLinks } from './path-safety.ts';
+import { resolveAdapterCLIEntry } from './adapter-cli-entry.ts';
 import { devinHookEvents, devinManagedMarker, type DevinHookEvent } from './devin-hook.ts';
 
 export type DevinHookScope = 'user' | 'project';
@@ -148,8 +148,9 @@ function commandFor(hookEvent: DevinHookEvent, template?: string): string {
 }
 
 function defaultCommandTemplate(): string {
-  const cliPath = fileURLToPath(new URL('./cli.ts', import.meta.url));
-  return `${quoteShellArgument(process.execPath)} --experimental-strip-types ${quoteShellArgument(cliPath)} devin hook {event} ${devinManagedMarker}`;
+  const entry = resolveAdapterCLIEntry(import.meta.url);
+  return [quoteShellArgument(process.execPath), ...entry.nodeArguments.map(quoteShellArgument),
+    quoteShellArgument(entry.scriptPath), 'devin hook {event}', devinManagedMarker].join(' ');
 }
 
 function validateCommandTemplate(template: string): void {

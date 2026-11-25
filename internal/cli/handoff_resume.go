@@ -30,6 +30,7 @@ type resumeTarget struct {
 	executable          string
 	fallbackExecutables []string
 	newArgs             func(string, string) []string // prompt, source session key for runtimes that need one
+	newBriefArgs        func(string) []string         // private brief path for read-only interactive targets
 	nativeArgs          func(handoffbridge.NativeSession) ([]string, bool)
 	nativeInDir         bool
 	env                 map[string]string
@@ -135,6 +136,13 @@ func resumeTargets() map[string]resumeTarget {
 	add("muse_code", "Muse Code", "muse", func(prompt, _ string) []string { return []string{"--approval-mode", "on-request", prompt} }, nil, false, nil)
 	add("openhands", "OpenHands", "openhands", func(prompt, _ string) []string { return []string{"--task", prompt} }, nil, false, nil)
 	add("goose", "goose", "goose", func(prompt, _ string) []string { return []string{"run", "--interactive", "--text", prompt} }, nil, false, map[string]string{"GOOSE_MODE": "approve"})
+	targets["aider"] = resumeTarget{
+		label:      "Aider",
+		executable: "aider",
+		newBriefArgs: func(briefPath string) []string {
+			return []string{"--chat-mode", "ask", "--read", briefPath, "--no-auto-commits", "--no-analytics", "--no-check-update"}
+		},
+	}
 	return targets
 }
 
@@ -201,7 +209,7 @@ func runHandoffResume(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 	canonicalTarget := canonicalSource
 	if strings.TrimSpace(*targetName) != "" {
 		var ok bool
-		canonicalTarget, ok = canonicalHandoffHarness(*targetName)
+		canonicalTarget, ok = canonicalHandoffTarget(*targetName)
 		if !ok {
 			_, _ = fmt.Fprintln(stderr, "unsupported target runtime")
 			return 2
@@ -438,7 +446,7 @@ func buildResumePlan(subject resumeSubject, targetHarness, cwd, outputDir string
 	} else if forceNew {
 		plan.Reason = "requested_new_session"
 	}
-	if target.newArgs == nil {
+	if target.newArgs == nil && target.newBriefArgs == nil {
 		return resumePlan{}, handoffpkg.Brief{}, fmt.Errorf("%s can reopen its own sessions but cannot start a new session from a brief; choose another --agent", target.label)
 	}
 	if subject.source == "native" && targetHarness == subject.session.Harness && plan.Reason == "" {
@@ -460,11 +468,15 @@ func buildResumePlan(subject resumeSubject, targetHarness, cwd, outputDir string
 		key = "threadforge-handoff-" + hex.EncodeToString(sum[:8])
 	}
 	plan.Mode, plan.BriefPath = "new_session", briefPath
-	plan.Args = target.newArgs(prompt, key)
-	if beacon.HandoffMarker(subject.session.Harness, subject.session.ID) == "" {
-		plan.LinkStatus = "marker_unavailable"
+	if target.newBriefArgs != nil {
+		plan.Args = target.newBriefArgs(briefPath)
 	} else {
-		plan.LinkStatus = "marker_emitted_unverified"
+		plan.Args = target.newArgs(prompt, key)
+		if beacon.HandoffMarker(subject.session.Harness, subject.session.ID) == "" {
+			plan.LinkStatus = "marker_unavailable"
+		} else {
+			plan.LinkStatus = "marker_emitted_unverified"
+		}
 	}
 	brief := handoffpkg.BuildRuntimeLogBrief(subject.session, subject.events, subject.scan, time.Now())
 	if subject.source == "native" {
@@ -555,6 +567,9 @@ func printResumePlan(w io.Writer, plan resumePlan) {
 		_, _ = fmt.Fprintln(w, "  link:      handoff marker will be included; it is an unverified claim")
 	} else if plan.LinkStatus == "marker_unavailable" {
 		_, _ = fmt.Fprintln(w, "  warning:   source session id cannot be represented in the handoff marker; no link event is expected")
+	}
+	if plan.Target == "aider" {
+		_, _ = fmt.Fprintln(w, "  safety:    Aider opens the private brief read-only in ask mode; no initial prompt or session-link marker is sent")
 	}
 	if len(plan.Env) > 0 {
 		names := make([]string, 0, len(plan.Env))

@@ -1,6 +1,6 @@
 {
   "name": "@threadforge/openclaw-observer",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -11,5 +11,13 @@
   },
   "exports": {
     ".": "./index.js"
-  }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "openclaw.plugin.json",
+    "LICENSE",
+    "NOTICE",
+    "THIRD_PARTY.md"
+  ]
 }

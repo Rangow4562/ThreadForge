@@ -105,7 +105,7 @@ func TestFeatureParityRowsMapToCutoverRequirements(t *testing.T) {
 		}
 	}
 	for _, id := range RequiredFeatures {
-		if id == "release.license-review" { // tracked by docs/license-audit.md and THIRD_PARTY.md, outside the product-area table
+		if id == "release.license-review" || id == "release.product-name-clearance" { // external legal evidence is tracked by docs/license-audit.md and docs/cutover.md
 			continue
 		}
 		if _, ok := covered[id]; !ok {
@@ -126,6 +126,15 @@ func TestUnifiedAcceptanceDocumentsCurrentEvidenceSchema(t *testing.T) {
 		return
 	}
 	t.Fatal("Unified acceptance row was not found in docs/feature-parity.md")
+}
+
+func TestCutoverApprovalDocumentationUsesCurrentEvidenceSchema(t *testing.T) {
+	data := readRepositoryDocument(t, filepath.Join("..", "..", "docs", "cutover.md"))
+	version := strings.TrimPrefix(SchemaVersion, "threadforge.cutover-evidence.")
+	marker := "Evidence " + version + " accepts release-manager, security-reviewer, license-reviewer, and product-name-reviewer approvals"
+	if !strings.Contains(string(data), marker) {
+		t.Fatalf("cutover approval documentation must describe current evidence schema %q", SchemaVersion)
+	}
 }
 
 func TestReleaseCandidateWorkflowCannotPublishPublicReleases(t *testing.T) {
@@ -181,7 +190,13 @@ func TestReleaseCandidateWorkflowCannotPublishPublicReleases(t *testing.T) {
 		t.Fatalf("release source policy must execute its separately tested verifier, got %q", sourceCheck)
 	}
 
-	for _, jobName := range []string{"python-license-evidence", "release-candidate", "release-candidate-bundle", "engineering-runtime-sbom"} {
+	for _, jobName := range []string{
+		"python-license-evidence",
+		"release-candidate",
+		"release-candidate-bundle",
+		"engineering-runtime-sbom",
+		"browser-extension-candidate",
+	} {
 		job := workflowYAMLValue(jobs, jobName)
 		condition := workflowYAMLScalar(job, "if")
 		if !strings.Contains(condition, "github.ref == 'refs/heads/main'") {
@@ -200,6 +215,7 @@ func TestReleaseCandidateWorkflowCannotPublishPublicReleases(t *testing.T) {
 	}
 
 	sbomActions := 0
+	browserSBOMActions := 0
 	uploadActions := 0
 	var inspect func(*yaml.Node)
 	inspect = func(node *yaml.Node) {
@@ -220,6 +236,11 @@ func TestReleaseCandidateWorkflowCannotPublishPublicReleases(t *testing.T) {
 					if strings.HasPrefix(action, "anchore/sbom-action@") {
 						sbomActions++
 						configuration := workflowYAMLValue(node, "with")
+						target := workflowYAMLScalar(configuration, "path")
+						if target == "adapters/browser-extension/dist" ||
+							target == "adapters/browser-extension/dist-firefox" {
+							browserSBOMActions++
+						}
 						if workflowYAMLScalar(configuration, "upload-release-assets") != "false" ||
 							workflowYAMLScalar(configuration, "upload-artifact") != "false" {
 							t.Error("candidate SBOM generation must not upload to a public release or secondary artifact")
@@ -250,8 +271,14 @@ func TestReleaseCandidateWorkflowCannotPublishPublicReleases(t *testing.T) {
 		}
 	}
 	inspect(root)
-	if sbomActions != 3 {
-		t.Errorf("expected three non-publishing SBOM action configurations, got %d", sbomActions)
+	if sbomActions != 5 {
+		t.Errorf(
+			"expected five non-publishing SBOM action configurations (three existing plus two browser targets), got %d",
+			sbomActions,
+		)
+	}
+	if browserSBOMActions != 2 {
+		t.Errorf("expected non-publishing SBOM scans for both browser targets, got %d", browserSBOMActions)
 	}
 	if uploadActions == 0 {
 		t.Error("release candidates must remain available as temporary workflow artifacts")

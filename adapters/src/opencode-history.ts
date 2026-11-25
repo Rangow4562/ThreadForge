@@ -1,9 +1,9 @@
-import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { runBoundedCommand } from './bounded-command.ts';
 import { isWithinRealPaths } from './path-safety.ts';
 import { TextDecoder } from 'node:util';
 import { emitEvents, type ThreadforgeEvent } from './emit.ts';
@@ -625,33 +625,11 @@ async function runPowerShell(command: OpenCodeHistoryCommand): Promise<string> {
 }
 
 async function spawnCaptured(executable: string, args: string[], cwd: string): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const child = spawn(executable, args, { cwd, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let settled = false;
-    const timeout = setTimeout(() => {
-      child.kill();
-      finish(new Error('OpenCode CLI timed out'));
-    }, cliTimeoutMs);
-    const finish = (error?: Error, output?: string) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      if (error) reject(error);
-      else resolve(output ?? '');
-    };
-    child.stdout.on('data', (chunk: Buffer) => {
-      size += chunk.byteLength;
-      if (size > maxCliOutputBytes) {
-        child.kill();
-        finish(new Error('OpenCode CLI output exceeded the local limit'));
-      } else chunks.push(Buffer.from(chunk));
-    });
-    child.once('error', () => finish(new Error('OpenCode CLI could not be started')));
-    child.once('close', (code) => {
-      if (code !== 0) finish(new Error(`OpenCode CLI exited with status ${code}`));
-      else finish(undefined, Buffer.concat(chunks).toString('utf8'));
-    });
+  return runBoundedCommand(executable, args, {
+    label: 'OpenCode CLI',
+    timeoutMs: cliTimeoutMs,
+    captureStdout: true,
+    maxStdoutBytes: maxCliOutputBytes,
+    cwd,
   });
 }

@@ -118,17 +118,27 @@ function instrumentOpenCodeV2HookDomain(
     enumerable: true,
     value: async (name: string, callback: (event: unknown) => unknown) => {
       const observedCallback = async (event: unknown): Promise<unknown> => {
-        const result = await callback(event);
-        if (callbackMarker && recordedCallbacks < 256) {
-          recordedCallbacks++;
-          appendFileSync(callbackMarker, `${JSON.stringify({
-            hook: `${domainName}.${name}`,
-            completed: true,
-            memory_context_marker_present: domainName === 'session' && name === 'context' &&
-              eventContainsMemoryMarker(event, expectedMemoryMarker),
-          })}\n`, { mode: 0o600 });
+        let completed = false;
+        let hookErrorObserved = false;
+        try {
+          const result = await callback(event);
+          completed = true;
+          return result;
+        } catch (error) {
+          hookErrorObserved = true;
+          throw error;
+        } finally {
+          if (callbackMarker && recordedCallbacks < 256) {
+            recordedCallbacks++;
+            appendFileSync(callbackMarker, `${JSON.stringify({
+              hook: `${domainName}.${name}`,
+              completed,
+              hook_error_observed: hookErrorObserved,
+              memory_context_marker_present: domainName === 'session' && name === 'context' &&
+                eventContainsMemoryMarker(event, expectedMemoryMarker),
+            })}\n`, { mode: 0o600 });
+          }
         }
-        return result;
       };
       const result = await originalHook.call(domain, name, observedCallback);
       registeredHooks.push(`${domainName}.${name}`);

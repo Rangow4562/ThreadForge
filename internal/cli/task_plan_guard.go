@@ -37,6 +37,7 @@ type taskPlanGateAntigravityTool struct {
 
 type taskPlanGateToolInput struct {
 	FilePath   string `json:"file_path"`
+	FilePathJS string `json:"filePath"`
 	Path       string `json:"path"`
 	TargetFile string `json:"TargetFile"`
 	Patch      string `json:"patch"`
@@ -76,8 +77,12 @@ func runTaskPlanGuard(args []string, stdout, stderr io.Writer) int {
 	cursorMarker := fs.String("threadforge-managed-cursor-plan-gate", "", "required Cursor hook marker")
 	antigravityMarker := fs.String("threadforge-managed-antigravity-plan-gate", "", "required Antigravity hook marker")
 	clineMarker := fs.String("threadforge-managed-cline-plan-gate", "", "required Cline CLI plugin marker")
+	opencodeMarker := fs.String("threadforge-managed-opencode-plan-gate", "", "required OpenCode plugin marker")
 	planGateMarker := fs.String("threadforge-plan-gate", "", "required host-specific plan-gate ownership marker")
 	if err := fs.Parse(args); err != nil || *taskID == "" || *projectID == "" || *projectRoot == "" || fs.NArg() != 0 {
+		return writeTaskPlanGateResult(stdout, stderr, false, *host)
+	}
+	if *host != "opencode" && *opencodeMarker != "" {
 		return writeTaskPlanGateResult(stdout, stderr, false, *host)
 	}
 	switch *host {
@@ -111,6 +116,10 @@ func runTaskPlanGuard(args []string, stdout, stderr io.Writer) int {
 		}
 	case "cline-cli":
 		if *clineMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *geminiMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *planGateMarker != "cline-v1" {
+			return writeTaskPlanGateResult(stdout, stderr, false, *host)
+		}
+	case "opencode":
+		if *opencodeMarker != planGateRuntimeMarker || *claudeMarker != "" || *qwenMarker != "" || *copilotMarker != "" || *codexMarker != "" || *geminiMarker != "" || *cursorMarker != "" || *antigravityMarker != "" || *clineMarker != "" || *planGateMarker != "opencode-v1" {
 			return writeTaskPlanGateResult(stdout, stderr, false, *host)
 		}
 	default:
@@ -164,6 +173,17 @@ func runTaskPlanGuard(args []string, stdout, stderr io.Writer) int {
 		}
 		if !taskPlanGateToolIsSupported(*host, toolName) && taskPlanGateCopilotUnsupportedMutationTool(toolName) {
 			return writeCopilotUnscopedPlanDecision(stdout, stderr, false)
+		}
+	}
+	if *host == "cursor" {
+		if taskPlanGateCursorReadOnlyMCPTool(toolName) {
+			return writeTaskPlanGateResult(stdout, stderr, true, *host)
+		}
+		if taskPlanGateCursorRequiresGovernedPlan(toolName) {
+			if !taskPlanGateCursorUnscopedInputValid(toolName, toolArgs) {
+				return writeTaskPlanGateResult(stdout, stderr, false, *host)
+			}
+			return guardCursorUnscopedTool(*taskID, *projectID, *projectRoot, hookInput.CWD, *database, stdout, stderr)
 		}
 	}
 	if !taskPlanGateToolIsSupported(*host, toolName) {
@@ -236,6 +256,49 @@ func taskPlanGateCopilotIsMCPTool(toolName string) bool {
 	return toolName == "mcp" || strings.HasPrefix(toolName, "mcp_") || strings.HasPrefix(toolName, "mcp:")
 }
 
+func taskPlanGateCursorRequiresGovernedPlan(toolName string) bool {
+	name := strings.TrimSpace(toolName)
+	return strings.EqualFold(name, "Shell") || taskPlanGateCursorIsMCPTool(name)
+}
+
+func taskPlanGateCursorIsMCPTool(toolName string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(toolName)), "mcp:")
+}
+
+// Cursor only bypasses the task-plan check for an exact set of Threadforge
+// read-only MCP tools. Unknown MCP tools are treated as potentially mutating.
+func taskPlanGateCursorReadOnlyMCPTool(toolName string) bool {
+	if !taskPlanGateCursorIsMCPTool(toolName) {
+		return false
+	}
+	name := strings.ToLower(strings.TrimSpace(toolName))
+	name = strings.TrimSpace(name[len("mcp:"):])
+	switch name {
+	case "threadforge_context_get", "threadforge_project_memory_read_v2",
+		"threadforge_procedure_list", "threadforge_procedure_get", "threadforge_procedure_guide",
+		"threadforge_task_resume_context", "threadforge_task_discover":
+		return true
+	default:
+		return false
+	}
+}
+
+func taskPlanGateCursorUnscopedInputValid(toolName string, raw json.RawMessage) bool {
+	if strings.EqualFold(strings.TrimSpace(toolName), "Shell") {
+		var input taskPlanGateToolInput
+		if json.Unmarshal(raw, &input) != nil {
+			return false
+		}
+		command := input.Command
+		if command == "" {
+			command = input.Cmd
+		}
+		return strings.TrimSpace(command) != ""
+	}
+	var input map[string]json.RawMessage
+	return taskPlanGateCursorIsMCPTool(toolName) && json.Unmarshal(raw, &input) == nil && input != nil
+}
+
 // MCP names are host-controlled. Recognize read-only operations by their final
 // tool component and treat unknown names as potentially mutating.
 func taskPlanGateCopilotReadOnlyMCPTool(toolName string) bool {
@@ -286,6 +349,25 @@ func taskPlanGateCopilotUnsupportedMutationTool(toolName string) bool {
 }
 
 func guardCopilotUnscopedTool(taskID, projectID, projectRoot, cwd, database string, stdout, stderr io.Writer) int {
+	return writeCopilotUnscopedPlanDecision(stdout, stderr,
+		taskPlanGateUnscopedAllowedByPlan(taskID, projectID, projectRoot, cwd, database))
+}
+
+func guardCursorUnscopedTool(taskID, projectID, projectRoot, cwd, database string, stdout, stderr io.Writer) int {
+	result := struct {
+		Permission   string `json:"permission,omitempty"`
+		UserMessage  string `json:"user_message,omitempty"`
+		AgentMessage string `json:"agent_message,omitempty"`
+	}{}
+	if !taskPlanGateUnscopedAllowedByPlan(taskID, projectID, projectRoot, cwd, database) {
+		result.Permission = "deny"
+		result.UserMessage = "Threadforge withheld this Cursor shell or MCP call until requirements are finalized and governed execution is confirmed."
+		result.AgentMessage = "The configured Threadforge task plan gate withheld this shell or MCP call. Review finalized task requirements and the plan decision."
+	}
+	return writeIndentedJSON(stdout, result, stderr)
+}
+
+func taskPlanGateUnscopedAllowedByPlan(taskID, projectID, projectRoot, cwd, database string) bool {
 	root, rootErr := taskPlanGateProjectRoot(projectRoot)
 	permittedByPlan := false
 	if rootErr == nil {
@@ -302,7 +384,7 @@ func guardCopilotUnscopedTool(taskID, projectID, projectRoot, cwd, database stri
 			}
 		}
 	}
-	return writeCopilotUnscopedPlanDecision(stdout, stderr, permittedByPlan)
+	return permittedByPlan
 }
 
 func writeCopilotUnscopedPlanDecision(stdout, stderr io.Writer, permittedByPlan bool) int {
@@ -341,6 +423,8 @@ func taskPlanGateToolIsSupported(host, toolName string) bool {
 		}
 	case "cline-cli":
 		return toolName == "editor" || toolName == "apply_patch"
+	case "opencode":
+		return toolName == "write" || toolName == "edit" || toolName == "apply_patch"
 	default:
 		return false
 	}
@@ -414,6 +498,35 @@ func taskPlanGateToolTargetPaths(host, toolName string, raw json.RawMessage) ([]
 		}
 		return []string{input.Path}, true
 	}
+	if host == "opencode" {
+		if toolName == "apply_patch" {
+			if input.Patch != "" && input.Input != "" {
+				return nil, false
+			}
+			patch := input.Patch
+			if patch == "" {
+				patch = input.Input
+			}
+			return taskPlanGateCopilotPatchPaths(patch)
+		}
+		if toolName != "write" && toolName != "edit" {
+			return nil, false
+		}
+		target := ""
+		for _, candidate := range []string{input.FilePath, input.FilePathJS, input.Path} {
+			if candidate == "" {
+				continue
+			}
+			if target != "" && target != candidate {
+				return nil, false
+			}
+			target = candidate
+		}
+		if target == "" {
+			return nil, false
+		}
+		return []string{target}, true
+	}
 	if host != "github-copilot" {
 		if input.FilePath == "" {
 			return nil, false
@@ -483,6 +596,17 @@ func taskPlanGateCopilotPatchPaths(patch string) ([]string, bool) {
 }
 
 func writeTaskPlanGateResult(stdout, stderr io.Writer, withinScope bool, host string) int {
+	if host == "opencode" {
+		result := struct {
+			Decision string `json:"decision"`
+			Reason   string `json:"reason,omitempty"`
+		}{Decision: "allow"}
+		if !withinScope {
+			result.Decision = "deny"
+			result.Reason = "Threadforge withheld this OpenCode file operation; task requirements, plan decision, or implementation scope did not satisfy the configured guard."
+		}
+		return writeIndentedJSON(stdout, result, stderr)
+	}
 	if host == "cline-cli" {
 		result := struct {
 			Decision string `json:"decision"`

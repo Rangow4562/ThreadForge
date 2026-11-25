@@ -589,6 +589,17 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 	if code != 0 || unconfirmedError != "" || !strings.Contains(unconfirmedOutput, "\"permissionDecision\": \"deny\"") {
 		t.Fatalf("unconfirmed plan was not denied: code=%d stdout=%s stderr=%s", code, unconfirmedOutput, unconfirmedError)
 	}
+	opencodeWriteInput := map[string]any{
+		"hook_event_name": "PreToolUse", "tool_name": "write", "cwd": projectRoot,
+		"tool_input": map[string]any{"filePath": "src/main.go", "content": "private OpenCode source"},
+	}
+	code, opencodeUnconfirmedOutput, opencodeUnconfirmedError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "opencode", opencodeWriteInput)
+	if code != 0 || opencodeUnconfirmedError != "" || !strings.Contains(opencodeUnconfirmedOutput, `"decision": "deny"`) ||
+		strings.Contains(opencodeUnconfirmedOutput, projectRoot) || strings.Contains(opencodeUnconfirmedOutput, "private OpenCode source") {
+		t.Fatalf("unconfirmed OpenCode write was not privately denied: code=%d stdout=%s stderr=%s",
+			code, opencodeUnconfirmedOutput, opencodeUnconfirmedError)
+	}
 	copilotShellInput := map[string]any{
 		"eventName": "preToolUse", "cwd": projectRoot, "toolName": "bash",
 		"toolArgs": map[string]any{"command": "node -e write-private-sentinel"},
@@ -622,6 +633,38 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 		t.Fatalf("read-only Copilot MCP retrieval should remain available during planning: code=%d stdout=%s stderr=%s",
 			code, copilotReadOnlyMCPOutput, copilotReadOnlyMCPError)
 	}
+	cursorShellInput := map[string]any{
+		"hook_event_name": "preToolUse", "tool_name": "Shell", "cwd": projectRoot,
+		"tool_input": map[string]any{"command": "node -e write-private-sentinel"},
+	}
+	code, cursorBeforePlanShellOutput, cursorBeforePlanShellError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorShellInput)
+	if code != 0 || cursorBeforePlanShellError != "" || !strings.Contains(cursorBeforePlanShellOutput, `"permission": "deny"`) ||
+		strings.Contains(cursorBeforePlanShellOutput, "write-private-sentinel") {
+		t.Fatalf("unconfirmed Cursor shell call was not privately denied: code=%d stdout=%s stderr=%s",
+			code, cursorBeforePlanShellOutput, cursorBeforePlanShellError)
+	}
+	cursorMCPMutationInput := map[string]any{
+		"hook_event_name": "preToolUse", "tool_name": "MCP:fixture_write_record", "cwd": projectRoot,
+		"tool_input": map[string]any{"record": "private-value"},
+	}
+	code, cursorBeforePlanMCPOutput, cursorBeforePlanMCPError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorMCPMutationInput)
+	if code != 0 || cursorBeforePlanMCPError != "" || !strings.Contains(cursorBeforePlanMCPOutput, `"permission": "deny"`) ||
+		strings.Contains(cursorBeforePlanMCPOutput, "private-value") {
+		t.Fatalf("unconfirmed Cursor MCP call was not privately denied: code=%d stdout=%s stderr=%s",
+			code, cursorBeforePlanMCPOutput, cursorBeforePlanMCPError)
+	}
+	cursorReadOnlyMCPInput := map[string]any{
+		"hook_event_name": "preToolUse", "tool_name": "MCP:threadforge_procedure_get", "cwd": projectRoot,
+		"tool_input": map[string]any{"procedure_id": "approved-procedure"},
+	}
+	code, cursorReadOnlyMCPOutput, cursorReadOnlyMCPError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorReadOnlyMCPInput)
+	if code != 0 || cursorReadOnlyMCPError != "" || strings.Contains(cursorReadOnlyMCPOutput, "permission") {
+		t.Fatalf("allowlisted read-only Cursor MCP retrieval should remain available during planning: code=%d stdout=%s stderr=%s",
+			code, cursorReadOnlyMCPOutput, cursorReadOnlyMCPError)
+	}
 	if code := Run([]string{"task", "plan", "confirm", "--id", "plan-gate-task", "--expected-revision", "3",
 		"--decision", "plan_only", "--actor", "owner", "--reason", "plan only; do not edit"}, &out, &stderr); code != 0 {
 		t.Fatalf("plan-only confirmation code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
@@ -640,6 +683,12 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 		strings.Contains(blockedOutput, projectRoot) || strings.Contains(blockedOutput, "private source") {
 		t.Fatalf("plan-only hook response did not deny privately: %s", blockedOutput)
 	}
+	code, opencodePlanOnlyOutput, opencodePlanOnlyError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "opencode", opencodeWriteInput)
+	if code != 0 || opencodePlanOnlyError != "" || !strings.Contains(opencodePlanOnlyOutput, `"decision": "deny"`) {
+		t.Fatalf("plan-only OpenCode write was not denied: code=%d stdout=%s stderr=%s",
+			code, opencodePlanOnlyOutput, opencodePlanOnlyError)
+	}
 	code, copilotPlanOnlyShellOutput, copilotPlanOnlyShellError := runTaskPlanGuardTestHook(t, projectRoot,
 		"plan-gate-task", "plan-gate-project", "github-copilot", copilotShellInput)
 	if code != 0 || copilotPlanOnlyShellError != "" ||
@@ -653,6 +702,18 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 		!strings.Contains(copilotPlanOnlyMCPOutput, `"permissionDecision": "deny"`) {
 		t.Fatalf("plan-only Copilot MCP mutation was not denied: code=%d stdout=%s stderr=%s",
 			code, copilotPlanOnlyMCPOutput, copilotPlanOnlyMCPError)
+	}
+	code, cursorPlanOnlyShellOutput, cursorPlanOnlyShellError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorShellInput)
+	if code != 0 || cursorPlanOnlyShellError != "" || !strings.Contains(cursorPlanOnlyShellOutput, `"permission": "deny"`) {
+		t.Fatalf("plan-only Cursor shell call was not denied: code=%d stdout=%s stderr=%s",
+			code, cursorPlanOnlyShellOutput, cursorPlanOnlyShellError)
+	}
+	code, cursorPlanOnlyMCPOutput, cursorPlanOnlyMCPError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorMCPMutationInput)
+	if code != 0 || cursorPlanOnlyMCPError != "" || !strings.Contains(cursorPlanOnlyMCPOutput, `"permission": "deny"`) {
+		t.Fatalf("plan-only Cursor MCP call was not denied: code=%d stdout=%s stderr=%s",
+			code, cursorPlanOnlyMCPOutput, cursorPlanOnlyMCPError)
 	}
 	codexPlanOnlyInput := map[string]any{
 		"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": projectRoot,
@@ -695,10 +756,66 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 		"--decision", "governed_execution", "--actor", "owner", "--reason", "continue within the declared scope"}, &out, &stderr); code != 0 {
 		t.Fatalf("scoped plan confirmation code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
 	}
+	code, cursorGovernedShellOutput, cursorGovernedShellError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorShellInput)
+	var cursorGovernedShell map[string]any
+	if code != 0 || cursorGovernedShellError != "" || json.Unmarshal([]byte(cursorGovernedShellOutput), &cursorGovernedShell) != nil ||
+		len(cursorGovernedShell) != 0 {
+		t.Fatalf("governed Cursor shell call must return no opinion, not allow: code=%d stdout=%s stderr=%s",
+			code, cursorGovernedShellOutput, cursorGovernedShellError)
+	}
+	cursorShellOutsideCWDInput := map[string]any{
+		"hook_event_name": "preToolUse", "tool_name": "Shell", "cwd": t.TempDir(),
+		"tool_input": map[string]any{"command": "go test ./..."},
+	}
+	code, cursorShellOutsideCWDOutput, cursorShellOutsideCWDError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorShellOutsideCWDInput)
+	if code != 0 || cursorShellOutsideCWDError != "" || !strings.Contains(cursorShellOutsideCWDOutput, `"permission": "deny"`) {
+		t.Fatalf("Cursor shell call outside the selected project was not denied: code=%d stdout=%s stderr=%s",
+			code, cursorShellOutsideCWDOutput, cursorShellOutsideCWDError)
+	}
+	code, cursorGovernedMCPOutput, cursorGovernedMCPError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "cursor", cursorMCPMutationInput)
+	var cursorGovernedMCP map[string]any
+	if code != 0 || cursorGovernedMCPError != "" || json.Unmarshal([]byte(cursorGovernedMCPOutput), &cursorGovernedMCP) != nil ||
+		len(cursorGovernedMCP) != 0 {
+		t.Fatalf("governed Cursor MCP call must return no opinion, not allow: code=%d stdout=%s stderr=%s",
+			code, cursorGovernedMCPOutput, cursorGovernedMCPError)
+	}
 
 	code, inScopeOutput, inScopeError := runClaudeTaskPlanGuardTestHook(t, projectRoot, "plan-gate-task", "plan-gate-project", hookInput)
 	if code != 0 || inScopeError != "" || strings.Contains(inScopeOutput, "permissionDecision") {
 		t.Fatalf("in-scope hook must return no opinion, not an allow: code=%d stdout=%s stderr=%s", code, inScopeOutput, inScopeError)
+	}
+	code, opencodeInScopeOutput, opencodeInScopeError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "opencode", opencodeWriteInput)
+	var opencodeInScope map[string]any
+	if code != 0 || opencodeInScopeError != "" || json.Unmarshal([]byte(opencodeInScopeOutput), &opencodeInScope) != nil ||
+		opencodeInScope["decision"] != "allow" || strings.Contains(opencodeInScopeOutput, "private OpenCode source") {
+		t.Fatalf("in-scope OpenCode write did not return a content-free no-opinion result: code=%d stdout=%s stderr=%s",
+			code, opencodeInScopeOutput, opencodeInScopeError)
+	}
+	opencodeOutsideInput := map[string]any{
+		"hook_event_name": "PreToolUse", "tool_name": "edit", "cwd": projectRoot,
+		"tool_input": map[string]any{"filePath": "docs/readme.md", "oldString": "private", "newString": "changed"},
+	}
+	code, opencodeOutsideOutput, opencodeOutsideError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "opencode", opencodeOutsideInput)
+	if code != 0 || opencodeOutsideError != "" || !strings.Contains(opencodeOutsideOutput, `"decision": "deny"`) ||
+		strings.Contains(opencodeOutsideOutput, "docs/readme.md") || strings.Contains(opencodeOutsideOutput, "private") {
+		t.Fatalf("out-of-scope OpenCode edit was not privately denied: code=%d stdout=%s stderr=%s",
+			code, opencodeOutsideOutput, opencodeOutsideError)
+	}
+	opencodePatchInput := map[string]any{
+		"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": projectRoot,
+		"tool_input": map[string]any{"patch": "*** Begin Patch\n*** Update File: src/main.go\n@@\n-old\n+new\n*** End Patch"},
+	}
+	code, opencodePatchOutput, opencodePatchError := runTaskPlanGuardTestHook(t, projectRoot,
+		"plan-gate-task", "plan-gate-project", "opencode", opencodePatchInput)
+	if code != 0 || opencodePatchError != "" || strings.Contains(opencodePatchOutput, `"decision": "deny"`) ||
+		strings.Contains(opencodePatchOutput, "permissionDecision") {
+		t.Fatalf("in-scope OpenCode patch should return a content-free no-opinion result: code=%d stdout=%s stderr=%s",
+			code, opencodePatchOutput, opencodePatchError)
 	}
 	codexInScopeInput := map[string]any{
 		"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": projectRoot,
@@ -821,8 +938,8 @@ func TestTaskPlanGuardsDenyPlanOnlyAndOutOfScopeWritesWithoutGrantingPermission(
 			code, cursorOutsideOutput, cursorOutsideError)
 	}
 	cursorUnsupportedInput := map[string]any{
-		"tool_name": "Shell", "cwd": projectRoot,
-		"tool_input": map[string]any{"command": "echo do-not-run"},
+		"tool_name": "UnknownTool", "cwd": projectRoot,
+		"tool_input": map[string]any{"value": "do-not-run"},
 	}
 	code, cursorUnsupportedOutput, cursorUnsupportedError := runTaskPlanGuardTestHook(t, projectRoot,
 		"plan-gate-task", "plan-gate-project", "cursor", cursorUnsupportedInput)
@@ -1154,6 +1271,8 @@ func runTaskPlanGuardTestHook(t *testing.T, projectRoot, taskID, projectID, host
 		args = append(args, "--host", host, "--threadforge-managed-antigravity-plan-gate=v1", "--threadforge-plan-gate=antigravity-v1")
 	} else if host == "cline-cli" {
 		args = append(args, "--host", host, "--threadforge-managed-cline-plan-gate=v1", "--threadforge-plan-gate=cline-v1")
+	} else if host == "opencode" {
+		args = append(args, "--host", host, "--threadforge-managed-opencode-plan-gate=v1", "--threadforge-plan-gate=opencode-v1")
 	} else {
 		args = append(args, "--threadforge-managed-claude-plan-gate=v1", "--threadforge-plan-gate=claude-v1")
 	}
@@ -6695,6 +6814,97 @@ func TestMemoryLearnWithoutConfiguredLocalModelProducesNoCandidate(t *testing.T)
 	}
 }
 
+func TestMemoryLearnRemoteRequiresExplicitOptInAndCompleteConfiguration(t *testing.T) {
+	runnerCalled := false
+	runner := func(context.Context, string, []byte, bool) ([]byte, error) {
+		runnerCalled = true
+		return nil, errors.New("inference must not start")
+	}
+	for _, args := range [][]string{
+		{"--input", "unused.jsonl", "--project-id", "demo", "--remote-endpoint", "https://inference.example/v1", "--remote-model", "model"},
+		{"--input", "unused.jsonl", "--project-id", "demo", "--remote-opt-in"},
+		{"--input", "unused.jsonl", "--project-id", "demo", "--remote-opt-in", "--remote-endpoint", "https://inference.example/v1", "--remote-model", "model", "--model-path", "local-model"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := learnMemoryWithRunner(args, &stdout, &stderr, runner); code != 2 {
+			t.Fatalf("invalid remote configuration code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		}
+	}
+	if runnerCalled {
+		t.Fatal("remote inference ran without a valid explicit opt-in configuration")
+	}
+}
+
+func TestMemoryLearnRemoteOptInKeepsCredentialOutOfProtocolRequest(t *testing.T) {
+	t.Setenv("THREADFORGE_MEMORY_API_KEY", "fixture-secret-not-in-request")
+	inputPath := filepath.Join(t.TempDir(), "events.jsonl")
+	var input bytes.Buffer
+	encoder := json.NewEncoder(&input)
+	for _, action := range []string{"test.failed", "task.failed"} {
+		if err := encoder.Encode(beacon.NewEvent(beacon.NewEventOptions{
+			Action: action, Harness: beacon.HarnessInfo{Name: "codex"}, Message: "A focused test failure repeated.",
+		})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(inputPath, input.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	runner := func(ctx context.Context, python string, requestBytes []byte, remoteOptIn bool) ([]byte, error) {
+		if python != "fixture-python" || !remoteOptIn {
+			return nil, errors.New("remote inference invocation was not explicitly marked")
+		}
+		if _, ok := ctx.Deadline(); !ok {
+			return nil, errors.New("remote inference request omitted its timeout")
+		}
+		if bytes.Contains(requestBytes, []byte("fixture-secret-not-in-request")) {
+			return nil, errors.New("remote credential was serialized into the protocol request")
+		}
+		var request struct {
+			Operation string `json:"operation"`
+			Params    struct {
+				Backend map[string]any `json:"backend"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(requestBytes, &request); err != nil || request.Operation != "memory.learn" ||
+			request.Params.Backend["type"] != "openai_compatible" ||
+			request.Params.Backend["base_url"] != "https://inference.example/v1" ||
+			request.Params.Backend["model"] != "remote-model" || request.Params.Backend["remote_opt_in"] != true ||
+			len(request.Params.Backend) != 4 {
+			return nil, errors.New("memory learning sent an invalid remote backend request")
+		}
+		return []byte(`{"schema_version":"threadforge.python.v1","request_id":"memory-learn","status":"ok","result":{"status":"no_candidate","reason":"remote_inference_unavailable","candidate":null}}`), nil
+	}
+	code := learnMemoryWithRunner([]string{
+		"--input", inputPath, "--project-id", "demo", "--remote-opt-in",
+		"--remote-endpoint", "https://inference.example/v1", "--remote-model", "remote-model",
+		"--python", "fixture-python",
+	}, &stdout, &stderr, runner)
+	if code != 0 || !strings.Contains(stdout.String(), `"reason": "remote_inference_unavailable"`) ||
+		strings.Contains(stdout.String(), "fixture-secret-not-in-request") {
+		t.Fatalf("remote learning code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestMemoryLearnPythonEnvironmentWithholdsRemoteCredentialByDefault(t *testing.T) {
+	t.Setenv("THREADFORGE_MEMORY_API_KEY", "local-mode-must-not-inherit-this")
+	containsKey := func(environment []string) bool {
+		for _, entry := range environment {
+			if strings.HasPrefix(strings.ToUpper(entry), "THREADFORGE_MEMORY_API_KEY=") {
+				return true
+			}
+		}
+		return false
+	}
+	if containsKey(memoryLearnPythonEnvironment(false)) {
+		t.Fatal("local inference subprocess inherited the remote memory API key")
+	}
+	if !containsKey(memoryLearnPythonEnvironment(true)) {
+		t.Fatal("explicit remote inference did not receive its environment-only API key")
+	}
+}
+
 func TestMemoryLearnTreatsPromptTextAsUntrustedAndBlocksTraceCredentials(t *testing.T) {
 	input := filepath.Join(t.TempDir(), "events.jsonl")
 	var content bytes.Buffer
@@ -6838,9 +7048,12 @@ func TestMemoryLearnCLIStoresSourceBoundDraftWithoutSendingLocalPaths(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := func(ctx context.Context, python string, requestBytes []byte) ([]byte, error) {
+	runner := func(ctx context.Context, python string, requestBytes []byte, remoteOptIn bool) ([]byte, error) {
 		if python != "fixture-python" {
 			return nil, fmt.Errorf("unexpected python command %q", python)
+		}
+		if remoteOptIn {
+			return nil, errors.New("local inference was unexpectedly marked remote")
 		}
 		if _, ok := ctx.Deadline(); !ok {
 			return nil, errors.New("learning inference request omitted its timeout")
@@ -6942,7 +7155,7 @@ func TestMemoryLearnCLIWithRequestedBindingDoesNotPersistWithoutApplicableFiles(
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := func(context.Context, string, []byte) ([]byte, error) { return response, nil }
+	runner := func(context.Context, string, []byte, bool) ([]byte, error) { return response, nil }
 	databasePath := filepath.Join(root, "must-not-exist.sqlite")
 	var stdout, stderr bytes.Buffer
 	code := learnMemoryWithRunner([]string{

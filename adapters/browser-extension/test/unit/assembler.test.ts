@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from './test-api.js';
 import '../../src/adapters/claude.js';
 import { Assembler } from '../../src/background/assembler.js';
 import type { InterceptEvent } from '../../src/shared/types.js';

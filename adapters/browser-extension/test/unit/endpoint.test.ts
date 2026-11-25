@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from './test-api.js';
 import { DEFAULT_OTLP_LOGS_ENDPOINT, isLocalThreadforgeLogsEndpoint } from '../../src/shared/endpoint.js';
 
 describe('local Threadforge OTLP endpoint', () => {

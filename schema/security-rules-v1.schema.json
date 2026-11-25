@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.ai/schemas/security-rules-v1.schema.json",
+  "title": "Threadforge security rules response v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "count", "rules"],
+  "properties": {
+    "schema_version": { "const": "threadforge.security-rules.v1" },
+    "count": { "type": "integer", "minimum": 0, "maximum": 500 },
+    "rules": {
+      "type": "array",
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "title", "severity", "status", "posture", "kind", "source", "test_count"],
+      "properties": {
+        "rule_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "description": { "type": "string", "maxLength": 2048 },
+        "severity": { "enum": ["info", "low", "medium", "high", "critical"] },
+        "status": { "enum": ["experimental", "stable", "deprecated"] },
+        "posture": { "enum": ["detect", "enforce-capable"] },
+        "kind": { "enum": ["match", "correlation"] },
+        "reason": { "type": "string", "maxLength": 1000 },
+        "source": { "enum": ["baseline", "store"] },
+        "test_count": { "type": "integer", "minimum": 0, "maximum": 10000 }
+      }
+    }
+  }
+}

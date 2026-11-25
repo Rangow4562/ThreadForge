@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from './test-api.js';
 import { detectBrowser, type NavigatorLike, type UABrand } from '../../src/shared/browser-identity.js';
 
 // Brand lists as each browser reports them in navigator.userAgentData.brands.
@@ -88,12 +88,11 @@ describe('detectBrowser — UA Client Hints brands', () => {
     expect([...names]).toEqual(['Microsoft Edge']);
   });
 
-  it.each(['Not_A Brand', 'Not)A;Brand', ' Not A;Brand', 'Not-A.Brand', 'Not?A_Brand', 'Not/A)Brand', 'Not A(Brand'])(
-    'never picks the GREASE brand %j',
-    (grease) => {
+  for (const grease of ['Not_A Brand', 'Not)A;Brand', ' Not A;Brand', 'Not-A.Brand', 'Not?A_Brand', 'Not/A)Brand', 'Not A(Brand']) {
+    it(`never picks the GREASE brand ${JSON.stringify(grease)}`, () => {
       expect(detectBrowser(nav([b(grease, '99'), b('Chromium', '124')]))?.name).toBe('Chromium');
-    },
-  );
+    });
+  }
 
   it('keeps GREASE in browser.brands, exactly as reported (semconv takes brands verbatim)', () => {
     const id = detectBrowser(nav([b('Not)A;Brand', '99'), b('Chromium', '124')]));
@@ -122,7 +121,7 @@ describe('detectBrowser — Brave without a Brave brand', () => {
 });
 
 describe('detectBrowser — UA string fallback (no UA Client Hints)', () => {
-  it.each([
+  const cases: Array<[label: string, ua: string, name: string, version: string]> = [
     ['Edge', CHROME_UA + ' Edg/120.0.0.0', 'Microsoft Edge', '120'],
     ['Opera', CHROME_UA + ' OPR/106.0.0.0', 'Opera', '106'],
     ['Vivaldi (older builds that still say so)', CHROME_UA + ' Vivaldi/6.5.3206.48', 'Vivaldi', '6'],
@@ -139,13 +138,17 @@ describe('detectBrowser — UA string fallback (no UA Client Hints)', () => {
       'Safari',
       '17',
     ],
-  ])('%s', (_label, ua, name, version) => {
-    const id = detectBrowser(nav(undefined, ua));
-    expect(id?.name).toBe(name);
-    expect(id?.version).toBe(version);
-    expect(id?.brands).toEqual([]);
-    expect(id?.original).toBe(ua);
-  });
+  ];
+
+  for (const [label, ua, name, version] of cases) {
+    it(label, () => {
+      const id = detectBrowser(nav(undefined, ua));
+      expect(id?.name).toBe(name);
+      expect(id?.version).toBe(version);
+      expect(id?.brands).toEqual([]);
+      expect(id?.original).toBe(ua);
+    });
+  }
 
   it('falls back to the UA string when the brand list is empty', () => {
     expect(detectBrowser(nav([], CHROME_UA + ' Edg/120.0.0.0'))?.name).toBe('Microsoft Edge');

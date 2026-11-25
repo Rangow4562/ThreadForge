@@ -4,10 +4,12 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import {
+  buildOpenCodePlanGateArguments,
   buildOpenCodeMemoryArguments,
   createOpenCodeAdapter,
   createThreadforgeOpenCodeV1Plugin,
   createThreadforgeOpenCodeV2Plugin,
+  type OpenCodeTaskPlanGuardInput,
 } from '../src/opencode-plugin.ts';
 import type { ThreadforgeEvent } from '../src/emit.ts';
 
@@ -276,6 +278,102 @@ test('captures bounded tool and command metadata but not raw arguments or result
   assert.equal(JSON.stringify(events).includes('sensitive output'), false);
   assert.equal(JSON.stringify(events).includes('secret body'), false);
   assert.equal(JSON.stringify(events).includes('call-a'), false);
+});
+
+test('OpenCode task-plan guard is opt-in, bounds direct file callbacks, and leaves ordinary permissions authoritative', async () => {
+  const events: ThreadforgeEvent[] = [];
+  const guardInputs: OpenCodeTaskPlanGuardInput[] = [];
+  const projectRoot = process.cwd();
+  const planGate = {
+    taskId: 'task-parser',
+    projectId: 'parser-project',
+    projectRoot,
+    invokeGuard: async (_options: unknown, input: OpenCodeTaskPlanGuardInput) => {
+      guardInputs.push(input);
+      return { decision: 'allow' };
+    },
+  };
+  const adapter = createOpenCodeAdapter(async (event) => { events.push(event); }, 128, undefined, planGate);
+  const calls = [
+    ['write', { filePath: 'src/main.go', content: 'private file content' }],
+    ['edit', { filePath: 'src/main.go', oldString: 'private old', newString: 'private new' }],
+    ['apply_patch', { patch: 'private patch bytes' }],
+  ] as const;
+  for (const [tool, args] of calls) {
+    await adapter.hooks['tool.execute.before']({ tool, sessionID: 'session-a', callID: 'call-a' }, { args });
+  }
+  await adapter.hooks['tool.execute.before']({ tool: 'bash', sessionID: 'session-a' }, { args: { command: 'private shell command' } });
+  await adapter.flush();
+  assert.deepEqual(guardInputs.map((input) => input.tool_name), ['write', 'edit', 'apply_patch']);
+  assert.equal(guardInputs.every((input) => input.cwd === projectRoot && input.hook_event_name === 'PreToolUse'), true);
+  assert.equal(JSON.stringify(events).includes('private file content'), false);
+  assert.equal(JSON.stringify(events).includes('private shell command'), false);
+  assert.deepEqual(buildOpenCodePlanGateArguments(planGate), [
+    'task', 'plan', 'guard', '--host', 'opencode', '--task-id', 'task-parser',
+    '--project-id', 'parser-project', '--project-root', projectRoot,
+    '--threadforge-managed-opencode-plan-gate=v1', '--threadforge-plan-gate=opencode-v1',
+  ]);
+
+  const unconfigured = captureAdapter();
+  await unconfigured.adapter.hooks['tool.execute.before']({ tool: 'write' }, { args: { filePath: 'src/main.go' } });
+  await unconfigured.adapter.flush();
+  assert.equal(unconfigured.events.length, 1, 'default plugin behavior remains observational only');
+});
+
+test('OpenCode task-plan guard denies when the task is unconfirmed or the local guard fails', async () => {
+  const planGate = {
+    taskId: 'task-parser', projectId: 'parser-project', projectRoot: process.cwd(),
+    invokeGuard: async () => ({ decision: 'deny' }),
+  };
+  const denied = createOpenCodeAdapter(async () => {}, 128, undefined, planGate);
+  await assert.rejects(
+    Promise.resolve(denied.hooks['tool.execute.before']({ tool: 'write' }, { args: { filePath: 'src/main.go' } })),
+    /configured task plan did not verify/,
+  );
+  const unavailable = createOpenCodeAdapter(async () => {}, 128, undefined, {
+    ...planGate,
+    invokeGuard: async () => { throw new Error('private child stderr'); },
+  });
+  await assert.rejects(
+    Promise.resolve(unavailable.hooks['tool.execute.before']({ tool: 'edit' }, { args: { filePath: 'src/main.go' } })),
+    (error: unknown) => error instanceof Error && /could not verify/.test(error.message) && !error.message.includes('private child stderr'),
+  );
+});
+
+test('OpenCode V1 and V2 task-plan callbacks propagate a typed deny before tool execution', async () => {
+  let v1GuardCalls = 0;
+  const v1 = createThreadforgeOpenCodeV1Plugin({ planGate: {
+    taskId: 'task-parser', projectId: 'parser-project',
+    invokeGuard: async () => { v1GuardCalls++; return { decision: 'deny' }; },
+  } });
+  const v1Hooks = await v1.server({ directory: process.cwd() });
+  await assert.rejects(
+    Promise.resolve(v1Hooks['tool.execute.before']({ tool: 'apply_patch' }, { args: { patch: 'private patch' } })),
+    /configured task plan did not verify/,
+  );
+  assert.equal(v1GuardCalls, 1);
+
+  let v2Before: ((event: unknown) => unknown) | undefined;
+  let v2GuardCalls = 0;
+  const v2 = createThreadforgeOpenCodeV2Plugin({ planGate: {
+    taskId: 'task-parser', projectId: 'parser-project',
+    invokeGuard: async () => { v2GuardCalls++; return { decision: 'deny' }; },
+    createToolError: (message) => Object.assign(new Error(message), { _tag: 'Tool.Error' }),
+  } });
+  const cleanup = await v2.setup({
+    location: { directory: process.cwd() },
+    tool: { hook: async (name, callback) => {
+      if (name === 'execute.before') v2Before = callback;
+      return { dispose: () => {} };
+    } },
+  });
+  assert.ok(v2Before);
+  await assert.rejects(
+    Promise.resolve(v2Before({ tool: 'write', input: { filePath: 'src/main.go', content: 'private' } })),
+    (error: unknown) => error instanceof Error && error.message.includes('configured task plan did not verify') && (error as Error & { _tag?: string })._tag === 'Tool.Error',
+  );
+  assert.equal(v2GuardCalls, 1);
+  await cleanup();
 });
 
 test('maps session and permission events only when an explicit decision is present', async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from './test-api.js';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,7 +51,7 @@ describe('chatgpt adapter — simple turn (delta_encoding v1)', () => {
     expect(turn.turnId).toBe(`${CONV}:asst-0001`);
   });
   it('marks the turn completed and has no tool calls (empty search groups)', () => {
-    expect(turn.completedAt).toBeTypeOf('number');
+    expect(typeof turn.completedAt).toBe('number');
     expect(turn.toolCalls).toHaveLength(0);
   });
 });

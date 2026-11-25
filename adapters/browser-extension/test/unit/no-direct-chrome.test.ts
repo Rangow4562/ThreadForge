@@ -2,7 +2,7 @@
 // direct `chrome.runtime...` call would work on Chrome and break on Firefox,
 // where chrome.* is callback-style and the code awaits it -- exactly the kind of
 // regression no Chromium e2e can catch.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from './test-api.js';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,13 +30,13 @@ describe('extension API access', () => {
     expect(files.length).toBeGreaterThan(5);
   });
 
-  it.each(files.map((f) => [path.relative(srcDir, f), f]))(
-    '%s uses the shim, not chrome.* / browser.* directly',
-    (_rel, file) => {
+  for (const file of files) {
+    const relative = path.relative(srcDir, file);
+    it(`${relative} uses the shim, not chrome.* / browser.* directly`, () => {
       const offending = stripComments(readFileSync(file, 'utf8'))
         .split('\n')
         .filter((line) => DIRECT.test(line));
       expect(offending).toEqual([]);
-    },
-  );
+    });
+  }
 });

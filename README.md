@@ -37,7 +37,7 @@
 **Threadforge** is the local-first successor architecture unifying and advancing the capabilities of **Beacon**, **Mancode**, **AnyJev**, and **RRSI**. Its core objective is to prevent repeated failure modes across disparate AI coding agent harnesses by enforcing strict source-freshness checking, cryptographic procedure provenance, revision-controlled task state, calibrated typed decisions, and verifiable evolution loops.
 
 > [!NOTE]
-> Threadforge operates strictly **local-first** and **loopback-only** (`127.0.0.1`). It never transmits telemetry traces, private session stores, or raw credentials over external networks, and requires human-in-the-loop review for all memory promotions.
+> Threadforge is **local-first by default**. Internal intake listeners bind only to loopback (`127.0.0.1`); raw telemetry traces, private session stores, and credentials are not transmitted as telemetry. Individual inference operations may use a remote provider only through their explicit opt-in. For `memory learn`, that opt-in sends only bounded, normalized action/harness/severity/summary observations to a configured HTTPS OpenAI-compatible endpoint; raw prompts, paths, session IDs, and API keys are excluded from the request body. Review the provider's data handling before opting in. Every learned procedure remains a draft requiring held-out evaluation and human approval.
 
 ```
                       ┌──────────────────────────────────────────────┐
@@ -97,13 +97,13 @@ Threadforge integrates with over 20 AI coding agent harnesses and runtimes, prov
 
 | Harness / Runtime | Integration Type | Approved Memory Retrieval | Task Continuity / Plan Guard | Local History Poller | Status & Documentation |
 | :--- | :--- | :---: | :---: | :---: | :--- |
-| **Aider** | Portable approved procedure file | Explicit `--read` or separately opted-in project config | None | None | Fixture-tested config lifecycle; live loading unverified ([`docs/aider.md`](docs/aider.md)) |
+| **Aider** | Portable approved procedure file | Explicit `--read` or separately opted-in project config | None | None | Aider 0.86.2 loaded a Threadforge-generated handoff brief as read-only context; exported-procedure and managed-config loading remain unverified ([`docs/aider.md`](docs/aider.md)) |
 | **Claude Code** | Native Hooks + MCP | `UserPromptSubmit` (local) | Deny-only `PreToolUse` file guard | JSONL Transcript Poller | Verified Local Smoke ([`docs/claude-history.md`](docs/claude-history.md)) |
 | **Codex CLI** | Hooks + OTLP + MCP | `UserPromptSubmit` (local) | Advisory continuity context | Native Session Reader | Verified Loopback OTLP ([`docs/codex-cli-telemetry.md`](docs/codex-cli-telemetry.md)) |
 | **Cursor** | Extension + MCP | `sessionStart` Bootstrap | Deny-only `Write` plan gate | Composer DB & Transcripts | Verified Composer Sync ([`docs/cursor-history.md`](docs/cursor-history.md)) |
 | **Gemini CLI** | Project Hooks + MCP | `BeforeAgent` Hook | Deny-only `BeforeTool` guard | Loopback OTLP Intake | Verified Tool Guard ([`docs/gemini-cli.md`](docs/gemini-cli.md)) |
 | **Antigravity** | PreInvocation Hook | Invocation 0 Bootstrap | Scoped project-task context | Local Telemetry Slices | Verified Hook Transport ([`docs/antigravity-cli.md`](docs/antigravity-cli.md)) |
-| **OpenCode** | Plugin + Transform | Opt-in prompt-time memory & task resume ([`docs/opencode-memory.md`](docs/opencode-memory.md)) | Project-scoped planning profile | Session CLI Poller | Verified Prompt-Memory Transport ([`docs/opencode-history.md`](docs/opencode-history.md)) |
+| **OpenCode** | Plugin + Transform | Opt-in prompt-time memory & task resume ([`docs/opencode-memory.md`](docs/opencode-memory.md)) | Opt-in deny-only direct-file task gate ([`docs/opencode-plan-gate.md`](docs/opencode-plan-gate.md)) | Session CLI Poller | Verified Prompt-Memory Transport ([`docs/opencode-history.md`](docs/opencode-history.md)) |
 | **Cline** | Plugin + Global MCP | `.cline/skills/` + advisory project rule | Optional CLI `editor`/`apply_patch` task-plan gate | Task/Session/Kanban stores | Verified Package Build; gate dispatch unverified ([`docs/cline.md`](docs/cline.md)) |
 | **Qwen Code** | Project Hooks + MCP | `UserPromptExpansion` | Best-effort deny-only file guard | Loopback OTLP Intake | Verified Settings Lock ([`docs/qwen-code.md`](docs/qwen-code.md)) |
 | **GitHub Copilot CLI** | Prompts + Skills + MCP | Opt-in prompt-time approved memory ([`docs/copilot-cli-memory.md`](docs/copilot-cli-memory.md)) | Deny-only command hook | Events JSONL Poller | Verified Prompt Installer ([`docs/copilot-prompts.md`](docs/copilot-prompts.md)) |

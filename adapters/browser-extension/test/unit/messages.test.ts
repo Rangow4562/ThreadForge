@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from './test-api.js';
 import { isInterceptEvent, isRelayMessage, siteForHost } from '../../src/shared/messages.js';
 
 describe('browser bridge message validation', () => {

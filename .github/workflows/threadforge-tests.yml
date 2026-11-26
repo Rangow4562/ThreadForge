@@ -267,7 +267,7 @@ jobs:
         run: ./packaging/windows/test-install.ps1
 
       - name: Build Engineering image and verify archive-derived config digest
-        if: runner.os == 'Windows' && matrix.python == '3.11'
+        if: runner.os == 'Linux' && matrix.python == '3.11'
         shell: pwsh
         env:
           ENGINEERING_IMAGE_TAG: threadforge-engineering:ci-${{ github.sha }}

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -2366,6 +2366,43 @@ test('Goose OTLP CLI prints local guidance and reports only sanitized config and
     assert.equal(overridden.stdout.includes(configPath), false);
     assert.equal(overridden.stdout.includes('private reasoning'), false);
     assert.deepEqual(await readFile(configPath, 'utf8'), config);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('Goose OTLP CLI requires content-capture consent and manages only its reversible loopback YAML block', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'threadforge-goose-otel-config-cli-'));
+  const configPath = path.join(root, 'config.yaml');
+  try {
+    const denied = await invoke(['goose', 'otel', 'install', '--config-path', configPath]);
+    assert.notEqual(denied.code, 0);
+    assert.match(denied.stderr, /allow-content-capture/);
+    await assert.rejects(lstat(configPath));
+
+    let result = await invoke([
+      'goose', 'otel', 'install', '--config-path', configPath, '--allow-content-capture',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    const installed = JSON.parse(result.stdout) as { result: string; content_capture_possible: boolean; consent_confirmed: boolean };
+    assert.equal(installed.result, 'installed');
+    assert.equal(installed.content_capture_possible, true);
+    assert.equal(installed.consent_confirmed, true);
+    assert.equal(result.stdout.includes(configPath), false);
+    assert.equal(result.stdout.includes('127.0.0.1:4318'), false);
+
+    result = await invoke([
+      'goose', 'otel', 'update', '--config-path', configPath, '--endpoint', 'http://localhost:4319',
+      '--timeout-ms', '18000', '--allow-content-capture',
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'updated');
+    const updatedConfig = await readFile(configPath, 'utf8');
+    assert.match(updatedConfig, /otel_exporter_otlp_endpoint: "http:\/\/localhost:4319"/);
+    assert.match(updatedConfig, /otel_exporter_otlp_timeout: 18000/);
+
+    result = await invoke(['goose', 'otel', 'uninstall', '--config-path', configPath]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).result, 'removed');
+    await assert.rejects(lstat(configPath));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

@@ -1305,6 +1305,61 @@ def test_goose_procedure_bootstrap_schema_is_content_free_and_non_authorizing():
             validator.validate(invalid)
 
 
+def test_goose_otel_config_schema_requires_consent_and_safe_result_shapes():
+    schema = json.loads((SCHEMA_DIRECTORY / "goose-otel-config-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    install_result = {
+        "schema_version": "threadforge.goose-otel-config.v1",
+        "action": "install",
+        "result": "installed",
+        "content_capture_possible": True,
+        "content_capture_scope": "loopback_configured",
+        "consent_confirmed": True,
+        "config_created_by_threadforge": True,
+        "configured_endpoint_class": "loopback_http",
+        "timeout_ms": 10000,
+        "runtime_environment_may_override": True,
+    }
+    validator.validate(install_result)
+    validator.validate({
+        **install_result,
+        "action": "update",
+        "result": "unchanged",
+        "config_created_by_threadforge": False,
+    })
+    validator.validate({
+        "schema_version": "threadforge.goose-otel-config.v1",
+        "action": "uninstall",
+        "result": "removed",
+        "content_capture_possible": False,
+        "content_capture_scope": "none",
+        "consent_confirmed": False,
+        "config_created_by_threadforge": False,
+        "runtime_environment_may_override": False,
+    })
+    for invalid in (
+        {**install_result, "consent_confirmed": False},
+        {**install_result, "content_capture_possible": False},
+        {**install_result, "configured_endpoint_class": "remote_http"},
+        {**install_result, "timeout_ms": 120001},
+        {**install_result, "result": "removed"},
+        {
+            "schema_version": "threadforge.goose-otel-config.v1",
+            "action": "uninstall",
+            "result": "removed",
+            "content_capture_possible": False,
+            "content_capture_scope": "none",
+            "consent_confirmed": False,
+            "config_created_by_threadforge": False,
+            "configured_endpoint_class": "loopback_http",
+            "runtime_environment_may_override": False,
+        },
+        {**install_result, "config_path": "C:/Users/private/goose/config.yaml"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_mancode_legacy_requirements_schema_keeps_content_review_only_and_typed():
     schema = json.loads((SCHEMA_DIRECTORY / "mancode-legacy-requirements-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

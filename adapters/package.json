@@ -74,6 +74,7 @@
     "./hermes-hook": "./dist/hermes-hook.js",
     "./hermes-history": "./dist/hermes-history.js",
     "./goose-history": "./dist/goose-history.js",
+    "./goose-otel-config": "./dist/goose-otel-config.js",
     "./deepseek-hook": "./dist/deepseek-hook.js",
     "./deepseek-history": "./dist/deepseek-history.js",
     "./devin-hook": "./dist/devin-hook.js",

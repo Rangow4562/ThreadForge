@@ -17,6 +17,23 @@ export interface GooseOtelStatusOptions {
   now?: Date;
 }
 
+export function getGooseConfigPath(options: {
+  platform?: NodeJS.Platform;
+  homeDir?: string;
+  appData?: string;
+} = {}): string {
+  const platform = options.platform ?? process.platform;
+  const homeDir = options.homeDir ?? os.homedir();
+  if (platform === 'win32') {
+    const windows = path.win32;
+    const appData = options.appData && windows.isAbsolute(options.appData)
+      ? options.appData
+      : windows.join(homeDir, 'AppData', 'Roaming');
+    return windows.join(appData, 'Block', 'goose', 'config', 'config.yaml');
+  }
+  return path.posix.join(homeDir, '.config', 'goose', 'config.yaml');
+}
+
 export interface GooseOtelStatus {
   schema_version: 'threadforge.goose-otel-status.v1';
   inspection_complete: boolean;
@@ -41,14 +58,15 @@ export interface GooseOtelStatus {
 
 /** Print-only local OTLP guidance. Threadforge never edits Goose's user-owned config. */
 export function renderGooseOtelConfig(endpoint = defaultEndpoint): string {
-  const normalized = validateLoopbackEndpoint(endpoint);
+  const normalized = normalizeGooseOtelEndpoint(endpoint);
   return [
     '# Merge these keys into the existing Goose config.yaml; preserve all other settings.',
     `otel_exporter_otlp_endpoint: ${JSON.stringify(normalized)}`,
     'otel_exporter_otlp_timeout: 10000',
     '',
     '# This targets the local OTLP/HTTP receiver on port 4318 by default.',
-    '# Threadforge does not enable message-content capture or write Goose configuration.',
+    '# Goose GenAI spans may contain prompts, outputs, reasoning, and tool metadata.',
+    '# Only enable this after approving local capture; this snippet does not install hooks.',
     '# Inspect OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SDK_DISABLED, and OTEL_EXPORTER_OTLP_PROTOCOL',
     '# in the environment that launches Goose; they can override or disable this config.',
   ].join('\n');
@@ -59,7 +77,9 @@ export async function getGooseOtelStatus(options: GooseOtelStatusOptions = {}): 
   const env = options.env ?? process.env;
   const homeDir = options.homeDir ?? os.homedir();
   const platform = options.platform ?? process.platform;
-  const configPath = options.configPath ?? path.join(homeDir, '.config', 'goose', 'config.yaml');
+  const configPath = options.configPath ?? getGooseConfigPath({
+    platform, homeDir, appData: env.APPDATA,
+  });
   const logPath = options.logPath ?? resolveThreadforgeTracePath(env, homeDir, platform);
   const issues = new Set<string>();
   const config = await inspectGooseConfig(configPath, issues);
@@ -238,7 +258,7 @@ function classifyEndpoint(value: string): GooseOtelStatus['configured_endpoint']
   } catch { return 'invalid'; }
 }
 
-function validateLoopbackEndpoint(value: string): string {
+export function normalizeGooseOtelEndpoint(value: string): string {
   if (classifyEndpoint(value) !== 'loopback_http') {
     throw new Error('Goose OTLP endpoint must be a loopback HTTP base URL without credentials, path, query, or fragment');
   }

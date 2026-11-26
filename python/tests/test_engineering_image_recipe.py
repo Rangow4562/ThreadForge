@@ -20,7 +20,7 @@ IMAGE_ROOT = REPOSITORY_ROOT / "containers" / "engineering"
 SHA256 = "a" * 64
 
 
-def _docker_save_archive(path: Path, *, tag: str) -> str:
+def _docker_save_archive(path: Path, *, tag: str, legacy: bool = False) -> str:
     layer = b"layer data"
     config = {
         "architecture": "amd64",
@@ -30,24 +30,28 @@ def _docker_save_archive(path: Path, *, tag: str) -> str:
     }
     config_bytes = json.dumps(config, separators=(",", ":")).encode()
     digest = hashlib.sha256(config_bytes).hexdigest()
-    config_name = f"{digest}.json"
-    manifest = [{"Config": config_name, "RepoTags": [tag], "Layers": ["layer.tar"]}]
+    layer_digest = hashlib.sha256(layer).hexdigest()
+    config_name = f"{digest}.json" if legacy else f"blobs/sha256/{digest}"
+    layer_name = "layer.tar" if legacy else f"blobs/sha256/{layer_digest}"
+    manifest = [{"Config": config_name, "RepoTags": [tag], "Layers": [layer_name]}]
     with tarfile.open(path, mode="w") as archive:
+        if not legacy:
+            for name in ("blobs/", "blobs/sha256/"):
+                directory = tarfile.TarInfo(name)
+                directory.type = tarfile.DIRTYPE
+                directory.mode = 0o755
+                directory.mtime = 0
+                archive.addfile(directory)
         for name, data in {
             "manifest.json": json.dumps(manifest).encode(),
             config_name: config_bytes,
-            "layer.tar": layer,
+            layer_name: layer,
         }.items():
             info = tarfile.TarInfo(name)
             info.size = len(data)
             info.mode = 0o644
             info.mtime = 0
             archive.addfile(info, io.BytesIO(data))
-        directory = tarfile.TarInfo("layer-metadata/")
-        directory.type = tarfile.DIRTYPE
-        directory.mode = 0o755
-        directory.mtime = 0
-        archive.addfile(directory)
     return f"sha256:{digest}"
 
 
@@ -239,6 +243,15 @@ def test_docker_archive_inspector_derives_config_digest_from_tagged_image(tmp_pa
         inspector.config_digest_from_archive(archive, expected_tag="threadforge-engineering:other")
 
 
+def test_docker_archive_inspector_retains_legacy_digest_json_compatibility(tmp_path):
+    inspector = _load_archive_inspector()
+    archive = tmp_path / "legacy-image.docker.tar"
+    tag = "threadforge-engineering:legacy"
+    expected_digest = _docker_save_archive(archive, tag=tag, legacy=True)
+
+    assert inspector.config_digest_from_archive(archive, expected_tag=tag) == expected_digest
+
+
 def test_docker_archive_inspector_rejects_unsafe_members(tmp_path):
     inspector = _load_archive_inspector()
     archive_path = tmp_path / "unsafe.docker.tar"
@@ -310,12 +323,15 @@ $receipt = $receiptLines | ConvertFrom-Json -ErrorAction Stop
 if ($receipt.schema_version -ne 'threadforge.engineering-image-build.v2') {{ throw 'Unexpected build receipt version.' }}
 if ($receipt.image_id -ne '{image_id}' -or $receipt.image_config_digest -ne '{config_digest}') {{ throw 'Build identities were not preserved separately.' }}
 if (-not (Test-Path -LiteralPath $explicitArchive -PathType Leaf)) {{ throw 'Requested Docker archive was not preserved.' }}
+ $failureMessage = $null
 try {{
     & $buildScript -Tag 'threadforge-engineering:wrong' -ArchivePath $failedArchive | Out-Null
     throw 'Mismatched archive tag was unexpectedly accepted.'
 }} catch {{
     if ($_.Exception.Message -eq 'Mismatched archive tag was unexpectedly accepted.') {{ throw }}
+    $failureMessage = $_.Exception.Message
 }}
+if ($failureMessage -ne 'Could not derive the Engineering image config digest from the Docker archive.') {{ throw "Unexpected failure message: $failureMessage" }}
 if (Test-Path -LiteralPath $failedArchive) {{ throw 'Failed explicit archive output was not cleaned up.' }}
 $tempReceiptLines = & $buildScript -Tag {ps_literal(tag)}
 if ($LASTEXITCODE -ne 0) {{ throw 'Mocked temporary archive build returned a failure code.' }}

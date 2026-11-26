@@ -129,7 +129,7 @@ def config_digest_from_archive(archive_path: Path, *, expected_tag: str) -> str:
                 raise DockerArchiveError("Docker archive config is missing")
             config_bytes = _read_member(archive, config_member, limit=MAX_CONFIG_BYTES)
             digest = hashlib.sha256(config_bytes).hexdigest()
-            if PurePosixPath(config_name).name != f"{digest}.json":
+            if PurePosixPath(config_name).name not in {digest, f"{digest}.json"}:
                 raise DockerArchiveError("Docker archive config filename does not match its bytes")
             try:
                 config = json.loads(

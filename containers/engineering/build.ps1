@@ -78,8 +78,12 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $archivePath -PathType Leaf)) {
         throw 'Docker could not save the Engineering image archive.'
     }
-    $imageConfigDigest = (& python $archiveInspector --archive $archivePath --tag $Tag).Trim()
-    if ($LASTEXITCODE -ne 0 -or $imageConfigDigest -notmatch '^sha256:[0-9a-f]{64}$') {
+    $imageConfigDigestOutput = & python $archiveInspector --archive $archivePath --tag $Tag
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not derive the Engineering image config digest from the Docker archive.'
+    }
+    $imageConfigDigest = ($imageConfigDigestOutput -join "`n").Trim()
+    if ($imageConfigDigest -notmatch '^sha256:[0-9a-f]{64}$') {
         throw 'Could not derive the Engineering image config digest from the Docker archive.'
     }
     $receipt = [ordered]@{

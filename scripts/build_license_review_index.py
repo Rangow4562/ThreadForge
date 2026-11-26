@@ -368,6 +368,18 @@ def _load_go_observations(
             raise LicenseReviewIndexError(f"Go {target} report.csv has unexpected columns")
         if len(rows) != evidence.get("license_record_count"):
             raise LicenseReviewIndexError(f"Go {target} report count does not match its evidence")
+        unknown_url_count = sum(
+            row["license_url"].casefold() == "unknown" for row in rows
+        )
+        reported_unknown_url_count = evidence.get("license_url_unknown_count")
+        if (
+            not isinstance(reported_unknown_url_count, int)
+            or isinstance(reported_unknown_url_count, bool)
+            or reported_unknown_url_count != unknown_url_count
+        ):
+            raise LicenseReviewIndexError(
+                f"Go {target} unknown source URL count does not match its report"
+            )
         for row in rows:
             observations.append(
                 {
@@ -663,6 +675,61 @@ def _make_python_gap_queue_csv(index: dict[str, Any]) -> bytes:
     return buffer.getvalue().encode("utf-8")
 
 
+def _go_source_url_missing(value: Any) -> bool:
+    return (
+        not isinstance(value, str)
+        or not value.strip()
+        or value.strip().casefold() == "unknown"
+    )
+
+
+def _make_go_gap_queue_csv(index: dict[str, Any]) -> bytes:
+    """Build a grouped queue for Go observations without a scanner source URL."""
+    grouped: dict[str, dict[str, Any]] = {}
+    for item in index["go_observations"]:
+        source_url = item["license_url"]
+        if not _go_source_url_missing(source_url):
+            continue
+        package = item["package"]
+        entry = grouped.setdefault(
+            package,
+            {"targets": set(), "observation_count": 0, "archives": {}},
+        )
+        target = item["target"]
+        entry["targets"].add(target)
+        entry["observation_count"] += 1
+        entry["archives"][target] = {
+            "target": target,
+            "archive": item["archive"],
+            "archive_sha256": item["archive_sha256"],
+        }
+
+    buffer = io.StringIO(newline="")
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(
+        [
+            "package",
+            "targets_with_missing_or_unknown_license_url_json",
+            "missing_or_unknown_license_url_observation_count",
+            "evidence_archives_json",
+            "meaning",
+        ]
+    )
+    for package, entry in sorted(grouped.items()):
+        writer.writerow(
+            [
+                _csv_value(package),
+                _csv_value(sorted(entry["targets"])),
+                _csv_value(entry["observation_count"]),
+                _csv_value(
+                    [entry["archives"][target] for target in sorted(entry["archives"])]
+                ),
+                "Missing or unknown scanner source URL only; not a missing license expression, compatibility decision, or approval.",
+            ]
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
 def build_license_review_index(
     *,
     bundle_dir: Path,
@@ -777,10 +844,12 @@ def build_license_review_index(
     )
     csv_bytes = _make_csv(index)
     gap_queue_bytes = _make_python_gap_queue_csv(index)
+    go_gap_queue_bytes = _make_go_gap_queue_csv(index)
     files: dict[str, bytes] = {
         "license-review-index.json": json_bytes,
         "license-review-observations.csv": csv_bytes,
         "license-review-evidence-gaps.csv": gap_queue_bytes,
+        "license-review-go-evidence-gaps.csv": go_gap_queue_bytes,
         "evidence/checksums.txt": checksum_bytes,
     }
     for profile in python_profiles + go_profiles:
@@ -853,6 +922,10 @@ def main(argv: list[str] | None = None) -> int:
                     or not item["license_files"]
                     or item["license_metadata_malformed"]
                     or item["license_classifier_metadata_malformed"]
+                ),
+                "go_observations_with_missing_or_unknown_license_urls": sum(
+                    _go_source_url_missing(item["license_url"])
+                    for item in index["go_observations"]
                 ),
                 "review_status": index["review_status"],
                 "release_clearance": index["release_clearance"],

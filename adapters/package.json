@@ -26,6 +26,7 @@
     "./cursor-hooks-config": "./dist/cursor-hooks-config.js",
     "./codex-hook": "./dist/codex-hook.js",
     "./codex-hooks-config": "./dist/codex-hooks-config.js",
+    "./cursor-rules-config": "./dist/cursor-rules-config.js",
     "./gemini-telemetry-config": "./dist/gemini-telemetry-config.js",
     "./gemini-memory-config": "./dist/gemini-memory-config.js",
     "./gemini-skill-config": "./dist/gemini-skill-config.js",

@@ -101,9 +101,12 @@ def _python_archive(
     return _tar_bytes(entries)
 
 
-def _go_archive(target):
+def _go_archive(
+    target, *, license_url="https://example.test/LICENSE", reported_unknown_count=None
+):
     goos, goarch = target.split("_")
     notice = b"Example Go license\n"
+    unknown_url_count = int(license_url.casefold() == "unknown")
     evidence = {
         "schema": "threadforge.go-license-evidence.v1",
         "source_commit": SOURCE_COMMIT,
@@ -112,6 +115,11 @@ def _go_archive(target):
         "license_review_required": True,
         "release_clearance": False,
         "license_record_count": 1,
+        "license_url_unknown_count": (
+            unknown_url_count
+            if reported_unknown_count is None
+            else reported_unknown_count
+        ),
         "saved_notice_files": [
             {
                 "path": "example.com/module/LICENSE",
@@ -124,14 +132,24 @@ def _go_archive(target):
         {
             "go-license-evidence/README.md": b"unreviewed\n",
             "go-license-evidence/evidence.json": json.dumps(evidence).encode(),
-            "go-license-evidence/report.csv": b"package,license_url,license_expression\nexample.com/module,https://example.test/LICENSE,MIT\n",
+            "go-license-evidence/report.csv": (
+                "package,license_url,license_expression\n"
+                f"example.com/module,{license_url},MIT\n"
+            ).encode(),
             "go-license-evidence/licenses/example.com/module/LICENSE": notice,
         }
     )
 
 
 def _make_candidate(
-    root, *, variance=False, unsafe_python_profile=None, python_evidence_gaps=None
+    root,
+    *,
+    variance=False,
+    unsafe_python_profile=None,
+    python_evidence_gaps=None,
+    go_unknown_url_targets=None,
+    go_missing_url_targets=None,
+    go_unknown_count_overrides=None,
 ):
     root.mkdir()
     payloads = INDEX_BUILDER.VERIFIER.expected_payload_names(VERSION)
@@ -152,7 +170,19 @@ def _make_candidate(
         )
     for target in INDEX_BUILDER.VERIFIER.GO_TARGETS:
         name = f"threadforge_{VERSION}_{target}.go-licenses.tar.gz"
-        (root / name).write_bytes(_go_archive(target))
+        if target in set(go_unknown_url_targets or ()):
+            url = "UNKNOWN"
+        elif target in set(go_missing_url_targets or ()):
+            url = ""
+        else:
+            url = "https://example.test/LICENSE"
+        (root / name).write_bytes(
+            _go_archive(
+                target,
+                license_url=url,
+                reported_unknown_count=(go_unknown_count_overrides or {}).get(target),
+            )
+        )
     checksums = "".join(
         f"{hashlib.sha256((root / name).read_bytes()).hexdigest()}  {name}\n"
         for name in sorted(payloads)
@@ -222,8 +252,12 @@ def test_builds_target_preserving_review_index_and_never_grants_clearance(tmp_pa
         encoding="utf-8", newline=""
     ) as source:
         assert list(csv.DictReader(source)) == []
+    with (output / "license-review-go-evidence-gaps.csv").open(
+        encoding="utf-8", newline=""
+    ) as source:
+        assert list(csv.DictReader(source)) == []
     sums = (output / "SHA256SUMS.txt").read_text(encoding="ascii").splitlines()
-    assert len(sums) == 20
+    assert len(sums) == 21
     for row in sums:
         digest, relative = row.split("  ", 1)
         assert hashlib.sha256((output / relative).read_bytes()).hexdigest() == digest
@@ -288,6 +322,66 @@ def test_grouped_evidence_gap_queue_preserves_affected_profiles_and_archive_bind
         assert archive["archive_sha256"] == observation["archive_sha256"]
     sums = (output / "SHA256SUMS.txt").read_text(encoding="ascii")
     assert "license-review-evidence-gaps.csv" in sums
+    assert "license-review-go-evidence-gaps.csv" in sums
+
+
+def test_grouped_go_gap_queue_binds_unknown_urls_to_target_archives(tmp_path):
+    candidate = tmp_path / "candidate"
+    verification = _make_candidate(
+        candidate,
+        go_unknown_url_targets={"linux_amd64"},
+        go_missing_url_targets={"windows_amd64"},
+    )
+    output = tmp_path / "review"
+
+    index = _build(candidate, output, verification)
+    assert index["review_status"] == "unreviewed"
+    assert index["release_clearance"] is False
+    assert index["release_authorized"] is False
+    assert index["automated_license_inference_performed"] is False
+
+    with (output / "license-review-go-evidence-gaps.csv").open(
+        encoding="utf-8", newline=""
+    ) as source:
+        rows = list(csv.DictReader(source))
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["package"] == "example.com/module"
+    assert json.loads(row["targets_with_missing_or_unknown_license_url_json"]) == [
+        "linux_amd64",
+        "windows_amd64",
+    ]
+    assert row["missing_or_unknown_license_url_observation_count"] == "2"
+    archives = json.loads(row["evidence_archives_json"])
+    assert [item["target"] for item in archives] == [
+        "linux_amd64",
+        "windows_amd64",
+    ]
+    for archive in archives:
+        observation = next(
+            item
+            for item in index["go_observations"]
+            if item["target"] == archive["target"]
+        )
+        assert archive["archive"] == observation["archive"]
+        assert archive["archive_sha256"] == observation["archive_sha256"]
+    sums = (output / "SHA256SUMS.txt").read_text(encoding="ascii")
+    assert "license-review-go-evidence-gaps.csv" in sums
+
+
+def test_rejects_go_unknown_url_count_that_disagrees_with_report(tmp_path):
+    candidate = tmp_path / "candidate"
+    verification = _make_candidate(
+        candidate,
+        go_unknown_url_targets={"linux_amd64"},
+        go_unknown_count_overrides={"linux_amd64": 0},
+    )
+
+    with pytest.raises(
+        INDEX_BUILDER.LicenseReviewIndexError,
+        match="unknown source URL count does not match its report",
+    ):
+        _build(candidate, tmp_path / "review", verification)
 
 
 def test_rejects_changed_candidate_payload(tmp_path):

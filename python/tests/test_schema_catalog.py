@@ -31,6 +31,28 @@ def test_cursor_plan_gate_result_is_no_opinion_or_deny_only():
             validator.validate(invalid)
 
 
+def test_cursor_project_memory_rule_result_has_fixed_path_and_no_private_fields():
+    schema = json.loads((SCHEMA_DIRECTORY / "cursor-project-memory-rule-v1.schema.json").read_text(encoding="utf-8"))
+    validator = validator_for(schema)(schema)
+    result = {
+        "schema_version": "threadforge.cursor-project-memory-rule.v1",
+        "host": "cursor",
+        "action": "installed",
+        "path": ".cursor/rules/threadforge-memory.mdc",
+        "sha256": "a" * 64,
+    }
+    validator.validate(result)
+    for invalid in (
+        {**result, "host": "unknown-agent"},
+        {**result, "path": "../outside/threadforge-memory.mdc"},
+        {**result, "action": "overwritten"},
+        {**result, "private_project_root": "C:/Users/private/project"},
+        {**result, "sha256": "not-a-digest"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_handoff_event_list_schema_is_versioned_content_free_and_reports_scan_state():
     schema = json.loads((SCHEMA_DIRECTORY / "handoff-event-list-v1.schema.json").read_text(encoding="utf-8"))
     validator = validator_for(schema)(schema)

@@ -21,6 +21,11 @@ import {
   removeCursorProjectPlanGateHook,
 } from './cursor-hooks-config.ts';
 import {
+  installCursorProjectMemoryRule,
+  planCursorProjectMemoryRule,
+  uninstallCursorProjectMemoryRule,
+} from './cursor-rules-config.ts';
+import {
   installCodexProjectHooks,
   installCodexProjectMemoryHook,
   installCodexProjectPlanGateHook,
@@ -168,7 +173,7 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   let qwenSubsystem: 'memory' | 'plan-gate' | undefined;
   let antigravitySubsystem: 'memory' | 'plan-gate' | undefined;
   let copilotSubsystem: 'sessions' | 'memory' | 'plan-gate' | 'prompts' | undefined;
-  let cursorSubsystem: 'sessions' | 'memory' | 'plan-gate' | undefined;
+  let cursorSubsystem: 'sessions' | 'memory' | 'plan-gate' | 'rules' | undefined;
   let factorySubsystem: 'sessions' | undefined;
   let fxSubsystem: 'sessions' | undefined;
   let piSubsystem: 'sessions' | undefined;
@@ -275,6 +280,15 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
   }
   if (family === 'cursor' && action === 'memory') {
     cursorSubsystem = 'memory';
+    action = rest[0];
+    rest = rest.slice(1);
+    if (!action) {
+      stderr.write(`${usage()}\n`);
+      return 2;
+    }
+  }
+  if (family === 'cursor' && action === 'rules') {
+    cursorSubsystem = 'rules';
     action = rest[0];
     rest = rest.slice(1);
     if (!action) {
@@ -1491,6 +1505,18 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
     } else if (family === 'cursor' && cursorSubsystem === 'memory' && action === 'uninstall') {
       rejectUnexpected(options, ['project-root']);
       result = await removeCursorProjectMemoryHook(projectRoot);
+    } else if (family === 'cursor' && cursorSubsystem === 'rules' && action === 'plan') {
+      rejectUnexpected(options, ['project-root']);
+      result = await planCursorProjectMemoryRule(required(options, 'project-root'));
+      warning = 'Cursor project memory rule is agent-selected and advisory; it does not inject task state, authorize actions, or verify that an installed Cursor host loads the rule.';
+    } else if (family === 'cursor' && cursorSubsystem === 'rules' && action === 'install') {
+      rejectUnexpected(options, ['project-root']);
+      result = await installCursorProjectMemoryRule(required(options, 'project-root'));
+      warning = 'Cursor project memory rule is agent-selected and advisory; it does not inject task state, authorize actions, or verify that an installed Cursor host loads the rule.';
+    } else if (family === 'cursor' && cursorSubsystem === 'rules' && action === 'uninstall') {
+      rejectUnexpected(options, ['project-root']);
+      result = await uninstallCursorProjectMemoryRule(required(options, 'project-root'));
+      warning = 'Only the unchanged Threadforge-owned Cursor rule was removed; live host discovery remains unverified.';
     } else if (family === 'cursor' && cursorSubsystem === 'plan-gate' && (action === 'install' || action === 'update')) {
       rejectUnexpected(options, ['project-root', 'command']);
       result = await installCursorProjectPlanGateHook(projectRoot, required(options, 'command'));
@@ -2012,6 +2038,7 @@ function usage(): string {
     '  npm run adapter -- gemini plan-gate uninstall --project-root <absolute-path>',
     '  npm run adapter -- cursor memory install|update --project-root <absolute-path> --command <threadforge-memory-hook-command-with-markers> [--task-id <id> [--session-id <id>] | --discover-active-task] [--max-task-entries 1-20]',
     '  npm run adapter -- cursor memory uninstall --project-root <absolute-path>',
+    '  npm run adapter -- cursor rules plan|install|uninstall --project-root <absolute-path>',
     '  npm run adapter -- cursor plan-gate install|update --project-root <absolute-path> --command <threadforge-deny-only-plan-gate-command-with-markers>',
     '  npm run adapter -- cursor plan-gate uninstall --project-root <absolute-path>',
     '  npm run adapter -- cursor skills install|uninstall --project-root <absolute-path> --skill-file <exported-SKILL.md> --sha256 <export-digest>',

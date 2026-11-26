@@ -68,13 +68,20 @@ def _docker_archive(path, *, tag=TAG, unsafe_member=None):
     }
     config_bytes = json.dumps(config, separators=(",", ":")).encode()
     image_config_digest = f"sha256:{hashlib.sha256(config_bytes).hexdigest()}"
-    config_name = f"{image_config_digest.removeprefix('sha256:')}.json"
-    manifest = [{"Config": config_name, "RepoTags": [tag], "Layers": ["layer.tar"]}]
+    config_name = f"blobs/sha256/{image_config_digest.removeprefix('sha256:')}"
+    layer_name = f"blobs/sha256/{hashlib.sha256(layer_data).hexdigest()}"
+    manifest = [{"Config": config_name, "RepoTags": [tag], "Layers": [layer_name]}]
     with tarfile.open(path, mode="w") as archive:
+        for name in ("blobs/", "blobs/sha256/"):
+            directory = tarfile.TarInfo(name)
+            directory.type = tarfile.DIRTYPE
+            directory.mode = 0o755
+            directory.mtime = 0
+            archive.addfile(directory)
         for name, data in {
             "manifest.json": json.dumps(manifest).encode(),
             config_name: config_bytes,
-            "layer.tar": layer_data,
+            layer_name: layer_data,
         }.items():
             info = tarfile.TarInfo(name)
             info.size = len(data)

@@ -266,6 +266,31 @@ jobs:
         shell: pwsh
         run: ./packaging/windows/test-install.ps1
 
+      - name: Build Engineering image and verify archive-derived config digest
+        if: runner.os == 'Linux' && matrix.python == '3.11'
+        shell: pwsh
+        env:
+          ENGINEERING_IMAGE_TAG: threadforge-engineering:ci-${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $receiptText = & ./containers/engineering/build.ps1 -Tag $env:ENGINEERING_IMAGE_TAG
+          if ($LASTEXITCODE -ne 0) { throw 'Engineering image archive-digest smoke failed.' }
+          $receipt = $receiptText | ConvertFrom-Json -ErrorAction Stop
+          if ($receipt.schema_version -cne 'threadforge.engineering-image-build.v2') {
+            throw 'Engineering image build returned an unexpected receipt schema.'
+          }
+          if ($receipt.platform -cne 'linux/amd64' -or $receipt.tag -cne $env:ENGINEERING_IMAGE_TAG) {
+            throw 'Engineering image build receipt has an unexpected platform or tag.'
+          }
+          foreach ($digest in @($receipt.image_id, $receipt.image_config_digest)) {
+            if ($digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
+              throw 'Engineering image receipt contains an invalid immutable digest.'
+            }
+          }
+          if ($receipt.benchmark_data_included -ne $false -or $receipt.evaluator_included -ne $false) {
+            throw 'Engineering image unexpectedly includes benchmark or evaluator data.'
+          }
+
       - name: Run Python tests, compile check, and lint
         shell: bash
         working-directory: python
@@ -1404,11 +1429,12 @@ jobs:
           IMAGE_ARCHIVE: ${{ runner.temp }}/threadforge_${{ steps.release.outputs.version }}_engineering_linux_amd64.docker.tar
         run: |
           $ErrorActionPreference = 'Stop'
-          & ./containers/engineering/build.ps1 -Tag $env:IMAGE_TAG |
+          & ./containers/engineering/build.ps1 -Tag $env:IMAGE_TAG -ArchivePath $env:IMAGE_ARCHIVE |
             Set-Content -LiteralPath $env:BUILD_RECEIPT -Encoding utf8NoBOM
           if ($LASTEXITCODE -ne 0) { throw 'Pinned Engineering image build failed.' }
-          & docker save --output $env:IMAGE_ARCHIVE $env:IMAGE_TAG
-          if ($LASTEXITCODE -ne 0) { throw 'Docker image archive export failed.' }
+          if (-not (Test-Path -LiteralPath $env:IMAGE_ARCHIVE -PathType Leaf)) {
+            throw 'Pinned Engineering image build did not retain its verified Docker archive.'
+          }
 
       - name: Generate SPDX SBOM from the built Engineering image
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3

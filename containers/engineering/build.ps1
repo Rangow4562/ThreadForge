@@ -1,7 +1,9 @@
 param(
     [Parameter()]
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}(:[A-Za-z0-9][A-Za-z0-9._-]{0,119})?$')]
-    [string]$Tag = 'threadforge-engineering:local'
+    [string]$Tag = 'threadforge-engineering:local',
+    [Parameter()]
+    [string]$ArchivePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,12 +35,29 @@ if ($LASTEXITCODE -ne 0) {
 $runtimeHash = (Get-FileHash -LiteralPath $runtimeLock -Algorithm SHA256).Hash.ToLowerInvariant()
 $buildHash = (Get-FileHash -LiteralPath $buildLock -Algorithm SHA256).Hash.ToLowerInvariant()
 $dockerfile = Join-Path $PSScriptRoot 'Dockerfile'
-$metadataPath = Join-Path ([System.IO.Path]::GetTempPath()) ("threadforge-engineering-build-$PID-$([Guid]::NewGuid().ToString('N')).json")
+$archiveInspector = Join-Path $PSScriptRoot '..\..\scripts\engineering_docker_archive.py'
+if (-not (Test-Path -LiteralPath $archiveInspector -PathType Leaf)) {
+    throw 'Engineering Docker archive inspector is missing.'
+}
+$removeArchive = [string]::IsNullOrWhiteSpace($ArchivePath)
+if ($removeArchive) {
+    $archivePath = Join-Path ([System.IO.Path]::GetTempPath()) ("threadforge-engineering-build-$PID-$([Guid]::NewGuid().ToString('N')).docker.tar")
+}
+else {
+    $archivePath = [System.IO.Path]::GetFullPath($ArchivePath)
+    if (Test-Path -LiteralPath $archivePath) {
+        throw 'Engineering image archive output already exists.'
+    }
+    $archiveParent = Split-Path -Parent $archivePath
+    if (-not (Test-Path -LiteralPath $archiveParent -PathType Container)) {
+        throw 'Engineering image archive output directory does not exist.'
+    }
+}
+$buildSucceeded = $false
 try {
     & docker --context default buildx build `
         --platform linux/amd64 `
         --load `
-        --metadata-file $metadataPath `
         --file $dockerfile `
         --tag $Tag `
         --build-arg "THREADFORGE_PYTHON_BASE_IMAGE=$baseImage" `
@@ -51,25 +70,23 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw 'Engineering runtime image build failed.'
     }
-    if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) {
-        throw 'Buildx did not write its image metadata file.'
-    }
-    try {
-        $buildMetadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json -ErrorAction Stop
-    }
-    catch {
-        throw 'Buildx image metadata is not valid JSON.'
-    }
-    $imageConfigDigest = $buildMetadata.'containerimage.config.digest'
-    if ($imageConfigDigest -notmatch '^sha256:[0-9a-f]{64}$') {
-        throw 'Buildx did not return a valid immutable image config digest.'
-    }
-
     $imageId = (& docker --context default image inspect --format '{{.Id}}' $Tag 2>$null).Trim()
     if ($LASTEXITCODE -ne 0 -or $imageId -notmatch '^sha256:[0-9a-f]{64}$') {
         throw 'Docker did not return an immutable local image ID after the build.'
     }
-    [ordered]@{
+    & docker --context default save --output $archivePath $Tag
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $archivePath -PathType Leaf)) {
+        throw 'Docker could not save the Engineering image archive.'
+    }
+    $imageConfigDigestOutput = & python $archiveInspector --archive $archivePath --tag $Tag
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not derive the Engineering image config digest from the Docker archive.'
+    }
+    $imageConfigDigest = ($imageConfigDigestOutput -join "`n").Trim()
+    if ($imageConfigDigest -notmatch '^sha256:[0-9a-f]{64}$') {
+        throw 'Could not derive the Engineering image config digest from the Docker archive.'
+    }
+    $receipt = [ordered]@{
         schema_version = 'threadforge.engineering-image-build.v2'
         platform = 'linux/amd64'
         image_id = $imageId
@@ -81,9 +98,11 @@ try {
         benchmark_data_included = $false
         evaluator_included = $false
     } | ConvertTo-Json -Compress
+    $buildSucceeded = $true
+    $receipt
 }
 finally {
-    if (Test-Path -LiteralPath $metadataPath -PathType Leaf) {
-        Remove-Item -LiteralPath $metadataPath -Force -ErrorAction SilentlyContinue
+    if (($removeArchive -or -not $buildSucceeded) -and (Test-Path -LiteralPath $archivePath -PathType Leaf)) {
+        Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
     }
 }

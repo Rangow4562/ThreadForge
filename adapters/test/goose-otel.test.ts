@@ -4,17 +4,39 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  getGooseConfigPath,
   getGooseOtelStatus,
   parseGooseOtelDuration,
   renderGooseOtelConfig,
   validateGooseOtelStatus,
 } from '../src/goose-otel.ts';
 
-test('prints loopback-only OTLP/HTTP YAML without enabling content capture or editing config', () => {
+test('uses Goose config locations for Windows APPDATA and Unix-like homes', () => {
+  assert.equal(
+    getGooseConfigPath({
+      platform: 'win32',
+      homeDir: 'C:\\Users\\Alice',
+      appData: 'C:\\Users\\Alice\\AppData\\Roaming',
+    }),
+    'C:\\Users\\Alice\\AppData\\Roaming\\Block\\goose\\config\\config.yaml',
+  );
+  assert.equal(
+    getGooseConfigPath({ platform: 'win32', homeDir: 'C:\\Users\\Alice', appData: 'relative-roaming' }),
+    'C:\\Users\\Alice\\AppData\\Roaming\\Block\\goose\\config\\config.yaml',
+  );
+  assert.equal(
+    getGooseConfigPath({ platform: 'linux', homeDir: '/home/alice' }),
+    '/home/alice/.config/goose/config.yaml',
+  );
+});
+
+test('prints loopback-only OTLP/HTTP YAML with an explicit capture warning and without editing config', () => {
   const output = renderGooseOtelConfig();
   assert.match(output, /otel_exporter_otlp_endpoint: "http:\/\/127\.0\.0\.1:4318"/);
   assert.match(output, /otel_exporter_otlp_timeout: 10000/);
-  assert.match(output, /does not enable message-content capture/);
+  assert.match(output, /spans may contain prompts, outputs, reasoning, and tool metadata/);
+  assert.match(output, /Only enable this after approving local capture/);
+  assert.doesNotMatch(output, /does not enable message-content capture/);
   assert.throws(() => renderGooseOtelConfig('https://collector.example'), /loopback HTTP/);
   assert.throws(() => renderGooseOtelConfig('http://user:secret@127.0.0.1:4318'), /loopback HTTP/);
   assert.throws(() => renderGooseOtelConfig('http://127.0.0.1:4318/v1/traces'), /loopback HTTP/);

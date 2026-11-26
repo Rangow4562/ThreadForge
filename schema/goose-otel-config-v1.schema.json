@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/goose-otel-config-v1.schema.json",
+  "title": "Threadforge Goose OTLP Config Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "action",
+    "result",
+    "content_capture_possible",
+    "content_capture_scope",
+    "consent_confirmed",
+    "config_created_by_threadforge",
+    "runtime_environment_may_override"
+  ],
+  "properties": {
+    "schema_version": { "const": "threadforge.goose-otel-config.v1" },
+    "action": { "enum": ["install", "update", "uninstall"] },
+    "result": { "enum": ["installed", "updated", "unchanged", "removed", "absent"] },
+    "content_capture_possible": { "type": "boolean" },
+    "content_capture_scope": { "enum": ["loopback_configured", "none"] },
+    "consent_confirmed": { "type": "boolean" },
+    "config_created_by_threadforge": { "type": "boolean" },
+    "configured_endpoint_class": { "const": "loopback_http" },
+    "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 120000 },
+    "runtime_environment_may_override": { "type": "boolean" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "action": { "enum": ["install", "update"] } }, "required": ["action"] },
+      "then": {
+        "required": ["configured_endpoint_class", "timeout_ms"],
+        "properties": {
+          "content_capture_possible": { "const": true },
+          "content_capture_scope": { "const": "loopback_configured" },
+          "consent_confirmed": { "const": true },
+          "runtime_environment_may_override": { "const": true }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "action": { "const": "install" } }, "required": ["action"] },
+            "then": { "properties": { "result": { "enum": ["installed", "unchanged"] } } }
+          },
+          {
+            "if": { "properties": { "action": { "const": "update" } }, "required": ["action"] },
+            "then": { "properties": { "result": { "enum": ["updated", "unchanged"] } } }
+          }
+        ]
+      }
+    },
+    {
+      "if": { "properties": { "action": { "const": "uninstall" } }, "required": ["action"] },
+      "then": {
+        "properties": {
+          "result": { "enum": ["removed", "absent"] },
+          "content_capture_possible": { "const": false },
+          "content_capture_scope": { "const": "none" },
+          "consent_confirmed": { "const": false },
+          "config_created_by_threadforge": { "const": false },
+          "runtime_environment_may_override": { "const": false }
+        },
+        "not": { "anyOf": [{ "required": ["configured_endpoint_class"] }, { "required": ["timeout_ms"] }] }
+      }
+    }
+  ]
+}

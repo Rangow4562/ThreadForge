@@ -111,6 +111,7 @@ import {
   updateClineUserMcpServer,
 } from './cline-mcp-config.ts';
 import { getGooseOtelStatus, parseGooseOtelDuration, renderGooseOtelConfig, validateGooseOtelStatus } from './goose-otel.ts';
+import { runGooseOtelConfigAction } from './goose-otel-config.ts';
 import { getGooseHistoryStatus, syncGooseHistory } from './goose-history.ts';
 import { getVSCodeOtelStatus, parseVSCodeOtelDuration, renderVSCodeOtelConfig, validateVSCodeOtelStatus } from './vscode-otel.ts';
 import { renderClaudeCoworkOtelGuidance } from './claude-cowork-otel.ts';
@@ -1117,6 +1118,19 @@ export async function runAdapterCLI(args: string[], stdout: NodeJS.WritableStrea
         ? `${JSON.stringify(validation)}\n`
         : `VS Code Copilot OTLP validation ${validation.valid ? 'passed' : 'failed'}: ${validation.issues.length} issue(s)\n`);
       return validation.valid ? 0 : 1;
+    } else if (family === 'goose' && gooseSubsystem === 'otel' && (action === 'install' || action === 'update' || action === 'uninstall')) {
+      const uninstall = action === 'uninstall';
+      rejectUnexpected(options,
+        uninstall ? ['config-path'] : ['config-path', 'endpoint', 'timeout-ms'],
+        [], uninstall ? [] : ['allow-content-capture']);
+      const result = await runGooseOtelConfigAction(action, {
+        ...(options.values.has('config-path') ? { configPath: required(options, 'config-path') } : {}),
+        ...(options.values.has('endpoint') ? { endpoint: required(options, 'endpoint') } : {}),
+        ...(options.values.has('timeout-ms') ? { timeoutMs: Number(required(options, 'timeout-ms')) } : {}),
+        allowContentCapture: options.switches.has('allow-content-capture'),
+      });
+      stdout.write(`${JSON.stringify(result)}\n`);
+      return 0;
     } else if (family === 'goose' && gooseSubsystem === 'otel' && action === 'print-config') {
       rejectUnexpected(options, ['endpoint']);
       stdout.write(`${renderGooseOtelConfig(options.values.has('endpoint') ? required(options, 'endpoint') : undefined)}\n`);
@@ -1782,6 +1796,7 @@ function parseOptions(args: string[]): ParsedOptions {
     if (!key?.startsWith('--') || key.length < 3) throw new Error('adapter options must use --name value form');
     const name = key.slice(2);
     if (name === 'print' || name === 'include-content' || name === 'watch' || name === 'acknowledge-local-source' ||
+        name === 'allow-content-capture' ||
         name === 'privacy-reviewed' ||
         name === 'memory-discover-active-task' || name === 'discover-active-task' ||
         name === 'json' || name === 'capture-content' || name === 'allow-remote') {
@@ -1969,6 +1984,8 @@ function usage(): string {
     '  npm run adapter -- dsh sessions sync [--dsh-home <absolute-path>|--sessions-dir <absolute-path>] [--state-path <absolute-path>] [--endpoint <loopback-v1-events-url>] [--max-sessions <1-5000>] [--workspace <absolute-path>] [--session-id <id>] [--print] [--include-content] [--watch --interval <5s-168h>]',
     '  npm run adapter -- claude-cowork otel print-config --endpoint <public-https-collector-url>',
     '  npm run adapter -- goose otel print-config [--endpoint <loopback-http-base-url>]',
+    '  npm run adapter -- goose otel install|update [--config-path <absolute-path>] [--endpoint <loopback-http-base-url>] [--timeout-ms <1-120000>] --allow-content-capture',
+    '  npm run adapter -- goose otel uninstall [--config-path <absolute-path>]',
     '  npm run adapter -- goose otel status [--config-path <config.yaml>] [--log-path <events.jsonl>] [--json]',
     '  npm run adapter -- goose otel validate [--since <duration>] [--config-path <config.yaml>] [--log-path <events.jsonl>] [--json]',
     '  npm run adapter -- goose sessions status [--db-path <absolute-path>] [--state-path <absolute-path>] [--max-sessions <1-500>]',

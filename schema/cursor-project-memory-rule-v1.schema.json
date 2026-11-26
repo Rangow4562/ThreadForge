@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threadforge.dev/schema/cursor-project-memory-rule-v1.schema.json",
+  "title": "Threadforge Cursor project memory rule result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "host",
+    "action",
+    "path",
+    "sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "threadforge.cursor-project-memory-rule.v1"
+    },
+    "host": {
+      "const": "cursor"
+    },
+    "action": {
+      "enum": [
+        "planned",
+        "installed",
+        "unchanged",
+        "removed",
+        "absent"
+      ]
+    },
+    "path": {
+      "const": ".cursor/rules/threadforge-memory.mdc"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

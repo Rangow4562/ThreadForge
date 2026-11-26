@@ -33,34 +33,57 @@ if ($LASTEXITCODE -ne 0) {
 $runtimeHash = (Get-FileHash -LiteralPath $runtimeLock -Algorithm SHA256).Hash.ToLowerInvariant()
 $buildHash = (Get-FileHash -LiteralPath $buildLock -Algorithm SHA256).Hash.ToLowerInvariant()
 $dockerfile = Join-Path $PSScriptRoot 'Dockerfile'
-& docker --context default buildx build `
-    --platform linux/amd64 `
-    --load `
-    --file $dockerfile `
-    --tag $Tag `
-    --build-arg "THREADFORGE_PYTHON_BASE_IMAGE=$baseImage" `
-    --build-arg "THREADFORGE_REQUIREMENTS_SHA256=$runtimeHash" `
-    --build-arg "THREADFORGE_BUILD_REQUIREMENTS_SHA256=$buildHash" `
-    --build-context "threadforge-python=$pythonRoot" `
-    --build-context "threadforge-workspace=$workspaceRoot" `
-    --build-context "threadforge-archipelago=$archipelagoRoot" `
-    $PSScriptRoot
-if ($LASTEXITCODE -ne 0) {
-    throw 'Engineering runtime image build failed.'
-}
+$metadataPath = Join-Path ([System.IO.Path]::GetTempPath()) ("threadforge-engineering-build-$PID-$([Guid]::NewGuid().ToString('N')).json")
+try {
+    & docker --context default buildx build `
+        --platform linux/amd64 `
+        --load `
+        --metadata-file $metadataPath `
+        --file $dockerfile `
+        --tag $Tag `
+        --build-arg "THREADFORGE_PYTHON_BASE_IMAGE=$baseImage" `
+        --build-arg "THREADFORGE_REQUIREMENTS_SHA256=$runtimeHash" `
+        --build-arg "THREADFORGE_BUILD_REQUIREMENTS_SHA256=$buildHash" `
+        --build-context "threadforge-python=$pythonRoot" `
+        --build-context "threadforge-workspace=$workspaceRoot" `
+        --build-context "threadforge-archipelago=$archipelagoRoot" `
+        $PSScriptRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Engineering runtime image build failed.'
+    }
+    if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) {
+        throw 'Buildx did not write its image metadata file.'
+    }
+    try {
+        $buildMetadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw 'Buildx image metadata is not valid JSON.'
+    }
+    $imageConfigDigest = $buildMetadata.'containerimage.config.digest'
+    if ($imageConfigDigest -notmatch '^sha256:[0-9a-f]{64}$') {
+        throw 'Buildx did not return a valid immutable image config digest.'
+    }
 
-$imageId = (& docker --context default image inspect --format '{{.Id}}' $Tag 2>$null).Trim()
-if ($LASTEXITCODE -ne 0 -or $imageId -notmatch '^sha256:[0-9a-f]{64}$') {
-    throw 'Docker did not return an immutable local image ID after the build.'
+    $imageId = (& docker --context default image inspect --format '{{.Id}}' $Tag 2>$null).Trim()
+    if ($LASTEXITCODE -ne 0 -or $imageId -notmatch '^sha256:[0-9a-f]{64}$') {
+        throw 'Docker did not return an immutable local image ID after the build.'
+    }
+    [ordered]@{
+        schema_version = 'threadforge.engineering-image-build.v2'
+        platform = 'linux/amd64'
+        image_id = $imageId
+        image_config_digest = $imageConfigDigest
+        tag = $Tag
+        base_image = $baseImage
+        runtime_requirements_sha256 = $runtimeHash
+        build_requirements_sha256 = $buildHash
+        benchmark_data_included = $false
+        evaluator_included = $false
+    } | ConvertTo-Json -Compress
 }
-[ordered]@{
-    schema_version = 'threadforge.engineering-image-build.v1'
-    platform = 'linux/amd64'
-    image_id = $imageId
-    tag = $Tag
-    base_image = $baseImage
-    runtime_requirements_sha256 = $runtimeHash
-    build_requirements_sha256 = $buildHash
-    benchmark_data_included = $false
-    evaluator_included = $false
-} | ConvertTo-Json -Compress
+finally {
+    if (Test-Path -LiteralPath $metadataPath -PathType Leaf) {
+        Remove-Item -LiteralPath $metadataPath -Force -ErrorAction SilentlyContinue
+    }
+}

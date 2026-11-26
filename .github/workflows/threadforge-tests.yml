@@ -1404,11 +1404,12 @@ jobs:
           IMAGE_ARCHIVE: ${{ runner.temp }}/threadforge_${{ steps.release.outputs.version }}_engineering_linux_amd64.docker.tar
         run: |
           $ErrorActionPreference = 'Stop'
-          & ./containers/engineering/build.ps1 -Tag $env:IMAGE_TAG |
+          & ./containers/engineering/build.ps1 -Tag $env:IMAGE_TAG -ArchivePath $env:IMAGE_ARCHIVE |
             Set-Content -LiteralPath $env:BUILD_RECEIPT -Encoding utf8NoBOM
           if ($LASTEXITCODE -ne 0) { throw 'Pinned Engineering image build failed.' }
-          & docker save --output $env:IMAGE_ARCHIVE $env:IMAGE_TAG
-          if ($LASTEXITCODE -ne 0) { throw 'Docker image archive export failed.' }
+          if (-not (Test-Path -LiteralPath $env:IMAGE_ARCHIVE -PathType Leaf)) {
+            throw 'Pinned Engineering image build did not retain its verified Docker archive.'
+          }
 
       - name: Generate SPDX SBOM from the built Engineering image
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import importlib.util
+import io
 import re
 import shutil
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -14,6 +18,47 @@ from threadforge_domains.workspace.security import valid_pinned_image
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 IMAGE_ROOT = REPOSITORY_ROOT / "containers" / "engineering"
 SHA256 = "a" * 64
+
+
+def _docker_save_archive(path: Path, *, tag: str) -> str:
+    layer = b"layer data"
+    config = {
+        "architecture": "amd64",
+        "os": "linux",
+        "config": {"User": "65532:65532"},
+        "rootfs": {"type": "layers", "diff_ids": [f"sha256:{hashlib.sha256(layer).hexdigest()}"]},
+    }
+    config_bytes = json.dumps(config, separators=(",", ":")).encode()
+    digest = hashlib.sha256(config_bytes).hexdigest()
+    config_name = f"{digest}.json"
+    manifest = [{"Config": config_name, "RepoTags": [tag], "Layers": ["layer.tar"]}]
+    with tarfile.open(path, mode="w") as archive:
+        for name, data in {
+            "manifest.json": json.dumps(manifest).encode(),
+            config_name: config_bytes,
+            "layer.tar": layer,
+        }.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.mode = 0o644
+            info.mtime = 0
+            archive.addfile(info, io.BytesIO(data))
+        directory = tarfile.TarInfo("layer-metadata/")
+        directory.type = tarfile.DIRTYPE
+        directory.mode = 0o755
+        directory.mtime = 0
+        archive.addfile(directory)
+    return f"sha256:{digest}"
+
+
+def _load_archive_inspector():
+    path = REPOSITORY_ROOT / "scripts" / "engineering_docker_archive.py"
+    spec = importlib.util.spec_from_file_location("threadforge_engineering_docker_archive", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("could not load Engineering Docker archive inspector")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _assert_hash_locked_requirements(path: Path, *, minimum_packages: int) -> set[str]:
@@ -173,14 +218,52 @@ def test_image_build_receipt_v2_schema_binds_local_id_and_config_digest_separate
     assert not Draft202012Validator(schema).is_valid(receipt)
 
 
-def test_powershell_build_script_reads_buildx_config_digest_and_cleans_metadata(tmp_path):
+def test_engineering_build_uses_archive_digest_not_buildx_metadata():
+    build_script = (IMAGE_ROOT / "build.ps1").read_text(encoding="utf-8")
+
+    assert "--load" in build_script
+    assert "docker --context default save --output $archivePath $Tag" in build_script
+    assert "engineering_docker_archive.py" in build_script
+    assert "--metadata-file" not in build_script
+    assert "--push" not in build_script
+
+
+def test_docker_archive_inspector_derives_config_digest_from_tagged_image(tmp_path):
+    inspector = _load_archive_inspector()
+    archive = tmp_path / "image.docker.tar"
+    expected_tag = "threadforge-engineering:local"
+    expected_digest = _docker_save_archive(archive, tag=expected_tag)
+
+    assert inspector.config_digest_from_archive(archive, expected_tag=expected_tag) == expected_digest
+    with pytest.raises(inspector.DockerArchiveError, match="tag does not match"):
+        inspector.config_digest_from_archive(archive, expected_tag="threadforge-engineering:other")
+
+
+def test_docker_archive_inspector_rejects_unsafe_members(tmp_path):
+    inspector = _load_archive_inspector()
+    archive_path = tmp_path / "unsafe.docker.tar"
+    with tarfile.open(archive_path, mode="w") as archive:
+        member = tarfile.TarInfo("../outside")
+        member.size = 1
+        archive.addfile(member, io.BytesIO(b"x"))
+
+    with pytest.raises(inspector.DockerArchiveError, match="unsafe member path"):
+        inspector.config_digest_from_archive(
+            archive_path, expected_tag="threadforge-engineering:local"
+        )
+
+
+def test_powershell_build_script_binds_digest_from_saved_archive_and_cleans_temp(tmp_path):
     powershell = shutil.which("pwsh")
     if powershell is None:
         pytest.skip("PowerShell Core is unavailable")
 
     image_id = f"sha256:{'b' * 64}"
-    config_digest = f"sha256:{'a' * 64}"
-    metadata_capture = tmp_path / "metadata-path.txt"
+    tag = "threadforge-engineering:local"
+    archive_fixture = tmp_path / "fixture.docker.tar"
+    config_digest = _docker_save_archive(archive_fixture, tag=tag)
+    archive_capture = tmp_path / "archive-path.txt"
+    explicit_archive = tmp_path / "preserved.docker.tar"
     smoke_script = tmp_path / "mock-engineering-build.ps1"
 
     def ps_literal(value: str) -> str:
@@ -189,7 +272,10 @@ def test_powershell_build_script_reads_buildx_config_digest_and_cleans_metadata(
     smoke_script.write_text(
         f"""
 $ErrorActionPreference = 'Stop'
-$metadataCapture = {ps_literal(str(metadata_capture))}
+$archiveCapture = {ps_literal(str(archive_capture))}
+$archiveFixture = {ps_literal(str(archive_fixture))}
+$explicitArchive = {ps_literal(str(explicit_archive))}
+$failedArchive = {ps_literal(str(tmp_path / 'failed.docker.tar'))}
 $buildScript = {ps_literal(str(IMAGE_ROOT / 'build.ps1'))}
 function docker {{
     $call = @($args)
@@ -202,11 +288,13 @@ function docker {{
         return
     }}
     if ($call[0] -eq '--context' -and $call[2] -eq 'buildx' -and $call[3] -eq 'build') {{
-        $metadataIndex = [Array]::IndexOf($call, '--metadata-file')
-        if ($metadataIndex -lt 0) {{ throw 'Buildx was not asked to write metadata.' }}
-        $metadataPath = [string]$call[$metadataIndex + 1]
-        [IO.File]::WriteAllText($metadataCapture, $metadataPath)
-        [IO.File]::WriteAllText($metadataPath, '{{"containerimage.config.digest":"{config_digest}"}}')
+        $global:LASTEXITCODE = 0
+        return
+    }}
+    if ($call[0] -eq '--context' -and $call[2] -eq 'save' -and $call[3] -eq '--output') {{
+        $archivePath = [string]$call[4]
+        Copy-Item -LiteralPath $archiveFixture -Destination $archivePath
+        [IO.File]::WriteAllText($archiveCapture, $archivePath)
         $global:LASTEXITCODE = 0
         return
     }}
@@ -216,12 +304,23 @@ function docker {{
     }}
     throw 'Unexpected Docker invocation.'
 }}
-$receiptLines = & $buildScript -Tag 'threadforge-engineering:local'
+$receiptLines = & $buildScript -Tag {ps_literal(tag)} -ArchivePath $explicitArchive
 if ($LASTEXITCODE -ne 0) {{ throw 'Mocked build command returned a failure code.' }}
 $receipt = $receiptLines | ConvertFrom-Json -ErrorAction Stop
 if ($receipt.schema_version -ne 'threadforge.engineering-image-build.v2') {{ throw 'Unexpected build receipt version.' }}
 if ($receipt.image_id -ne '{image_id}' -or $receipt.image_config_digest -ne '{config_digest}') {{ throw 'Build identities were not preserved separately.' }}
-if (Test-Path -LiteralPath (Get-Content -LiteralPath $metadataCapture -Raw)) {{ throw 'Temporary Buildx metadata was not removed.' }}
+if (-not (Test-Path -LiteralPath $explicitArchive -PathType Leaf)) {{ throw 'Requested Docker archive was not preserved.' }}
+try {{
+    & $buildScript -Tag 'threadforge-engineering:wrong' -ArchivePath $failedArchive | Out-Null
+    throw 'Mismatched archive tag was unexpectedly accepted.'
+}} catch {{
+    if ($_.Exception.Message -eq 'Mismatched archive tag was unexpectedly accepted.') {{ throw }}
+}}
+if (Test-Path -LiteralPath $failedArchive) {{ throw 'Failed explicit archive output was not cleaned up.' }}
+$tempReceiptLines = & $buildScript -Tag {ps_literal(tag)}
+if ($LASTEXITCODE -ne 0) {{ throw 'Mocked temporary archive build returned a failure code.' }}
+$tempArchive = Get-Content -LiteralPath $archiveCapture -Raw
+if (Test-Path -LiteralPath $tempArchive) {{ throw 'Temporary Docker archive was not removed.' }}
 $receiptLines
 """,
         encoding="utf-8",

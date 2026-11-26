@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
+import pytest
 from jsonschema import Draft202012Validator
 
 from threadforge_domains.workspace.security import valid_pinned_image
@@ -146,3 +149,94 @@ def test_image_build_receipt_schema_is_immutable_and_data_free():
     Draft202012Validator(schema).validate(receipt)
     receipt["evaluator_included"] = True
     assert not Draft202012Validator(schema).is_valid(receipt)
+
+
+def test_image_build_receipt_v2_schema_binds_local_id_and_config_digest_separately():
+    schema = json.loads(
+        (REPOSITORY_ROOT / "schema" / "engineering-image-build-v2.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    receipt = {
+        "schema_version": "threadforge.engineering-image-build.v2",
+        "platform": "linux/amd64",
+        "image_id": f"sha256:{'b' * 64}",
+        "image_config_digest": f"sha256:{'a' * 64}",
+        "tag": "threadforge-engineering:local",
+        "base_image": (IMAGE_ROOT / "base-image.txt").read_text(encoding="utf-8").strip(),
+        "runtime_requirements_sha256": SHA256,
+        "build_requirements_sha256": SHA256,
+        "benchmark_data_included": False,
+        "evaluator_included": False,
+    }
+    Draft202012Validator(schema).validate(receipt)
+    receipt["image_config_digest"] = "mutable-tag"
+    assert not Draft202012Validator(schema).is_valid(receipt)
+
+
+def test_powershell_build_script_reads_buildx_config_digest_and_cleans_metadata(tmp_path):
+    powershell = shutil.which("pwsh")
+    if powershell is None:
+        pytest.skip("PowerShell Core is unavailable")
+
+    image_id = f"sha256:{'b' * 64}"
+    config_digest = f"sha256:{'a' * 64}"
+    metadata_capture = tmp_path / "metadata-path.txt"
+    smoke_script = tmp_path / "mock-engineering-build.ps1"
+
+    def ps_literal(value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
+
+    smoke_script.write_text(
+        f"""
+$ErrorActionPreference = 'Stop'
+$metadataCapture = {ps_literal(str(metadata_capture))}
+$buildScript = {ps_literal(str(IMAGE_ROOT / 'build.ps1'))}
+function docker {{
+    $call = @($args)
+    if ($call[0] -eq '--context' -and $call[2] -eq 'context') {{
+        $global:LASTEXITCODE = 0
+        return 'unix://mock-docker.sock'
+    }}
+    if ($call[0] -eq 'buildx' -and $call[1] -eq 'version') {{
+        $global:LASTEXITCODE = 0
+        return
+    }}
+    if ($call[0] -eq '--context' -and $call[2] -eq 'buildx' -and $call[3] -eq 'build') {{
+        $metadataIndex = [Array]::IndexOf($call, '--metadata-file')
+        if ($metadataIndex -lt 0) {{ throw 'Buildx was not asked to write metadata.' }}
+        $metadataPath = [string]$call[$metadataIndex + 1]
+        [IO.File]::WriteAllText($metadataCapture, $metadataPath)
+        [IO.File]::WriteAllText($metadataPath, '{{"containerimage.config.digest":"{config_digest}"}}')
+        $global:LASTEXITCODE = 0
+        return
+    }}
+    if ($call[0] -eq '--context' -and $call[2] -eq 'image' -and $call[3] -eq 'inspect') {{
+        $global:LASTEXITCODE = 0
+        return '{image_id}'
+    }}
+    throw 'Unexpected Docker invocation.'
+}}
+$receiptLines = & $buildScript -Tag 'threadforge-engineering:local'
+if ($LASTEXITCODE -ne 0) {{ throw 'Mocked build command returned a failure code.' }}
+$receipt = $receiptLines | ConvertFrom-Json -ErrorAction Stop
+if ($receipt.schema_version -ne 'threadforge.engineering-image-build.v2') {{ throw 'Unexpected build receipt version.' }}
+if ($receipt.image_id -ne '{image_id}' -or $receipt.image_config_digest -ne '{config_digest}') {{ throw 'Build identities were not preserved separately.' }}
+if (Test-Path -LiteralPath (Get-Content -LiteralPath $metadataCapture -Raw)) {{ throw 'Temporary Buildx metadata was not removed.' }}
+$receiptLines
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-File", str(smoke_script)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    receipt = json.loads(result.stdout.strip())
+    assert receipt["schema_version"] == "threadforge.engineering-image-build.v2"
+    assert receipt["image_id"] == image_id
+    assert receipt["image_config_digest"] == config_digest

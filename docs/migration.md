@@ -2,6 +2,12 @@
 
 Migration is deliberately a review workflow, not an automatic cutover. It never imports credentials, never marks imported knowledge approved, and never mutates the source tree. It currently creates private local snapshots of normalized JSON records, then stages those records in SQLite with scope `local_pending_review`.
 
+## Actual-source revalidation — November 25, 2026
+
+On the merged `main` source tree (`dedbeb054b200e70666dc78bfbe59976afc633ef`), `go test ./internal/cli -run '^TestConfiguredMigrationSourceReadback$' -count=1 -v` passed with `THREADFORGE_BEACON_SOURCE` and `THREADFORGE_ANYJEV_SOURCE` set to the clean pinned Beacon (`c8d56ada361eb7cb4d1eae1fe7b0e2fe69f36558`) and AnyJev (`795a4970b47218b7c0686cd579d691fc2cf8df2f`) checkouts. The test used temporary Threadforge homes, SQLite databases, snapshots, and independent source backups; it exercised format coverage, interruption recovery, apply/idempotent reapply, verification, rollback, and unchanged-source checks. Beacon reconciled one endpoint-cursor file/record (2,907 bytes). AnyJev reconciled 306 files (304 ready, 2 credential-path exclusions), 419 `local_pending_review` records, 24 populated formats, and 27,445,135 bytes, with zero unsupported, unconverted, unclassified, or rejected inputs. The temporary test state was removed; nothing was applied to a persistent Threadforge database.
+
+The same merged-tree CLI's read-only `migrate inspect` returned zero files, records, and source bytes for the supplied Mancode (`77fb169f7b85a5070bd38d27254b10d0a945d44a`) and RRSI (`be50316e1db05914068a973f322770ef08ed7ba1`) code checkouts, each with the empty-set fingerprint. Both source worktrees remained clean. This does not establish operational-state migration: the authoritative Mancode project/team/workspace roots and RRSI `--runs` histories must be supplied by their owners. Do not snapshot an empty code checkout as a substitute or treat these checks as cutover authorization.
+
 ## Command sequence
 
 When RRSI was run with a custom `rrsi.py --runs <directory>`, pass that exact directory as `--root` to `migrate inspect` and `migrate snapshot --product rrsi`. The importer recognizes `coding/`, `workspace/`, and `eng/` only as top-level children of this explicitly supplied root, then applies the same path-bound converters, privacy checks, backup verification, and review-only scope as repository-relative `runs/<domain>/` inputs. It does not search for or guess custom run directories.

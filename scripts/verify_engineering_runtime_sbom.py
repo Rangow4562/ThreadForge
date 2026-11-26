@@ -117,7 +117,10 @@ def _validate_docker_archive(path: Path, *, binding: dict[str, Any], expected_ta
     image = binding.get("image_archive")
     image_id = binding.get("image_id")
     image_id_match = IMAGE_ID_RE.fullmatch(image_id) if isinstance(image_id, str) else None
-    if not isinstance(image, dict) or not image_id_match:
+    schema_version = binding.get("schema_version")
+    config_digest = binding.get("image_config_digest") if schema_version == "threadforge.engineering-image-sbom-binding.v2" else image_id
+    config_digest_match = IMAGE_ID_RE.fullmatch(config_digest) if isinstance(config_digest, str) else None
+    if not isinstance(image, dict) or not image_id_match or not config_digest_match:
         raise EngineeringRuntimeSBOMError("binding is missing Docker archive identity")
 
     members: dict[str, tarfile.TarInfo] = {}
@@ -155,8 +158,8 @@ def _validate_docker_archive(path: Path, *, binding: dict[str, Any], expected_ta
             if config_member is None:
                 raise EngineeringRuntimeSBOMError("Docker image config is missing from the archive")
             config_data = _read_tar_member(archive, config_member, limit=MAX_IMAGE_CONFIG_BYTES)
-            if hashlib.sha256(config_data).hexdigest() != image_id_match.group(1):
-                raise EngineeringRuntimeSBOMError("Docker image config digest differs from the pinned image ID")
+            if hashlib.sha256(config_data).hexdigest() != config_digest_match.group(1):
+                raise EngineeringRuntimeSBOMError("Docker image config digest differs from the build config digest")
             config = _decode_json(config_data, "Docker image config")
             if not isinstance(config, dict):
                 raise EngineeringRuntimeSBOMError("Docker image config root is invalid")
@@ -341,7 +344,14 @@ def verify_engineering_runtime_artifact(
     try:
         import jsonschema
 
-        binding_schema = json.loads((repo_root / "schema" / "engineering-image-sbom-binding-v1.schema.json").read_text(encoding="utf-8"))
+        binding_schema_version = binding.get("schema_version")
+        binding_schema_file = {
+            "threadforge.engineering-image-sbom-binding.v1": "engineering-image-sbom-binding-v1.schema.json",
+            "threadforge.engineering-image-sbom-binding.v2": "engineering-image-sbom-binding-v2.schema.json",
+        }.get(binding_schema_version)
+        if binding_schema_file is None:
+            raise EngineeringRuntimeSBOMError("Engineering SBOM binding uses an unsupported version")
+        binding_schema = json.loads((repo_root / "schema" / binding_schema_file).read_text(encoding="utf-8"))
         jsonschema.Draft202012Validator(binding_schema).validate(binding)
     except ImportError as error:
         raise EngineeringRuntimeSBOMError("jsonschema is required to verify the Engineering SBOM binding") from error

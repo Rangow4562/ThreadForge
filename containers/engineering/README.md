@@ -29,12 +29,16 @@ From the repository root, run:
 
 The script requires a local Docker default context and Buildx, builds without
 publishing, then prints a metadata-only
-`threadforge.engineering-image-build.v1` receipt. `image_id` is the immutable
-local `sha256:<image-id>` accepted by the runtime pin; `tag` is only a local
-convenience label. Copy `image_id` into the private runtime-pin request's
-`--image` value. The build itself needs network access to retrieve the pinned
-base and hash-verified packages; the running benchmark container has no network
-and never pulls an image.
+`threadforge.engineering-image-build.v2` receipt. `image_id` is the immutable
+local `sha256:<image-id>` accepted by the runtime pin; `image_config_digest`
+comes from Buildx's build metadata and identifies the exact config bytes in a
+Docker-save archive. These digests can differ when BuildKit emits provenance
+as an image index, so archive verification uses `image_config_digest` while
+runtime pinning continues to use `image_id`. `tag` is only a local convenience
+label. Copy `image_id` into the private runtime-pin request's `--image` value.
+The build itself needs network access to retrieve the pinned base and
+hash-verified packages; the running benchmark container has no network and
+never pulls an image.
 
 The base digest and dependency locks make build inputs explicit, but a built
 image is not benchmark acceptance evidence. Record the returned image ID in

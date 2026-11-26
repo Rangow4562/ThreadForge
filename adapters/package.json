@@ -132,6 +132,8 @@
     "test:opencode-history-host": "node --experimental-strip-types scripts/opencode-history-host-smoke.mjs"
   },
   "devDependencies": {
+    "@opentelemetry/api": "1.10.0",
+    "@opentelemetry/sdk-trace": "3.1.1",
     "@types/node": "22.20.4",
     "typescript": "5.8.3"
   },

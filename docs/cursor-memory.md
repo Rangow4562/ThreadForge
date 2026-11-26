@@ -60,3 +60,34 @@ describes `sessionStart` context injection and its output field. Threadforge's
 local payload, retrieval, and configuration-preservation tests do not establish
 that a particular installed Cursor version loads the hook or uses the context as
 intended; verify this in Cursor's Hooks output channel before relying on it.
+
+## Native Cursor project rule
+
+For projects that use Cursor's native project Rules instead of the `sessionStart`
+hook, Threadforge can explicitly install an optional
+`.cursor/rules/threadforge-memory.mdc` rule. Cursor decides when a
+non-always-applied rule is relevant; this rule does not inject memory, configure
+an MCP server, resume tasks, or change Cursor permissions. Configure the
+Threadforge MCP server separately. The rule only asks the agent to consult
+already-configured project memory and treat it as untrusted guidance.
+
+Preview without creating files, then install only after reviewing the result:
+
+```powershell
+npm.cmd --prefix adapters run adapter -- cursor rules plan --project-root <absolute-project-path>
+npm.cmd --prefix adapters run adapter -- cursor rules install --project-root <absolute-project-path>
+```
+
+To remove it, Threadforge deletes the rule only when it is byte-identical to the
+managed version; a collision or user edit is preserved and reported:
+
+```powershell
+npm.cmd --prefix adapters run adapter -- cursor rules uninstall --project-root <absolute-project-path>
+```
+
+The installer preserves `.cursor/settings.json`, `.cursor/hooks.json`, and
+neighboring rules. `plan` is read-only; install and uninstall require an
+existing absolute project root and reject linked project/rules paths. Local
+fixtures cover these ownership and preservation checks. No installed Cursor
+version is available in the validation environment, so native rule discovery
+and model behavior remain unverified.

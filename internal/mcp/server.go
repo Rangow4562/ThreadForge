@@ -21,6 +21,7 @@ import (
 	"github.com/threadforge-ai/threadforge/pkg/memoryfeedback"
 	"github.com/threadforge-ai/threadforge/pkg/proceduregraph"
 	"github.com/threadforge-ai/threadforge/pkg/projectmemory"
+	"github.com/threadforge-ai/threadforge/pkg/strictjson"
 )
 
 const maxMessageBytes = 1 << 20
@@ -56,6 +57,7 @@ type rpcRequest struct {
 	ID      json.RawMessage `json:"id"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
+	Meta    json.RawMessage `json:"_meta,omitempty"`
 }
 
 type rpcResponse struct {
@@ -135,8 +137,11 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 
 func (session *stdioSession) handle(ctx context.Context, data []byte) (rpcResponse, bool) {
 	var request rpcRequest
-	if err := json.Unmarshal(data, &request); err != nil {
+	if !json.Valid(data) {
 		return responseError(nil, -32700, "parse error"), true
+	}
+	if err := strictjson.Decode(data, &request); err != nil {
+		return responseError(nil, -32600, "invalid request"), true
 	}
 	if request.JSONRPC != "2.0" || strings.TrimSpace(request.Method) == "" {
 		return responseError(request.ID, -32600, "invalid request"), true

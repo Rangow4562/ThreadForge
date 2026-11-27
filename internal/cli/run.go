@@ -47,7 +47,7 @@ import (
 // checked-in value aligned with the most recently published CLI release.
 var version = "0.5.0"
 
-const maxGraphBytes = 2 << 20
+const maxGraphBytes = proceduregraph.MaxGraphBytes
 
 func Run(args []string, stdout, stderr io.Writer) int {
 	return RunWithInput(args, os.Stdin, stdout, stderr)

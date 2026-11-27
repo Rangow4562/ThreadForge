@@ -29,7 +29,7 @@ var (
 	ErrFreshnessUnverified = errors.New("procedure has no recorded source-file fingerprints")
 )
 
-const maxGraphBytes = 2 << 20
+const maxGraphBytes = proceduregraph.MaxGraphBytes
 const maxProcedures = 10000
 const sharedRecordSchema = "threadforge.shared-procedure-record.v1"
 

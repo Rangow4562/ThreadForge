@@ -114,18 +114,24 @@ func TestFeatureParityRowsMapToCutoverRequirements(t *testing.T) {
 	}
 }
 
-func TestUnifiedAcceptanceDocumentsCurrentEvidenceSchema(t *testing.T) {
+func TestAcceptanceRowsDocumentCurrentEvidenceSchema(t *testing.T) {
 	data := readRepositoryDocument(t, filepath.Join("..", "..", "docs", "feature-parity.md"))
-	for _, line := range strings.Split(string(data), "\n") {
-		if !strings.HasPrefix(strings.TrimSpace(line), "| Unified acceptance |") {
-			continue
+	for _, rowName := range []string{"Migration acceptance", "Unified acceptance"} {
+		found := false
+		for _, line := range strings.Split(string(data), "\n") {
+			if !strings.HasPrefix(strings.TrimSpace(line), "| "+rowName+" |") {
+				continue
+			}
+			if !strings.Contains(line, SchemaVersion) {
+				t.Fatalf("%s row must describe current evidence schema %q: %s", rowName, SchemaVersion, line)
+			}
+			found = true
+			break
 		}
-		if !strings.Contains(line, SchemaVersion) || strings.Contains(line, "cutover evidence v3") {
-			t.Fatalf("Unified acceptance row must describe current evidence schema %q: %s", SchemaVersion, line)
+		if !found {
+			t.Fatalf("%s row was not found in docs/feature-parity.md", rowName)
 		}
-		return
 	}
-	t.Fatal("Unified acceptance row was not found in docs/feature-parity.md")
 }
 
 func TestCutoverApprovalDocumentationUsesCurrentEvidenceSchema(t *testing.T) {

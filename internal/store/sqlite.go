@@ -740,6 +740,9 @@ func (s *Store) ListProject(ctx context.Context, projectID string) ([]procedureg
 		if err := rows.Scan(&payload); err != nil {
 			return nil, err
 		}
+		if len(payload) > proceduregraph.MaxGraphBytes {
+			return nil, errors.New("stored procedure graph exceeds the maximum size")
+		}
 		var graph proceduregraph.Graph
 		if err := json.Unmarshal([]byte(payload), &graph); err != nil {
 			return nil, fmt.Errorf("decode stored graph: %w", err)
@@ -1103,6 +1106,9 @@ func readGraphDB(ctx context.Context, q queryer, id string) (proceduregraph.Grap
 	}
 	if err != nil {
 		return proceduregraph.Graph{}, err
+	}
+	if len(payload) > proceduregraph.MaxGraphBytes {
+		return proceduregraph.Graph{}, errors.New("stored procedure graph exceeds the maximum size")
 	}
 	var graph proceduregraph.Graph
 	if err := json.Unmarshal([]byte(payload), &graph); err != nil {

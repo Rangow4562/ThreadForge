@@ -82,6 +82,31 @@ func TestRevisionConflictDoesNotOverwrite(t *testing.T) {
 	}
 }
 
+func TestGetRejectsOversizedStoredGraphBeforeDecoding(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "memory.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO procedure_graphs(id, project_id, revision, status, graph_json, updated_at)
+		 VALUES(?, ?, ?, ?, ?, ?)`,
+		"oversized-graph", "repo:test", 1, proceduregraph.StatusDraft,
+		strings.Repeat(" ", proceduregraph.MaxGraphBytes+1), time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Get(ctx, "oversized-graph"); err == nil || !strings.Contains(err.Error(), "exceeds the maximum size") {
+		t.Fatalf("Get() error = %v, want oversized stored-graph rejection", err)
+	}
+	if _, err := s.ListProject(ctx, "repo:test"); err == nil || !strings.Contains(err.Error(), "exceeds the maximum size") {
+		t.Fatalf("ListProject() error = %v, want oversized stored-graph rejection", err)
+	}
+}
+
 func TestFailedValidationIsRejected(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(filepath.Join(t.TempDir(), "memory.db"))

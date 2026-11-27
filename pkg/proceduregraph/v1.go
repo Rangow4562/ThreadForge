@@ -1,6 +1,7 @@
 package proceduregraph
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -13,6 +14,17 @@ import (
 )
 
 const SchemaVersion = "threadforge.procedure-graph.v1"
+
+// MaxGraphBytes is the maximum encoded size accepted for a procedure graph.
+// Keep graph ingress, persistence, and portable-file limits aligned.
+const MaxGraphBytes = 2 << 20
+
+const (
+	maxApplicabilityEntries = 64
+	maxNodePathPatterns     = 16
+	maxEvidenceEntries      = 100
+	maxExpensivePathMatches = 128
+)
 
 const (
 	StatusDraft      Status = "draft"
@@ -149,6 +161,44 @@ var allowedStatuses = map[Status]bool{
 func Validate(g Graph) error {
 	var problems []Problem
 	add := func(field, message string) { problems = append(problems, Problem{Field: field, Message: message}) }
+	if len(g.Nodes) > 256 {
+		add("nodes", "must contain no more than 256 nodes")
+	}
+	if len(g.Edges) > 1024 {
+		add("edges", "must contain no more than 1024 edges")
+	}
+	if len(g.SourceFiles) > 500 {
+		add("source_files", "must contain no more than 500 path fingerprints")
+	}
+	if len(g.Applicability.Paths) > maxApplicabilityEntries {
+		add("applicability.paths", "must contain no more than 64 path patterns")
+	}
+	if len(g.Applicability.Modules) > maxApplicabilityEntries {
+		add("applicability.modules", "must contain no more than 64 modules")
+	}
+	if len(g.Evidence) > maxEvidenceEntries {
+		add("evidence", "must contain no more than 100 evidence entries")
+	}
+	if len(problems) > 0 {
+		return &ValidationError{Problems: problems}
+	}
+	if !applicabilityWorkWithinLimit(g) {
+		add("applicability.paths", "too many wildcard-to-source comparisons")
+	}
+	if len(problems) > 0 {
+		return &ValidationError{Problems: problems}
+	}
+	for i, node := range g.Nodes {
+		if len(node.Paths) > maxNodePathPatterns {
+			add(fmt.Sprintf("nodes[%d].paths", i), "must contain no more than 16 path patterns")
+		}
+	}
+	if len(problems) > 0 {
+		return &ValidationError{Problems: problems}
+	}
+	if !graphStringBytesWithinLimit(g) {
+		return &ValidationError{Problems: []Problem{{Field: "graph", Message: "string content exceeds the maximum graph size"}}}
+	}
 	checkPrivacy := func(field, value string) {
 		if privacy.ContainsCredentialText(value) {
 			add(field, "must not contain credential material")
@@ -175,18 +225,16 @@ func Validate(g Graph) error {
 	if !allowedStatuses[g.Status] {
 		add("status", "unknown lifecycle state")
 	}
-	if len(g.Nodes) == 0 || len(g.Nodes) > 256 {
-		add("nodes", "must contain between 1 and 256 nodes")
-	}
-	if len(g.Edges) > 1024 {
-		add("edges", "must contain no more than 1024 edges")
-	}
-	if len(g.SourceFiles) > 500 {
-		add("source_files", "must contain no more than 500 path fingerprints")
+	if len(g.Nodes) == 0 {
+		add("nodes", "must contain at least 1 node")
 	}
 	sourcePaths := make(map[string]bool, len(g.SourceFiles))
 	for i, source := range g.SourceFiles {
 		field := fmt.Sprintf("source_files[%d]", i)
+		if len(source.Path) > 1024 {
+			add(field+".path", "must be no more than 1024 characters")
+			continue
+		}
 		if err := validateRepositoryPath(source.Path); err != nil {
 			add(field+".path", err.Error())
 		}
@@ -206,17 +254,33 @@ func Validate(g Graph) error {
 		}
 	}
 
-	for i, pattern := range g.Applicability.Paths {
-		checkPrivacy(fmt.Sprintf("applicability.paths[%d]", i), pattern)
-		if err := validatePathPattern(pattern); err != nil {
-			add(fmt.Sprintf("applicability.paths[%d]", i), err.Error())
-		}
-	}
+	seenModules := make(map[string]bool, len(g.Applicability.Modules))
 	for i, module := range g.Applicability.Modules {
-		checkPrivacy(fmt.Sprintf("applicability.modules[%d]", i), module)
+		field := fmt.Sprintf("applicability.modules[%d]", i)
+		checkPrivacy(field, module)
 		if strings.TrimSpace(module) == "" || len(module) > 128 {
-			add(fmt.Sprintf("applicability.modules[%d]", i), "must contain 1 to 128 characters")
+			add(field, "must contain 1 to 128 characters")
 		}
+		if seenModules[module] {
+			add(field, "duplicate module")
+		}
+		seenModules[module] = true
+	}
+	seenApplicabilityPaths := make(map[string]bool, len(g.Applicability.Paths))
+	for i, pattern := range g.Applicability.Paths {
+		field := fmt.Sprintf("applicability.paths[%d]", i)
+		checkPrivacy(field, pattern)
+		if len(pattern) > 256 {
+			add(field, "must be no more than 256 characters")
+			continue
+		}
+		if err := validatePathPattern(pattern); err != nil {
+			add(field, err.Error())
+		}
+		if seenApplicabilityPaths[pattern] {
+			add(field, "duplicate applicability path pattern")
+		}
+		seenApplicabilityPaths[pattern] = true
 	}
 
 	nodeIDs := make(map[string]Node, len(g.Nodes))
@@ -232,22 +296,41 @@ func Validate(g Graph) error {
 		if !validNodeKind(node.Kind) {
 			add(field+".kind", "unknown node kind")
 		}
+		if len(node.Module) > 128 {
+			add(field+".module", "must be no more than 128 characters")
+		}
 		if strings.TrimSpace(node.Instruction) == "" || len(node.Instruction) > 4000 {
 			add(field+".instruction", "must contain 1 to 4000 characters")
 		}
 		checkPrivacy(field+".instruction", node.Instruction)
 		checkPrivacy(field+".module", node.Module)
+		seenNodePaths := make(map[string]bool, len(node.Paths))
 		for j, pattern := range node.Paths {
-			checkPrivacy(fmt.Sprintf("%s.paths[%d]", field, j), pattern)
-			if err := validatePathPattern(pattern); err != nil {
-				add(fmt.Sprintf("%s.paths[%d]", field, j), err.Error())
+			pathField := fmt.Sprintf("%s.paths[%d]", field, j)
+			checkPrivacy(pathField, pattern)
+			if len(pattern) > 256 {
+				add(pathField, "must be no more than 256 characters")
+				continue
 			}
+			if err := validatePathPattern(pattern); err != nil {
+				add(pathField, err.Error())
+			}
+			if seenNodePaths[pattern] {
+				add(pathField, "duplicate node path pattern")
+			}
+			seenNodePaths[pattern] = true
 		}
 	}
 
 	edgeKeys := make(map[string]bool, len(g.Edges))
 	for i, edge := range g.Edges {
 		field := fmt.Sprintf("edges[%d]", i)
+		if !validID(edge.From) {
+			add(field+".from", "must be a lowercase stable identifier")
+		}
+		if !validID(edge.To) {
+			add(field+".to", "must be a lowercase stable identifier")
+		}
 		if _, exists := nodeIDs[edge.From]; !exists {
 			add(field+".from", "references an unknown node")
 		}
@@ -277,6 +360,12 @@ func Validate(g Graph) error {
 		}
 		if !digestPattern.MatchString(evidence.ContentSHA256) {
 			add(field+".content_sha256", "must be a lowercase SHA-256 digest")
+		}
+		if len(evidence.Harness) > 128 {
+			add(field+".harness", "must be no more than 128 characters")
+		}
+		if len(evidence.ObservedAt) > 64 {
+			add(field+".observed_at", "must be no more than 64 characters")
 		}
 		if len(evidence.LocalTraceRef) > 256 {
 			add(field+".local_trace_ref", "must be no more than 256 characters")
@@ -328,21 +417,38 @@ func Validate(g Graph) error {
 			add("status", "validated and approved graphs require a passing held-out report")
 		}
 	}
-	if g.Status == StatusApproved {
-		if g.Approval == nil || strings.TrimSpace(g.Approval.ApprovedBy) == "" || strings.TrimSpace(g.Approval.Reason) == "" {
-			add("approval", "approved graphs require a reviewer and reason")
-		} else {
-			checkPrivacy("approval.approved_by", g.Approval.ApprovedBy)
-			checkPrivacy("approval.reason", g.Approval.Reason)
-			if _, err := time.Parse(time.RFC3339, g.Approval.ApprovedAt); err != nil {
-				add("approval.approved_at", "must use RFC3339")
-			}
+	if g.Approval != nil {
+		if strings.TrimSpace(g.Approval.ApprovedBy) == "" || len(g.Approval.ApprovedBy) > 128 {
+			add("approval.approved_by", "must contain 1 to 128 characters")
 		}
+		if strings.TrimSpace(g.Approval.Reason) == "" || len(g.Approval.Reason) > 1000 {
+			add("approval.reason", "must contain 1 to 1000 characters")
+		}
+		if len(g.Approval.ApprovedAt) > 64 {
+			add("approval.approved_at", "must be no more than 64 characters")
+		}
+		checkPrivacy("approval.approved_by", g.Approval.ApprovedBy)
+		checkPrivacy("approval.reason", g.Approval.Reason)
+		if _, err := time.Parse(time.RFC3339, g.Approval.ApprovedAt); err != nil {
+			add("approval.approved_at", "must use RFC3339")
+		}
+	}
+	if g.Status == StatusApproved && g.Approval == nil {
+		add("approval", "approved graphs require a reviewer and reason")
 	}
 	if g.Status == StatusSuperseded && !validID(g.SupersededBy) {
 		add("superseded_by", "superseded graphs require a replacement identifier")
 	}
+	if g.SupersededBy != "" && !validID(g.SupersededBy) {
+		add("superseded_by", "must be a lowercase stable identifier")
+	}
 
+	if len(problems) == 0 {
+		encoded, err := json.Marshal(g)
+		if err != nil || len(encoded) > MaxGraphBytes {
+			add("graph", "encoded graph must be no more than 2097152 bytes")
+		}
+	}
 	if len(problems) > 0 {
 		return &ValidationError{Problems: problems}
 	}
@@ -353,6 +459,63 @@ func (v Validation) PassesGate() bool {
 	return v.HeldOut && v.Status == "passed" &&
 		v.CandidateScore+v.NoiseFloor >= v.BaselineScore &&
 		v.CandidateCost <= v.BaselineCost+v.MaxCostIncrease
+}
+
+func graphStringBytesWithinLimit(g Graph) bool {
+	total := 0
+	add := func(value string) bool {
+		if len(value) > MaxGraphBytes-total {
+			return false
+		}
+		total += len(value)
+		return true
+	}
+	if !add(g.SchemaVersion) || !add(g.ID) || !add(g.ProjectID) || !add(g.Title) || !add(string(g.Status)) {
+		return false
+	}
+	for _, module := range g.Applicability.Modules {
+		if !add(module) {
+			return false
+		}
+	}
+	for _, pattern := range g.Applicability.Paths {
+		if !add(pattern) {
+			return false
+		}
+	}
+	for _, node := range g.Nodes {
+		if !add(node.ID) || !add(string(node.Kind)) || !add(node.Instruction) || !add(node.Module) {
+			return false
+		}
+		for _, pattern := range node.Paths {
+			if !add(pattern) {
+				return false
+			}
+		}
+	}
+	for _, edge := range g.Edges {
+		if !add(edge.From) || !add(edge.To) || !add(string(edge.Relation)) || !add(edge.Condition) {
+			return false
+		}
+	}
+	for _, evidence := range g.Evidence {
+		if !add(evidence.Origin) || !add(evidence.ContentSHA256) || !add(evidence.Harness) ||
+			!add(evidence.ObservedAt) || !add(evidence.LocalTraceRef) {
+			return false
+		}
+	}
+	for _, source := range g.SourceFiles {
+		if !add(source.Path) || !add(source.SHA256) {
+			return false
+		}
+	}
+	if g.Validation != nil && (!add(g.Validation.DatasetFingerprint) || !add(g.Validation.CostUnit) || !add(g.Validation.Status)) {
+		return false
+	}
+	if g.Approval != nil && (!add(g.Approval.ApprovedBy) || !add(g.Approval.ApprovedAt) || !add(g.Approval.Reason)) {
+		return false
+	}
+	return add(g.SupersededBy)
 }
 
 func Approve(g Graph, reviewer, reason, at string, privacyReviewed bool) (Graph, error) {
@@ -426,11 +589,22 @@ func SanitizeForShare(g Graph) (Graph, error) {
 func withoutLocalTraceReferences(g Graph) Graph {
 	projected := g
 	projected.Nodes = append([]Node(nil), g.Nodes...)
+	for i := range projected.Nodes {
+		projected.Nodes[i].Paths = append([]string(nil), g.Nodes[i].Paths...)
+	}
 	projected.Edges = append([]Edge(nil), g.Edges...)
 	projected.Evidence = append([]Evidence(nil), g.Evidence...)
 	projected.SourceFiles = append([]PathFingerprint(nil), g.SourceFiles...)
 	projected.Applicability.Modules = append([]string(nil), g.Applicability.Modules...)
 	projected.Applicability.Paths = append([]string(nil), g.Applicability.Paths...)
+	if g.Validation != nil {
+		validation := *g.Validation
+		projected.Validation = &validation
+	}
+	if g.Approval != nil {
+		approval := *g.Approval
+		projected.Approval = &approval
+	}
 	for i := range projected.Evidence {
 		projected.Evidence[i].LocalTraceRef = ""
 	}
@@ -441,9 +615,15 @@ func ApplicableToPath(g Graph, changedPath string) bool {
 	if len(g.Applicability.Paths) == 0 {
 		return true
 	}
+	if len(g.Applicability.Paths) > maxApplicabilityEntries || len(changedPath) > 1024 {
+		return false
+	}
 	changedPath = strings.TrimPrefix(path.Clean(strings.ReplaceAll(changedPath, "\\", "/")), "./")
 	for _, pattern := range g.Applicability.Paths {
-		if ok, _ := path.Match(pattern, changedPath); ok {
+		if len(pattern) > 256 || !boundedWildcardPattern(pattern) {
+			continue
+		}
+		if pattern == changedPath {
 			return true
 		}
 		if strings.HasSuffix(pattern, "/**") {
@@ -451,6 +631,13 @@ func ApplicableToPath(g Graph, changedPath string) bool {
 			if changedPath == prefix || strings.HasPrefix(changedPath, prefix+"/") {
 				return true
 			}
+			continue
+		}
+		if !strings.ContainsAny(pattern, "*?[") {
+			continue
+		}
+		if ok, _ := path.Match(pattern, changedPath); ok {
+			return true
 		}
 	}
 	return false
@@ -531,7 +718,7 @@ func BoundedNeighborhood(g Graph, seeds []string, hops, maxNodes int) (Neighborh
 	sort.Strings(ids)
 	nodes := make([]Node, 0, len(ids))
 	for _, id := range ids {
-		nodes = append(nodes, nodeByID[id])
+		nodes = append(nodes, cloneNode(nodeByID[id]))
 	}
 	edges := make([]Edge, 0)
 	for _, edge := range g.Edges {
@@ -551,7 +738,14 @@ func BoundedNeighborhood(g Graph, seeds []string, hops, maxNodes int) (Neighborh
 	return Neighborhood{GraphID: g.ID, Revision: g.Revision, Nodes: nodes, Edges: edges, Truncated: truncated}, nil
 }
 
-func validID(value string) bool { return identifierPattern.MatchString(value) }
+func cloneNode(node Node) Node {
+	node.Paths = append([]string(nil), node.Paths...)
+	return node
+}
+
+func validID(value string) bool {
+	return len(value) > 0 && len(value) <= 64 && identifierPattern.MatchString(value)
+}
 
 func validNodeKind(kind NodeKind) bool {
 	return kind == NodeTrigger || kind == NodeState || kind == NodeAction || kind == NodeCheck || kind == NodeOutput
@@ -563,7 +757,7 @@ func validRelation(relation Relation) bool {
 }
 
 func validatePathPattern(value string) error {
-	if value == "" || strings.Contains(value, "\\") || strings.Contains(value, ":") || strings.HasPrefix(value, "/") {
+	if value == "" || len(value) > 256 || strings.Contains(value, "\\") || strings.Contains(value, ":") || strings.HasPrefix(value, "/") {
 		return errors.New("must be a non-empty repository-relative path pattern")
 	}
 	for _, part := range strings.Split(value, "/") {
@@ -571,10 +765,65 @@ func validatePathPattern(value string) error {
 			return errors.New("must not contain empty, current-directory, or parent-directory segments")
 		}
 	}
+	if !boundedWildcardPattern(value) {
+		return errors.New("may contain no more than one wildcard per path segment")
+	}
 	if _, err := path.Match(value, "probe"); err != nil {
 		return errors.New("contains an invalid glob pattern")
 	}
 	return nil
+}
+
+func boundedWildcardPattern(value string) bool {
+	// A terminal /** is handled as a direct prefix check by ApplicableToPath.
+	if strings.HasSuffix(value, "/**") {
+		value = strings.TrimSuffix(value, "/**")
+	}
+	wildcardsInSegment := 0
+	inClass := false
+	previousWasStar := false
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '/':
+			wildcardsInSegment = 0
+			previousWasStar = false
+		case '[':
+			inClass = true
+			previousWasStar = false
+		case ']':
+			inClass = false
+			previousWasStar = false
+		case '*':
+			if inClass {
+				previousWasStar = false
+				continue
+			}
+			if !previousWasStar {
+				wildcardsInSegment++
+				if wildcardsInSegment > 1 {
+					return false
+				}
+			}
+			previousWasStar = true
+		default:
+			previousWasStar = false
+		}
+	}
+	return true
+}
+
+func applicabilityWorkWithinLimit(g Graph) bool {
+	checks := 0
+	for _, pattern := range g.Applicability.Paths {
+		if strings.HasSuffix(pattern, "/**") || !strings.ContainsAny(pattern, "*?[") {
+			continue
+		}
+		checks += len(g.SourceFiles)
+		if checks > maxExpensivePathMatches {
+			return false
+		}
+	}
+	return true
 }
 
 func validateRepositoryPath(value string) error {

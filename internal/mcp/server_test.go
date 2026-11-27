@@ -2136,6 +2136,53 @@ func TestRequestsRequireInitializationAndValidJSONRPCIDs(t *testing.T) {
 	}
 }
 
+func TestStdioRejectsDuplicateAndUnknownEnvelopeKeysButAllowsMeta(t *testing.T) {
+	procedures, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer procedures.Close()
+	session := &stdioSession{server: New(procedures), initialized: true}
+
+	valid, respond := session.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"ping","_meta":{"progressToken":7}}`))
+	if !respond || valid.Error != nil {
+		t.Fatalf("standard MCP _meta was rejected: respond=%t response=%#v", respond, valid)
+	}
+
+	for _, input := range []string{
+		`{"jsonrpc":"2.0","id":1,"method":"ping","method":"tools/list"}`,
+		`{"jsonrpc":"2.0","id":1,"method":"ping","_meta":{"progressToken":1,"progressToken":2}}`,
+		`{"jsonrpc":"2.0","id":1,"method":"ping","unexpected":true}`,
+	} {
+		response, respond := session.handle(context.Background(), []byte(input))
+		if !respond || response.Error == nil || response.Error.Code != -32600 || response.Error.Message != "invalid request" {
+			t.Fatalf("invalid MCP envelope was not rejected: input=%s respond=%t response=%#v", input, respond, response)
+		}
+	}
+
+	response, respond := session.handle(context.Background(), []byte(`{"jsonrpc":`))
+	if !respond || response.Error == nil || response.Error.Code != -32700 || response.Error.Message != "parse error" {
+		t.Fatalf("malformed JSON did not retain the parse-error response: respond=%t response=%#v", respond, response)
+	}
+}
+
+func TestServeStdioRejectsOversizedMessageLines(t *testing.T) {
+	procedures, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer procedures.Close()
+
+	var output bytes.Buffer
+	err = New(procedures).ServeStdio(context.Background(), strings.NewReader(strings.Repeat(" ", maxMessageBytes+1)+"\n"), &output)
+	if err == nil || !strings.Contains(err.Error(), "token too long") {
+		t.Fatalf("ServeStdio() error = %v, want scanner size-limit error", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("oversized message produced a response: %q", output.String())
+	}
+}
+
 func TestToolCallAcceptsStandardMetaAndRejectsUnknownParams(t *testing.T) {
 	procedures, err := store.Open(":memory:")
 	if err != nil {
